@@ -1,0 +1,45 @@
+鲸翼 WhaleWing
+Copyright 2026 鲸翼 WhaleWing 作者
+
+本插件的代码依 Apache License 2.0 授权，全文见 LICENSE。
+
+
+名称与标志
+----------
+“鲸翼”“WhaleWing”名称和“鲸尾为翼”标志（art/brand 下的全部文件）不在
+Apache License 2.0 的授权范围内（另见该许可第 6 条）。你可以按许可使用、修改和
+分发代码，但发布改版时须换用其他名称和标志，不得暗示改版由鲸翼作者发布或认可；
+如实写明“基于鲸翼”不受此限。
+
+外部二级插件的包名可以使用 dsh-whalewing- 前缀，表示“给鲸翼用的扩展”。
+插件页标题须使用自己的功能名，不得命名为“鲸翼 xx”，不得使用鲸翼标志，
+也不得暗示扩展由鲸翼作者发布或认可。
+
+
+模型世界立绘
+------------
+content/model-world/portraits 中的立绘及源码 art/model-world 中的原图依
+CC BY-NC-SA 4.0 单独授权，不适用 Apache License 2.0；商用须先取得作者授权。
+详见 content/model-world/portraits/NOTICE.md。
+
+
+第三方内容
+----------
+随插件分发的第三方代码、数据和内容保留各自的许可：
+
+- 工具台内联的第三方代码（其中 MP3 编码库为 LGPL-3.0）：
+  content/utilities/THIRD_PARTY_NOTICES.txt
+- 中文字体 Noto Sans SC（SIL Open Font License 1.1）：
+  content/utilities/NotoSansSC-LICENSE.txt
+- 模型目录数据 models.dev（MIT）与 Epoch AI 评测数据（CC BY 4.0）：
+  content/model-world/NOTICE.md 及同目录的 LICENSE 文件
+- 知识图谱布局力改编自 d3-force 与 d3-quadtree（ISC）：
+  src/graph-forces.js 文件头保留来源与许可全文
+- 随包技能中，鲸翼改编或收录了社区开源技能（Apache-2.0 或 MIT），来自 anthropics/skills、
+  obra/superpowers、mattpocock/skills、wshobson/agents、addyosmani/web-quality-skills、
+  kepano/obsidian-skills、coreyhaines31/marketingskills、nextlevelbuilder/ui-ux-pro-max-skill、
+  K-Dense-AI/scientific-agent-skills、op7418/Humanizer-zh、blader/humanizer、JimLiu/baoyu-skills、
+  vercel-labs/web-interface-guidelines、phuryn/pm-skills、Weizhena/Deep-Research-skills、
+  zarazhangrui/frontend-slides、crazyykhllc-bit/CyberPPT、lewislulu/html-ppt-skill：
+  许可全文见 content/skills 下各技能目录的 LICENSE.txt，
+  来源、固定提交与改动写在各自 SKILL.md 的“来源”一节
