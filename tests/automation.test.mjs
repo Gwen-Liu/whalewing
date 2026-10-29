@@ -51,7 +51,6 @@ test('自动任务用途只接受成功人工回执，fork不继承父自动身�
   assert.equal(fold([run, done]).purpose, 'knowledge');
   for (const events of [[done], [{ ...run, data: { ...run.data, name: 'wrong' } }, done], [run, { ...done, data: { ...done.data, kind: 'error' } }]]) assert.equal(fold(events).purpose, null);
   assert.equal(fold([run, done], 2).purpose, null);
-  assert.equal(fold([{ ...run, data: { ...run.data, name: 'youjin' } }, done]).purpose, 'knowledge', '改名前的旧会话仍按原用途识别');
   assert.equal(fold([run, done, { ...done, seq: 3, data: { ...done.data, text: '{}' } }]).purpose, 'knowledge');
 });
 

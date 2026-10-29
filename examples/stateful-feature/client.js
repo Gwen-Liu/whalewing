@@ -14720,9 +14720,9 @@ function apply(ctx) {
       }, [workbench, attempt]);
       return (0, import_react.createElement)(
         "section",
-        { className: "yj-section", "aria-label": "\u4FDD\u5B58\u6587\u672C" },
+        { className: "ww-section", "aria-label": "\u4FDD\u5B58\u6587\u672C" },
         (0, import_react.createElement)("h2", null, "\u4FDD\u5B58\u6587\u672C"),
-        (0, import_react.createElement)("p", { className: "yj-muted" }, "\u5F53\u524D profile \u5355\u72EC\u4FDD\u7559\u4E00\u6761\u6587\u672C\u3002\u5173\u95ED\u6216\u5378\u8F7D\u4FDD\u7559\u6570\u636E\uFF1B\u6E05\u9664\u6309\u94AE\u53EA\u6E05\u672C\u6269\u5C55\u7684\u4FDD\u5B58\u6587\u672C\u3002"),
+        (0, import_react.createElement)("p", { className: "ww-muted" }, "\u5F53\u524D profile \u5355\u72EC\u4FDD\u7559\u4E00\u6761\u6587\u672C\u3002\u5173\u95ED\u6216\u5378\u8F7D\u4FDD\u7559\u6570\u636E\uFF1B\u6E05\u9664\u6309\u94AE\u53EA\u6E05\u672C\u6269\u5C55\u7684\u4FDD\u5B58\u6587\u672C\u3002"),
         !connected ? (0, import_react.createElement)("button", { type: "button", disabled: connecting, onClick: () => {
           setConnected(false);
           setAttempt((value) => value + 1);
@@ -14732,22 +14732,22 @@ function apply(ctx) {
           (0, import_react.createElement)("p", { style: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" } }, saved ? saved.present ? saved.text : "\u5C1A\u672A\u4FDD\u5B58\u6587\u672C" : "\u8BF7\u70B9\u51FB\u5237\u65B0\u8BFB\u53D6\u4FDD\u5B58\u72B6\u6001"),
           (0, import_react.createElement)(
             "div",
-            { className: "yj-row" },
+            { className: "ww-row" },
             (0, import_react.createElement)("button", { type: "button", disabled: busy, onClick: () => execute({ action: "read" }) }, "\u5237\u65B0"),
-            (0, import_react.createElement)("button", { type: "button", className: "yj-primary", disabled: busy || !saved, onClick: () => {
+            (0, import_react.createElement)("button", { type: "button", className: "ww-primary", disabled: busy || !saved, onClick: () => {
               editRevision.current = saved.revision;
               setDraft(saved.text);
               setEditing(true);
             } }, "\u7F16\u8F91\u6587\u672C"),
-            (0, import_react.createElement)("button", { type: "button", className: "yj-danger", disabled: busy || !saved?.present, onClick: () => {
+            (0, import_react.createElement)("button", { type: "button", className: "ww-danger", disabled: busy || !saved?.present, onClick: () => {
               purgeRevision.current = saved.revision;
               setConfirming(true);
             } }, "\u6E05\u9664\u4FDD\u5B58\u6587\u672C")
           )
         ),
         active && editing && (0, import_react.createElement)(Drawer, { title: "\u7F16\u8F91\u4FDD\u5B58\u6587\u672C", busy, onClose: () => setEditing(false), footer: [
-          (0, import_react.createElement)("button", { key: "save", type: "button", className: "yj-primary", disabled: busy || !draft.trim(), onClick: () => execute({ action: "save", expectedRevision: editRevision.current, text: draft }) }, "\u4FDD\u5B58\u6587\u672C")
-        ] }, (0, import_react.createElement)("label", { className: "yj-field" }, "\u6587\u672C\u5185\u5BB9", (0, import_react.createElement)("textarea", { value: draft, maxLength: 4e3, rows: 8, disabled: busy, style: { width: "100%", boxSizing: "border-box" }, onChange: (event) => setDraft(event.target.value) }))),
+          (0, import_react.createElement)("button", { key: "save", type: "button", className: "ww-primary", disabled: busy || !draft.trim(), onClick: () => execute({ action: "save", expectedRevision: editRevision.current, text: draft }) }, "\u4FDD\u5B58\u6587\u672C")
+        ] }, (0, import_react.createElement)("label", { className: "ww-field" }, "\u6587\u672C\u5185\u5BB9", (0, import_react.createElement)("textarea", { value: draft, maxLength: 4e3, rows: 8, disabled: busy, style: { width: "100%", boxSizing: "border-box" }, onChange: (event) => setDraft(event.target.value) }))),
         active && confirming && (0, import_react.createElement)(ConfirmDialog, {
           title: "\u6E05\u9664\u4FDD\u5B58\u6587\u672C",
           message: "\u5C06\u6E05\u9664\u5F53\u524D profile \u4E2D\u672C\u6269\u5C55\u4FDD\u5B58\u7684 1 \u6761\u6587\u672C\uFF0C\u4E0D\u5220\u9664\u4E2A\u4EBA\u77E5\u8BC6\u3001\u5386\u53F2\u4F1A\u8BDD\u3001\u5B9A\u65F6\u4EFB\u52A1\u6216\u5176\u4ED6\u63D2\u4EF6\u6570\u636E\u3002\u4FDD\u7559\u7A7A\u503C\u7248\u672C\u7528\u4E8E\u9632\u6B62\u65E7\u7A97\u53E3\u8986\u76D6\u3002",

@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { mosaic, inpaint, qrMatrix, qrSvg, encodeWav, encodeMp3, extraTask } from '../src/utilities/extras.js';
 import { frameTimes } from '../src/utilities/media-prep.js';
 
-// 工具台依赖安装在 src/utilities 下，按其位置解析。
+// 办公工坊依赖安装在 src/utilities 下，按其位置解析。
 const jsQR = createRequire(new URL('../src/utilities/extras.js', import.meta.url))('jsqr');
 const image = (width, height, color) => { const data = new Uint8ClampedArray(width * height * 4); for (let i = 0; i < data.length; i += 4) data.set(color, i); return data; };
 

@@ -9,7 +9,7 @@ const auditFile = new URL('../content/utilities/audited-source.json', import.met
 const noticeFile = new URL('../content/utilities/THIRD_PARTY_NOTICES.txt', import.meta.url);
 const utilityRequire = createRequire(new URL('../src/utilities/core.js', import.meta.url));
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-const fail = message => { throw new Error(`工具台许可拒收：${message}`); };
+const fail = message => { throw new Error(`办公工坊许可拒收：${message}`); };
 const readText = file => new TextDecoder('utf-8', { fatal: true }).decode(readFileSync(file));
 const within = (root, file) => { const relative = path.relative(root, file); return relative !== '' && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative); };
 

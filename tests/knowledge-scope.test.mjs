@@ -49,8 +49,8 @@ test('根级导航可读索引浏览，但不要求属性区也不给写删恢�
   const issues = (await vault.validate()).issues;
   assert.ok(issues.some(item => item.includes('fragment_missing')));
   assert.ok(!issues.some(item => item.includes('METADATA')));
-  for (const operation of [() => vault.write('AGENTS.md', original, doc.hash), () => vault.remove('AGENTS.md', doc.hash), () => vault.restore('AGENTS.md', doc.hash)]) await assert.rejects(operation, { code: 'PATH' });
-  for (const name of ['.hidden.md', 'outside/私有.md', '../逃逸.md', 'missing:name:甲']) await assert.rejects(vault.read(name), { code: 'PATH' });
+  for (const operation of [() => vault.write('AGENTS.md', original, doc.hash), () => vault.remove('AGENTS.md', doc.hash), () => vault.restore('AGENTS.md', doc.hash)]) await assert.rejects(operation, { code: 'NOTE_PATH' });
+  for (const name of ['.hidden.md', 'outside/私有.md', '../逃逸.md', 'missing:name:甲']) await assert.rejects(vault.read(name), { code: 'NOTE_PATH' });
   assert.equal(await fs.readFile(path.join(vault.root, 'AGENTS.md'), 'utf8'), original);
 });
 
@@ -107,7 +107,7 @@ test('存在的范围外文件不成为缺失节点，仅允许读取范围中�
   assert.deepEqual(graph.nodes.filter(node => node.kind === 'missing').map(node => node.path).sort(), ['missing:name:根级未建立', 'missing:path:40-知识/未建立.md'].sort());
   assert.equal(graph.edges.length, 2);
   assert.equal((await vault.search('范围外私有正文')).notes.length, 0);
-  for (const name of ['outside/私有.md', '.whalewing/私有.md', '.隐藏.md']) await assert.rejects(vault.read(name), { code: 'PATH' });
+  for (const name of ['outside/私有.md', '.whalewing/私有.md', '.隐藏.md']) await assert.rejects(vault.read(name), { code: 'NOTE_PATH' });
 });
 
 test('缺失图节点持有来源，真实文件出现后重建归并，不改变方向事实及完整连接度', async t => {
@@ -124,7 +124,7 @@ test('缺失图节点持有来源，真实文件出现后重建归并，不改�
   assert.equal(graph.unresolved, 4);
   const filtered = await vault.graph({ query: '20-项目/甲' });
   assert.equal(filtered.nodes[0].degree, 2); assert.ok(filtered.omittedEdges > 0);
-  await assert.rejects(vault.read(missing.path), { code: 'PATH' });
+  await assert.rejects(vault.read(missing.path), { code: 'NOTE_PATH' });
   await write('40-知识/未建立.md', '');
   graph = await vault.graph({ path: '20-项目/甲.md' });
   assert.ok(!graph.nodes.some(node => node.kind === 'missing'));

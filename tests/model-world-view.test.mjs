@@ -86,15 +86,31 @@ test('初始读取不联网刷新，图鉴、时间线与榜单使用同一公�
   let tree = f.render();
   assert.equal(requests[0].action, 'list');
   assert.equal(requests[0].limit, 12);
-  assert.ok(nodes(tree).some(node => node.props.className === 'yj-mw-deck'));
+  assert.ok(nodes(tree).some(node => node.props.className === 'ww-mw-deck'));
   findButton(tree, '发布时间线').props.onClick(); await tick(); tree = f.render();
   assert.equal(requests.at(-1).action, 'timeline');
-  assert.ok(nodes(tree).some(node => node.props.className === 'yj-mw-timeline'));
+  assert.ok(nodes(tree).some(node => node.props.className === 'ww-mw-timeline'));
   findButton(tree, '实力榜').props.onClick(); await tick(); tree = f.render();
   assert.equal(requests.at(-1).league, 'overall');
   assert.ok(nodes(tree).some(node => node.type === 'table'));
   assert.equal(requests.some(input => input.action === 'refresh'), false);
   f.unmount();
+});
+
+// 需求§界面通用约定·页头（每个页签标题下一句现状摘要）；2026-10-28 修功能测试的已知问题：模型世界原来没有摘要
+test('页头标题下一句现状摘要：读取中、没有数据、有数据时写几家厂商、几个模型和哪天更新', async () => {
+  const summary = tree => text(nodes(tree).find(node => node.props?.className === 'ww-mw-summary'));
+  let reply = input => ({ ...data(input), modelCount: 192, acceptedAt: '2026-10-22T01:30:00.000Z' });
+  const f = harness(React => createModelWorldView(React, 'data:image/png;base64,fixture'), { api: { worldRequest: async input => reply(input) } });
+  assert.equal(summary(f.render()), '正在读取模型数据…');
+  await tick();
+  assert.equal(summary(f.render()), '1 家厂商 · 192 个模型 · 2026-10-22 更新');
+  f.unmount();
+  reply = input => ({ ...data(input), available: false, models: [], vendors: [], modelCount: 0, acceptedAt: null });
+  const empty = harness(React => createModelWorldView(React, 'data:image/png;base64,fixture'), { api: { worldRequest: async input => reply(input) } });
+  empty.render(); await tick();
+  assert.equal(summary(empty.render()), '还没有模型数据');
+  empty.unmount();
 });
 
 test('两项选择跨页保留，第三项被拒收；比较仅打开独立窗口', async () => {
@@ -111,7 +127,7 @@ test('两项选择跨页保留，第三项被拒收；比较仅打开独立窗�
   tree = f.render();
   assert.deepEqual(requests.at(-1), { action: 'compare', ids: ['甲', '乙'] });
   assert.ok(nodes(tree).some(node => node.type?.name === 'ModelWindow'));
-  assert.equal(nodes(tree).some(node => node.props.className === 'yj-world-result'), false);
+  assert.equal(nodes(tree).some(node => node.props.className === 'ww-world-result'), false);
   f.unmount();
 });
 
@@ -121,10 +137,10 @@ test('切页失败保留旧视图和旧数据，重试使用失败请求而不�
   const f = harness(React => createModelWorldView(React, 'art'), { api: { worldRequest: async input => { requests.push(input); if (input.action === 'timeline' && fail) throw new Error('读取失败'); return data(input); } } });
   f.render(); await tick();
   findButton(f.render(), '发布时间线').props.onClick(); await tick();
-  let tree = f.render(); assert.ok(nodes(tree).some(node => node.props.className === 'yj-mw-deck'));
+  let tree = f.render(); assert.ok(nodes(tree).some(node => node.props.className === 'ww-mw-deck'));
   fail = false; await findButton(tree, '重试').props.onClick(); tree = f.render();
   assert.equal(requests.at(-1).action, 'timeline');
-  assert.ok(nodes(tree).some(node => node.props.className === 'yj-mw-timeline'));
+  assert.ok(nodes(tree).some(node => node.props.className === 'ww-mw-timeline'));
   f.unmount();
 });
 
@@ -136,7 +152,7 @@ test('迟到分页请求不能覆盖新查询；卸载取消请求', async () =>
   assert.equal(signals[0].aborted, true);
   waiting[1].resolve(data(waiting[1].input)); await tick();
   waiting[0].resolve(data(waiting[0].input)); await tick();
-  assert.ok(nodes(f.render()).some(node => node.props.className === 'yj-mw-timeline'));
+  assert.ok(nodes(f.render()).some(node => node.props.className === 'ww-mw-timeline'));
   findButton(f.render(), '实力榜').props.onClick();
   f.unmount(); assert.equal(signals.at(-1).aborted, true);
 });
@@ -168,7 +184,7 @@ test('存储接受未知保留原错误及恢复入口，回读不联网也不�
   assert.ok(text(tree).includes(failure.message)); assert.equal(text(tree).includes(failure.code), false, '错误码不展示给员工');
   assert.equal(text(tree).includes('现有数据已保留'), false); assert.equal(notices.some(message => message.includes('已保留')), false);
   assert.ok(text(tree).includes('请重启 DSH 后重新读取'));
-  assert.ok(nodes(tree).some(node => node.props.className === 'yj-mw-deck'));
+  assert.ok(nodes(tree).some(node => node.props.className === 'ww-mw-deck'));
   await findButton(tree, '重新读取').props.onClick(); tree = f.render();
   assert.deepEqual(requests, ['list', 'refresh', 'list']);
   assert.equal(text(tree).includes(failure.code), false);
@@ -219,11 +235,11 @@ test('图鉴一页展示全部收录厂商并显示模型数，刷新缩减后�
     return { ...data(input), vendors: Array.from({ length: count }, (_, index) => ({ id: 'vendor-' + index, name: '厂商' + index, nameZh: '厂商' + index, modelCount: index + 1 })) };
   } } });
   f.render(); await tick(); let tree = f.render();
-  assert.equal(nodes(tree).filter(node => node.props.className === 'yj-mw-role').length, 15);
+  assert.equal(nodes(tree).filter(node => node.props.className === 'ww-mw-role').length, 15);
   assert.ok(text(tree).includes('15 个模型')); assert.equal(findButton(tree, '下一页'), undefined);
   await findButton(f.render(), '更新数据').props.onClick(); tree = f.render();
-  assert.equal(nodes(tree).filter(node => node.props.className === 'yj-mw-role').length, 1);
-  assert.equal(nodes(tree).some(node => node.props.className === 'yj-mw-page'), false);
+  assert.equal(nodes(tree).filter(node => node.props.className === 'ww-mw-role').length, 1);
+  assert.equal(nodes(tree).some(node => node.props.className === 'ww-mw-page'), false);
   f.unmount();
 });
 
@@ -240,8 +256,8 @@ test('模型末页快照缩减后进行一次本地offset纠正，不重复刷�
   assert.ok(text(f.render()).includes('25–25 / 25'));
   await findButton(f.render(), '更新数据').props.onClick();
   assert.deepEqual(requests.slice(-3).map(input => [input.action, input.offset]), [['refresh', undefined], ['timeline', 24], ['timeline', 0]]);
-  assert.equal(nodes(f.render()).filter(node => node.props.className === 'yj-mw-model-row').length, 1);
-  assert.equal(nodes(f.render()).some(node => node.props.className === 'yj-mw-page'), false); f.unmount();
+  assert.equal(nodes(f.render()).filter(node => node.props.className === 'ww-mw-model-row').length, 1);
+  assert.equal(nodes(f.render()).some(node => node.props.className === 'ww-mw-page'), false); f.unmount();
 });
 
 test('无快照停止等待保留可回读入口，迟到结果不宣称更新成功', async () => {
@@ -270,7 +286,7 @@ test('无快照网络失败保留原错误，已接纳空目录明确显示空�
   assert.equal(text(f.render()).includes('WORLD_FETCH'), false); assert.ok(text(f.render()).includes('连接失败'));
   assert.equal(text(f.render()).includes('现有数据已保留'), false);
   available = true; failing = false; await findButton(f.render(), '重试更新').props.onClick();
-  assert.ok(text(f.render()).includes('没有符合条件的模型')); assert.equal(nodes(f.render()).some(node => node.props.className === 'yj-mw-page'), false);
+  assert.ok(text(f.render()).includes('没有符合条件的模型')); assert.equal(nodes(f.render()).some(node => node.props.className === 'ww-mw-page'), false);
   f.unmount();
 });
 
@@ -373,7 +389,7 @@ test('收录名单的立绘逐一准确展示，图鉴与图片使用同一自�
   const vendors = Object.keys(portraits).map(id => ({ id, name: id }));
   const f = harness(React => createModelWorldView(React, portraits), { api: { worldRequest: async input => ({ ...data(input), vendors }) } });
   f.render(); await tick();
-  const cards = nodes(f.render()).filter(node => node.props.className === 'yj-mw-role');
+  const cards = nodes(f.render()).filter(node => node.props.className === 'ww-mw-role');
   assert.equal(cards.length, modelWorldPortraitIds.length);
   for (const card of cards) {
     const portrait = nodes(card).find(node => node.type?.name === 'Portrait');
@@ -392,7 +408,7 @@ for (const id of ['unknown', 'constructor', 'toString', '__proto__', 'hasOwnProp
     const vendors = [{ id, name: 'A pending' }, { id: 'openai', name: 'Z approved' }];
     const f = harness(React => createModelWorldView(React, portraits), { api: { worldRequest: async input => ({ ...data(input), vendors }) } });
     f.render(); await tick();
-    const cards = nodes(f.render()).filter(node => node.props.className === 'yj-mw-role');
+    const cards = nodes(f.render()).filter(node => node.props.className === 'ww-mw-role');
     const portraitsInCards = cards.map(card => nodes(card).find(node => node.type?.name === 'Portrait'));
     assert.deepEqual(portraitsInCards.map(portrait => portrait.props.vendorId), ['openai', id]);
     const placeholder = portraitsInCards[1].type(portraitsInCards[1].props);
@@ -405,7 +421,7 @@ for (const id of ['unknown', 'constructor', 'toString', '__proto__', 'hasOwnProp
 
 test('CSS遵循宿主主题、窗口尺寸、键盘焦点与减少动画，不固定黑白主题', () => {
   assert.match(worldViewCss, /prefers-reduced-motion:reduce/);
-  assert.match(worldViewCss, /\.yj-mw-dialog:not\(\[open\]\)/);
+  assert.match(worldViewCss, /\.ww-mw-dialog:not\(\[open\]\)/);
   assert.match(worldViewCss, /data-platform=darwin/);
   assert.match(worldViewCss, /:focus-visible/);
   assert.doesNotMatch(worldViewCss, /font-weight:(600|700|800|900)/);
@@ -425,8 +441,8 @@ test('实力榜按榜单切换请求，综合实力标出最强档；性价比�
   findButton(f.render(), '实力榜').props.onClick(); await tick();
   let tree = f.render();
   assert.deepEqual([requests.at(-1).league, requests.at(-1).limit], ['overall', 20]);
-  assert.ok(nodes(tree).some(node => node.props?.className === 'yj-mw-tier' && node.props['data-tier'] === 'T0'));
-  assert.ok(nodes(tree).some(node => node.props?.className === 'yj-mw-effort' && text(node) === '最高'), '综合实力标出取分的思考档');
+  assert.ok(nodes(tree).some(node => node.props?.className === 'ww-mw-tier' && node.props['data-tier'] === 'T0'));
+  assert.ok(nodes(tree).some(node => node.props?.className === 'ww-mw-effort' && text(node) === '最高'), '综合实力标出取分的思考档');
   assert.ok(nodes(tree).some(node => node.type === 'th' && text(node) === '编程'));
   findButton(tree, '性价比').props.onClick(); await tick(); tree = f.render();
   assert.deepEqual(requests.at(-1), { action: 'value' });
@@ -506,4 +522,157 @@ test('更新数据时综合实力在线更新失败：右上角说明模型目�
   assert.ok(text(f.render()).includes('模型目录已更新，综合实力仍用之前的数据：Artificial Analysis 拒绝了这个 API Key'));
   assert.ok(text(f.render()).includes('智能指数（2026-10-21 更新）'), '算法说明用实际使用的数据日期');
   f.unmount();
+});
+
+// 2026-10-27 用户：模型娘立绘是我们生成的高清图，要能点开放大、自己保存（不能商用）；保存的图右下角带鲸翼水印，不占画面。
+const flush = () => new Promise(setImmediate);
+async function viewerParent({ loadLarge } = {}) {
+  const portraits = loadModelWorldPortraits();
+  const calls = { large: [], watermark: [], download: [], revoked: [], notes: [] };
+  const options = {
+    loadLarge: loadLarge ?? (async id => { calls.large.push(id); return `data:large/${id}`; }),
+    watermark: async source => { calls.watermark.push(source); return { from: source }; },
+    download: (url, name) => calls.download.push([url, name]),
+    objectUrl: { create: blob => `blob:${blob.from.slice('data:large/'.length)}`, revoke: url => calls.revoked.push(url) },
+  };
+  const vendors = [{ id: 'openai', name: 'OpenAI', nameZh: 'OpenAI' }, { id: 'google', name: 'Google', nameZh: '谷歌' }, { id: 'anthropic', name: 'Anthropic', nameZh: 'Anthropic' }];
+  const parent = harness(React => createModelWorldView(React, portraits, options), { api: { worldRequest: async input => ({ ...data(input), vendors }) }, notify: message => calls.notes.push(message) });
+  parent.render(); await tick();
+  return { parent, calls, portraits };
+}
+async function openViewer(start, setup) {
+  const h = await viewerParent(setup);
+  const returnFocus = { isConnected: true, focused: 0, focus() { this.focused++; } };
+  nodes(h.parent.render()).filter(node => node.props?.className === 'ww-mw-zoom')[start].props.onClick({ currentTarget: returnFocus });
+  const element = nodes(h.parent.render()).find(node => node.type?.name === 'PortraitViewer');
+  let closed = 0;
+  // 单独渲染查看器时换上测试自己的提示收集，免得绕回外壳的提示函数。
+  const props = { ...element.props, onClose() { closed++; }, notify: message => h.calls.notes.push(message) };
+  h.parent.replace(element.type, props);
+  const dialog = { open: false, showModal() { this.open = true; }, close() { this.open = false; } };
+  const image = { naturalWidth: 2160, clientWidth: 450, offsetLeft: 76, offsetTop: 0, offsetWidth: 2160, offsetHeight: 3840 };
+  const stage = { scrollLeft: 0, scrollTop: 0, clientWidth: 1000, clientHeight: 800, querySelector: () => image };
+  const render = () => h.parent.render(props, tree => { for (const node of nodes(tree)) if (node.props.ref) node.props.ref.current = node.type === 'dialog' ? dialog : stage; });
+  render(); await flush();
+  return { ...h, render, dialog, stage, props, returnFocus, get closed() { return closed; } };
+}
+const shownImage = tree => nodes(tree).find(node => node.type === 'img' && node.props.className === 'ww-mw-viewer-img');
+const byLabel = (tree, label) => nodes(tree).find(node => node.type === 'button' && (node.props['aria-label'] === label || text(node) === label));
+
+test('图鉴每张有立绘的卡片右上角都有“查看大图”，点开按图鉴顺序浏览；没有大图来源时不显示入口', async () => {
+  const { parent } = await viewerParent();
+  const zooms = nodes(parent.render()).filter(node => node.props?.className === 'ww-mw-zoom');
+  assert.deepEqual(zooms.map(node => node.props['aria-label']), ['查看大图：OpenAI', '查看大图：谷歌', '查看大图：Anthropic']);
+  assert.equal(nodes(parent.render()).filter(node => node.props?.className === 'ww-mw-role').length, 3, '卡片本身仍是进入该厂商的按钮');
+  zooms[1].props.onClick({ currentTarget: null });
+  const viewer = nodes(parent.render()).find(node => node.type?.name === 'PortraitViewer');
+  assert.deepEqual(viewer.props.items, [{ id: 'openai', name: 'OpenAI' }, { id: 'google', name: '谷歌' }, { id: 'anthropic', name: 'Anthropic' }]);
+  assert.equal(viewer.props.start, 1);
+  parent.unmount();
+  const plain = harness(React => createModelWorldView(React, loadModelWorldPortraits()), { api: { worldRequest: async input => data(input) } });
+  plain.render(); await tick();
+  assert.equal(nodes(plain.render()).some(node => node.props?.className === 'ww-mw-zoom'), false);
+  plain.unmount();
+});
+
+test('查看器先显示小图，取到大图后显示带水印的那张；保存的就是这张，文件名带角色名', async () => {
+  const v = await openViewer(1);
+  assert.equal(v.dialog.open, true);
+  assert.deepEqual(v.calls.large, ['google']); assert.deepEqual(v.calls.watermark, ['data:large/google'], '大图先加水印再显示');
+  const tree = v.render();
+  assert.equal(shownImage(tree).props.src, 'blob:google'); assert.equal(shownImage(tree).props['data-ready'], true);
+  assert.equal(text(nodes(tree).find(node => node.props?.className === 'ww-mw-viewer-title')), '谷歌2 / 3');
+  assert.match(text(nodes(tree).find(node => node.props?.className === 'ww-mw-viewer-note')), /水印.*不能商用（CC BY-NC-SA 4\.0）/);
+  byLabel(tree, '保存图片').props.onClick();
+  assert.deepEqual(v.calls.download, [['blob:google', '鲸翼立绘-谷歌.jpg']]);
+  assert.equal(v.calls.notes.at(-1), '已保存“鲸翼立绘-谷歌.jpg”，在浏览器的下载里');
+  v.parent.unmount();
+});
+
+test('点图片放大到原图一比一并把点到的地方滚到中间，再点或“适应窗口”还原', async () => {
+  const v = await openViewer(0);
+  let tree = v.render();
+  shownImage(tree).props.onClick({ stopPropagation() {}, detail: 1, clientX: 225, clientY: 200, currentTarget: { getBoundingClientRect: () => ({ left: 0, top: 0, width: 450, height: 800 }) } });
+  tree = v.render();
+  assert.deepEqual(shownImage(tree).props.style, { width: '2160px' });
+  assert.equal(v.stage.scrollLeft, 76 + 0.5 * 2160 - 500); assert.equal(v.stage.scrollTop, 0.25 * 3840 - 400);
+  assert.equal(byLabel(tree, '适应窗口').props['aria-pressed'], true);
+  shownImage(tree).props.onClick({ stopPropagation() {}, detail: 2, currentTarget: {} });
+  assert.deepEqual(shownImage(v.render()).props.style, { width: '2160px' }, '双击的第二下不再切回');
+  byLabel(v.render(), '适应窗口').props.onClick();
+  assert.equal(shownImage(v.render()).props.style, undefined);
+  v.parent.unmount();
+});
+
+test('左右按钮和方向键切换角色并循环，每张大图只取一次；关闭释放图片、焦点回到入口', async () => {
+  const v = await openViewer(0);
+  byLabel(v.render(), '下一位').props.onClick(); v.render(); await flush();
+  assert.equal(shownImage(v.render()).props.src, 'blob:google');
+  const dialog = () => nodes(v.render()).find(node => node.type === 'dialog');
+  dialog().props.onKeyDown({ key: 'ArrowLeft', preventDefault() {} }); v.render();
+  dialog().props.onKeyDown({ key: 'ArrowLeft', preventDefault() {} }); v.render(); await flush();
+  assert.equal(shownImage(v.render()).props.src, 'blob:anthropic', '从第一位往前回到最后一位');
+  byLabel(v.render(), '下一位').props.onClick(); v.render(); await flush();
+  assert.deepEqual(v.calls.large, ['openai', 'google', 'anthropic'], '看过的不再重取');
+  let prevented = false; dialog().props.onCancel({ preventDefault() { prevented = true; } });
+  assert.equal(prevented, true); assert.equal(v.closed, 1);
+  v.parent.unmount();
+  assert.equal(v.dialog.open, false); assert.deepEqual(v.calls.revoked.sort(), ['blob:anthropic', 'blob:google', 'blob:openai']); assert.equal(v.returnFocus.focused, 1);
+});
+
+test('大图取不到时保留小图、不能保存，并给出重试', async () => {
+  let fail = true; const asked = [];
+  const v = await openViewer(0, { loadLarge: async id => { asked.push(id); if (fail) throw new Error('离线'); return `data:large/${id}`; } });
+  const tree = v.render();
+  assert.equal(shownImage(tree).props.src, v.portraits.openai, '先用小图');
+  assert.equal(byLabel(tree, '保存图片').props.disabled, true);
+  const status = nodes(tree).find(node => node.props?.className === 'ww-mw-viewer-status');
+  assert.equal(status.props.role, 'alert'); assert.match(text(status), /高清图没有载入/);
+  fail = false; byLabel(tree, '重试').props.onClick(); v.render(); await flush();
+  assert.equal(shownImage(v.render()).props.src, 'blob:openai'); assert.deepEqual(asked, ['openai', 'openai']);
+  v.parent.unmount();
+});
+
+test('详情里的立绘可直接点开大图；系列形象用系列立绘和名字', async () => {
+  const portraits = loadModelWorldPortraits(), zoomed = [];
+  const flash = model('deepseek/deepseek-v4-flash', 90, { vendorId: 'deepseek' });
+  const vendors = [{ id: 'deepseek', name: 'DeepSeek', nameZh: '深度求索' }];
+  const parent = harness(React => createModelWorldView(React, portraits, { loadLarge: async () => 'data:x' }), { api: { worldRequest: async input => ({ ...data(input, [flash]), vendors }) } });
+  parent.render(); await tick(); findButton(parent.render(), '发布时间线').props.onClick(); await tick();
+  await nodes(parent.render()).find(node => node.props['aria-label'] === `详情 ${flash.name}`).props.onClick({ currentTarget: { isConnected: true, focus() {} } });
+  const window = nodes(parent.render()).find(node => node.type?.name === 'ModelWindow');
+  assert.equal(typeof window.props.onZoom, 'function');
+  const props = { ...window.props, onZoom: (item, element) => zoomed.push([item, element]), state: { ...window.props.state, busy: false, data: { available: true, model: flash, vendors } } };
+  parent.replace(window.type, props);
+  const tree = parent.render(props, tree => { for (const node of nodes(tree)) if (node.props.ref) node.props.ref.current = node.type === 'dialog' ? { open: false, showModal() { this.open = true; }, close() {} } : { focus() {} }; });
+  const art = nodes(tree).find(node => node.props?.className === 'ww-mw-art-zoom');
+  assert.equal(art.props['aria-label'], '查看大图：深度求索 Flash');
+  assert.ok(text(art).includes('查看大图'), '立绘下面有提示');
+  art.props.onClick({ currentTarget: 'art' });
+  assert.deepEqual(zoomed, [[{ id: 'deepseek-flash', name: '深度求索 Flash' }, 'art']]);
+  parent.unmount();
+});
+
+test('查看器样式：压暗底、图片适应窗口、放大可拖动，入口跟随皮肤且触屏常显', () => {
+  assert.match(worldViewCss, /\.ww-mw-viewer::backdrop\{background:rgba\(8,10,16,\.86\)/);
+  assert.match(worldViewCss, /\.ww-mw-viewer-img\{display:block;height:100%;max-width:100%;object-fit:contain/);
+  assert.match(worldViewCss, /\.ww-mw-viewer-stage\.ww-zoomed\{display:block;overflow:auto/);
+  assert.match(worldViewCss, /\.ww-mw \.ww-mw-zoom\{[^}]*background:color-mix\(in srgb,var\(--ww-surface\) 80%,transparent\)/);
+  assert.match(worldViewCss, /@media\(hover:none\)\{\.ww-mw \.ww-mw-zoom\{opacity:1\}\}/);
+  assert.match(worldViewCss, /\.ww-mw-viewer:not\(\[open\]\)\{display:none\}/);
+});
+
+// 2026-10-27 用户：放大、适应窗口这几个按钮只有最下面一点能点，还被 DSH 右上角的窗口按钮挡住，挪到中间去。
+// 原因是 DSH 桌面版顶上 40px 是拖动窗口的区域（Windows 右上角还有窗口自己的三个按钮）；只改我们自己的查看器，不动 DSH。
+test('查看器按钮组在顶栏正中，整块不参与拖动窗口，并给桌面版的窗口按钮让位', async () => {
+  assert.match(worldViewCss, /\.ww-mw-viewer\{[^}]*-webkit-app-region:no-drag/, '压在拖动区域上的按钮也要点得中');
+  assert.match(worldViewCss, /\.ww-mw-viewer-bar\{display:grid;grid-template-columns:minmax\(0,1fr\) auto minmax\(0,1fr\)/, '左右两栏等宽，按钮组正好居中');
+  assert.match(worldViewCss, /\.ww-mw-viewer-actions\{grid-column:2;/);
+  assert.match(worldViewCss, /html\[data-windows-titlebar\] \.ww-mw-viewer-bar\{grid-template-columns:minmax\(0,1fr\) auto minmax\(150px,1fr\)\}/, '右栏至少让出窗口按钮的宽度');
+  assert.match(worldViewCss, /html\[data-platform=darwin\] \.ww-mw-viewer-title\{padding-inline-start:68px\}/, 'macOS 让出左上角红绿灯');
+  const v = await openViewer(0);
+  const bar = nodes(v.render()).find(node => node.type === 'header');
+  assert.deepEqual(bar.props.children.filter(Boolean).map(child => child.props.className), ['ww-mw-viewer-title', 'ww-mw-viewer-actions']);
+  assert.deepEqual(nodes(bar).filter(node => node.type === 'button').map(text), ['放大', '保存图片', '关闭']);
+  v.parent.unmount();
 });

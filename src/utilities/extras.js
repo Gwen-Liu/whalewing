@@ -213,5 +213,5 @@ export async function extraTask(tool, files, options = {}, text = '') {
   if (tool === 'image-grid') return gridTask(files, options);
   if (tool.startsWith('qr-')) return qrTask(tool, files, options, text);
   if (tool === 'audio-encode') return audioTask(options);
-  fail('未知工具');
+  fail('未知功能项');
 }

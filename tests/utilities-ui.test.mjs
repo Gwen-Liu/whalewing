@@ -176,12 +176,12 @@ function nodes(tree) { return tree && typeof tree === 'object' ? [tree, ...(tree
 const button = (tree, text) => nodes(tree).find(node => node.type === 'button' && (node.props.children.includes(text) || node.props['aria-label'] === text));
 const openTool = (tree, name, target = { focus() {}, isConnected: true }) => button(tree, name).props.onClick({ currentTarget: target });
 
-test('工具台搜索、键盘按钮语义、active 隐藏与选件保留', () => {
+test('办公工坊搜索、键盘按钮语义、active 隐藏与选件保留', () => {
   const fixture = reactFixture();
   try {
     let tree = fixture.render();
     assert.equal(tree.props.hidden, false);
-    assert.equal(nodes(tree).filter(node => node.props.className === 'yj-tool-card').length, 7);
+    assert.equal(nodes(tree).filter(node => node.props.className === 'ww-tool-card').length, 7);
     assert.equal(nodes(tree).filter(node => node.type === 'dialog').length, 0);
     assert.equal(nodes(tree).filter(node => node.type === 'svg').length, 7);
     assert.ok(nodes(tree).filter(node => node.type === 'button').every(node => node.props.type === 'button'));
@@ -191,20 +191,20 @@ test('工具台搜索、键盘按钮语义、active 隐藏与选件保留', () =
     tree = fixture.render(false); assert.equal(tree.props.hidden, true);
     tree = fixture.render(true); assert.ok(nodes(tree).some(node => node.props.children.some(child => typeof child === 'string' && child.includes('选中文件.docx'))));
     nodes(tree).find(node => node.props.type === 'search').props.onChange({ target: { value: '找不到的工具' } });
-    tree = fixture.render(); assert.equal(nodes(tree).filter(node => node.props.className === 'yj-tool-card').length, 0); assert.ok(nodes(tree).some(node => node.props.children.includes('没有匹配工具')));
+    tree = fixture.render(); assert.equal(nodes(tree).filter(node => node.props.className === 'ww-tool-card').length, 0); assert.ok(nodes(tree).some(node => node.props.children.includes('没有匹配的功能项')));
     assert.ok(button(tree, '开始处理'));
   } finally { fixture.unmount(); }
 });
 
-test('目录按工具分组，每个工具列出全部功能入口；搜索跨工具列出命中的功能', () => {
+test('目录按分类分组，每个分类列出全部功能项入口；搜索跨分类列出命中的功能项', () => {
   const fixture = reactFixture();
-  const cards = tree => nodes(tree).filter(node => node.props.className === 'yj-tool-card');
+  const cards = tree => nodes(tree).filter(node => node.props.className === 'ww-tool-card');
   try {
     let tree = fixture.render();
     assert.deepEqual(cards(tree).map(card => nodes(card).find(node => node.props['data-tool-id']).props['data-tool-id']), ['convert', 'pdf', 'excel', 'image', 'text', 'media', 'qr']);
-    assert.equal(nodes(tree).filter(node => node.props.className === 'yj-tool-chip').length, 44);
+    assert.equal(nodes(tree).filter(node => node.props.className === 'ww-tool-chip').length, 44);
     nodes(tree).find(node => node.props.type === 'search').props.onChange({ target: { value: 'Word' } }); tree = fixture.render();
-    const hits = nodes(tree).filter(node => node.props.className === 'yj-tool-hit');
+    const hits = nodes(tree).filter(node => node.props.className === 'ww-tool-hit');
     assert.deepEqual(hits.map(node => node.props.children[1].props.children[0]), ['Word 转 PDF', 'PDF 转 Word', 'Word 转 TXT', 'Word 版本对照', '提取文档图片']);
     assert.equal(cards(tree).length, 0);
     hits[3].props.onClick({ currentTarget: { focus() {} } }); tree = fixture.render();
@@ -221,16 +221,20 @@ test('搜索词序无关、可搜格式与别名，尚未内置的能力单独�
   assert.deepEqual(titles('图片格式'), ['图片转格式', '压缩与转格式']);
   for (const query of ['AVIF', 'jpeg', 'WebP', 'jfif', 'PNG']) assert.deepEqual(titles(query).slice(0, 2), ['图片转格式', '压缩与转格式'], query);
   assert.deepEqual(titles('照片压缩'), ['压缩与转格式']);
+  // 员工习惯说“PDF 工具”“图片工具”：“工具”不当搜索词，分类里的功能项排在前面，别的分类里沾边的排在后面。
+  const pdfGroup = ['合并 PDF', '拆分 PDF', '压缩 PDF', '页面整理', '旋转页面', '添加页码', '添加水印', '提取文字'];
+  for (const query of ['PDF 工具', 'pdf工具']) { const found = titles(query); assert.deepEqual(found.slice(0, 2), ['合并 PDF', '拆分 PDF'], query); assert.ok(pdfGroup.every(title => found.indexOf(title) < found.indexOf('Word 转 PDF')), query); }
+  assert.ok(titles('图片工具').includes('裁剪')); assert.equal(titles('工具').length, 44);
   assert.deepEqual(titles('不存在的功能'), []); assert.deepEqual(titles('   '), []);
   assert.deepEqual(utilityGapsFor('HEIC 转 JPG').length, 1); assert.match(utilityGapsFor('扫描件提字')[0], /OCR/); assert.deepEqual(utilityGapsFor('合并 PDF'), []);
   const fixture = reactFixture();
   try {
     let tree = fixture.render();
     nodes(tree).find(node => node.props.type === 'search').props.onChange({ target: { value: 'heic' } }); tree = fixture.render();
-    assert.ok(nodes(tree).some(node => node.props.children.includes('没有匹配工具')));
-    assert.match(nodes(tree).find(node => node.props.className === 'yj-tool-gaps').props.children[0].props.children[0], /HEIC/);
+    assert.ok(nodes(tree).some(node => node.props.children.includes('没有匹配的功能项')));
+    assert.match(nodes(tree).find(node => node.props.className === 'ww-tool-gaps').props.children[0].props.children[0], /HEIC/);
     nodes(tree).find(node => node.props.type === 'search').props.onChange({ target: { value: 'AVIF' } }); tree = fixture.render();
-    const hit = nodes(tree).find(node => node.props.className === 'yj-tool-hit');
+    const hit = nodes(tree).find(node => node.props.className === 'ww-tool-hit');
     hit.props.onClick({ currentTarget: { focus() {} } }); tree = fixture.render();
     // 格式转换里的“图片转格式”直接进入转换模式，不显示处理方式选择。
     assert.equal(nodes(tree).find(node => node.type === 'dialog').props['aria-label'], '格式转换');
@@ -319,30 +323,30 @@ test('最小化保留同一有界任务与草稿，恢复后关闭立即清理�
     let tree = fixture.render(); openTool(tree, '整理与统计', { isConnected: true, focus() { focused++; } });
     tree = fixture.render(); nodes(tree).find(node => node.type === 'textarea').props.onChange({ target: { value: '保留草稿' } });
     tree = fixture.render(); button(tree, '开始处理').props.onClick(); const worker = f.workers[0];
-    tree = fixture.render(); button(tree, '最小化工具').props.onClick(); tree = fixture.render();
+    tree = fixture.render(); button(tree, '最小化窗口').props.onClick(); tree = fixture.render();
     assert.equal(worker.stopped, false); assert.equal(f.timers.size, 1); assert.equal(nodes(tree).find(node => node.type === 'dialog').props.ref.current.open, false);
     worker.success(result()); tree = fixture.render(); assert.ok(button(tree, '恢复'));
     button(tree, '恢复').props.onClick(); tree = fixture.render();
     assert.equal(nodes(tree).find(node => node.type === 'textarea').props.value, '保留草稿'); assert.equal(f.workers.length, 1); assert.equal(f.urls.size, 1);
-    button(tree, '开始处理').props.onClick(); const pending = f.workers[1]; tree = fixture.render(); button(tree, '关闭工具').props.onClick();
+    button(tree, '开始处理').props.onClick(); const pending = f.workers[1]; tree = fixture.render(); button(tree, '关闭窗口').props.onClick();
     assert.equal(pending.stopped, true); assert.equal(f.urls.size, 0); assert.equal(f.timers.size, 0); assert.equal(focused, 1);
     pending.success(result('迟到.txt')); tree = fixture.render(); assert.equal(nodes(tree).some(node => node.type === 'dialog'), false);
   } finally { fixture.unmount(); for (const [key, descriptor] of originals) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key]; } }
 });
 
-test('切换工具必须确认，拒绝时保留旧窗口与输入', () => {
+test('切换分类必须确认，拒绝时保留旧窗口与输入', () => {
   const original = Object.getOwnPropertyDescriptor(globalThis, 'confirm'); let accepted = false, requested = 0;
   Object.defineProperty(globalThis, 'confirm', { configurable: true, value: () => { requested++; return accepted; } });
   const fixture = reactFixture();
   try {
     let tree = fixture.render(); openTool(tree, '整理与统计'); tree = fixture.render();
     nodes(tree).find(node => node.type === 'textarea').props.onChange({ target: { value: '不丢失' } });
-    tree = fixture.render(); button(tree, '最小化工具').props.onClick(); tree = fixture.render(); openTool(tree, '合并 PDF'); tree = fixture.render();
+    tree = fixture.render(); button(tree, '最小化窗口').props.onClick(); tree = fixture.render(); openTool(tree, '合并 PDF'); tree = fixture.render();
     assert.equal(requested, 1); assert.equal(nodes(tree).find(node => node.type === 'dialog').props['aria-label'], '文字处理');
     assert.equal(nodes(tree).find(node => node.type === 'textarea').props.value, '不丢失');
     accepted = true; openTool(tree, '合并 PDF'); tree = fixture.render();
-    assert.equal(requested, 2); assert.equal(nodes(tree).find(node => node.type === 'dialog').props['aria-label'], 'PDF 工具');
-    // 同一工具内切换功能不需确认，也不重建窗口。
+    assert.equal(requested, 2); assert.equal(nodes(tree).find(node => node.type === 'dialog').props['aria-label'], 'PDF 处理');
+    // 同一分类内切换功能项不需确认，也不重建窗口。
     openTool(tree, '拆分 PDF'); tree = fixture.render();
     assert.equal(requested, 2); assert.equal(nodes(tree).find(node => node.props['aria-current'] === true).props.children[0], '拆分 PDF');
   } finally { fixture.unmount(); if (original) Object.defineProperty(globalThis, 'confirm', original); else delete globalThis.confirm; }
@@ -367,32 +371,58 @@ test('Escape 与遮罩关闭同一路径，面板内空白不关闭且关闭后�
 test('清除选件同步清空原生输入；原卡片被筛选移除时恢复目录再归还焦点', () => {
   const fixture = reactFixture(); let focused = 0;
   try {
-    let tree = fixture.render(); const directory = nodes(tree).find(node => node.props.className === 'yj-grid yj-tool-directory').props.ref;
+    let tree = fixture.render(); const directory = nodes(tree).find(node => node.props.className === 'ww-grid ww-tool-directory').props.ref;
     openTool(tree, 'Word 转 PDF', { isConnected: false }); tree = fixture.render();
     const file = nodes(tree).find(node => node.props.type === 'file'); file.props.ref.current.value = 'fixture.docx';
     file.props.onChange({ target: { files: [new File(['x'], 'fixture.docx')] } }); tree = fixture.render();
     button(tree, '清除选件').props.onClick(); assert.equal(file.props.ref.current.value, '');
     tree = fixture.render(); assert.equal(button(tree, '开始处理').props.disabled, true);
-    button(tree, '最小化工具').props.onClick(); tree = fixture.render();
+    button(tree, '最小化窗口').props.onClick(); tree = fixture.render();
     nodes(tree).find(node => node.props.type === 'search').props.onChange({ target: { value: '不存在' } }); tree = fixture.render();
     directory.current.querySelector = selector => { assert.equal(selector, '[data-tool-id="convert"]'); return { focus() { focused++; } }; };
-    button(tree, '关闭工具').props.onClick(); tree = fixture.render(); tree = fixture.render();
-    assert.equal(nodes(tree).filter(node => node.props.className === 'yj-tool-card').length, 7); assert.equal(focused, 1);
+    button(tree, '关闭窗口').props.onClick(); tree = fixture.render(); tree = fixture.render();
+    assert.equal(nodes(tree).filter(node => node.props.className === 'ww-tool-card').length, 7); assert.equal(focused, 1);
   } finally { fixture.unmount(); }
 });
 
-test('工具模态独立于整页几何，内容高度居中且视口内滚动', () => {
+test('办公工坊窗口独立于整页几何，内容高度居中且视口内滚动', () => {
   const fixture = reactFixture();
   try {
     let tree = fixture.render(); openTool(tree, '整理与统计'); tree = fixture.render();
     const dialog = nodes(tree).find(node => node.type === 'dialog');
-    assert.equal(dialog.props.className, 'yj-tool-modal', '不继承 yj-page 的整页高度与 flex 布局');
+    assert.equal(dialog.props.className, 'ww-tool-modal', '不继承 ww-page 的整页高度与 flex 布局');
     const css = nodes(tree).find(node => node.type === 'style').props.children.join('');
-    const geometry = /dialog\.yj-tool-modal\{([^}]+)\}/.exec(css)?.[1];
+    const geometry = /dialog\.ww-tool-modal\{([^}]+)\}/.exec(css)?.[1];
     assert.ok(geometry);
     for (const declaration of ['position:fixed', 'inset:0', 'margin:auto', 'display:block', 'box-sizing:border-box', 'height:fit-content', 'min-height:0', 'width:min(1040px,calc(100vw - 32px))', 'max-height:calc(100dvh - 48px)', 'overflow:auto']) assert.ok(geometry.split(';').includes(declaration), declaration);
-    assert.match(css, /dialog\.yj-tool-modal:not\(\[open\]\)\{display:none\}/);
-    assert.ok(css.includes('.yj-tool-modal::backdrop'));
+    assert.match(css, /dialog\.ww-tool-modal:not\(\[open\]\)\{display:none\}/);
+    assert.ok(css.includes('.ww-tool-modal::backdrop'));
     assert.equal(dialog.props.ref.current.open, true);
+  } finally { fixture.unmount(); }
+});
+
+test('读图片的功能项选到 HEIC、TIFF、SVG 时马上提示先导出为 JPEG 或 PNG；移除后提示消失，其余功能项不提示', () => {
+  const fixture = reactFixture();
+  const hint = tree => nodes(tree).find(node => node.props.className === 'ww-tool-hint');
+  const hintText = tree => nodes(hint(tree)).filter(node => node.type === 'p').map(node => node.props.children.join(''));
+  try {
+    let tree = fixture.render(); openTool(tree, '压缩与转格式'); tree = fixture.render();
+    nodes(tree).find(node => node.props.type === 'file').props.onChange({ target: { files: [new File(['x'], 'photo.HEIC'), new File(['x'], 'a.png'), new File(['x'], 'b.heif'), new File(['x'], 'scan.tiff')] } });
+    tree = fixture.render();
+    // 选中就提示，不用等到开始处理；同一原因的文件合成一句，能处理的 a.png 不提。
+    assert.equal(hint(tree).props.role, 'status');
+    const lines = hintText(tree);
+    assert.equal(lines.length, 2);
+    assert.match(lines[0], /^photo\.HEIC、b\.heif：HEIC \/ HEIF 照片暂不支持.*导出为 JPEG 或 PNG/);
+    assert.match(lines[1], /^scan\.tiff：TIFF 图片尚不支持.*导出为 JPEG 或 PNG/);
+    assert.ok(!lines.join('').includes('a.png'));
+    assert.equal(button(tree, '开始处理').props.disabled, false, '一批里其余文件照常可以处理');
+    for (const name of ['photo.HEIC', 'b.heif', 'scan.tiff']) { button(tree, `移除 ${name}`).props.onClick(); tree = fixture.render(); }
+    assert.equal(hint(tree), undefined, '移除后提示消失');
+    // 不读图片的功能项（Word 转 PDF）选到同名文件不出这条提示，由扩展名检查说明。
+    button(tree, '关闭窗口').props.onClick(); tree = fixture.render();
+    openTool(tree, 'Word 转 PDF'); tree = fixture.render();
+    nodes(tree).find(node => node.props.type === 'file').props.onChange({ target: { files: [new File(['x'], 'photo.heic')] } });
+    tree = fixture.render(); assert.equal(hint(tree), undefined);
   } finally { fixture.unmount(); }
 });

@@ -1,3 +1,11 @@
+/**
+ * 新增技能的标识（技能目录名）和技能内容里的名称（name）共用一条规则：英文小写字母、数字和连字符，
+ * 连字符只夹在字母或数字中间，最长 80 个字符。界面先查一遍，宿主保存前再查一遍。
+ */
+export function isSkillIdentifier(value) {
+  return typeof value === 'string' && value.length <= 80 && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value);
+}
+
 /** 员工技能管理与浏览器共享唯一严格契约；模型工具不注册此管理入口。 */
 export function skillLibraryContract(z) {
   const text = z.string();

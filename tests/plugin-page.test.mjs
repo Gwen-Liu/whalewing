@@ -71,10 +71,10 @@ test('名称Remote卸载及重挂不丢失旧运输截止，旧结果丢弃后�
 test('扩展打开和重试共用工作台现有控件规则，原工作台选择器及状态视觉保持', async () => {
   const f = await fixture({ featureFrame: frame(0, [extension()]), pluginNavigation: { openBundle() {} } });
   const tree = view(f);
-  assert.equal(nodes(tree).find(node => node.props['data-whalewing-extensions']).props.className, 'yj-plugin-section');
+  assert.equal(nodes(tree).find(node => node.props['data-whalewing-extensions']).props.className, 'ww-plugin-section');
   assert.ok(nodes(tree).some(node => node.type === 'style' && node.props.children.includes(CONTROL_STYLE)));
   assert.ok(nodes(f.render()).some(node => node.type === 'style' && node.props.children.some(value => value.includes(CONTROL_STYLE))));
-  for (const selector of ['.yj-page button:where(:not(.yj-assistant-conversation *))', '.yj-plugin-section button:hover:not(:disabled)', '.yj-plugin-section button:disabled']) assert.ok(CONTROL_STYLE.includes(selector));
+  for (const selector of ['.ww-page button:where(:not(.ww-assistant-conversation *))', '.ww-plugin-section button:hover:not(:disabled)', '.ww-plugin-section button:disabled']) assert.ok(CONTROL_STYLE.includes(selector));
   for (const token of ['var(--dsw-alias-border-l2)', 'var(--dsw-alias-bg-layer-1)', 'var(--dsw-alias-interactive-bg-hover)']) assert.ok(CONTROL_STYLE.includes(token));
   assert.equal(f.ctx.whalewingWorkbench.ui.CONTROL_STYLE, undefined, '内部样式不晋升扩展API');
   await cleanup(f);

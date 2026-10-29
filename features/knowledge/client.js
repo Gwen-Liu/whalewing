@@ -10,6 +10,58 @@ export function createView(kit) {
   const { React, Glyph, ActionMenu, Modal, ConfirmDialog } = kit;
   const GraphCanvas = createGraphCanvas(React);
   const { createElement: h, useState, useRef, useEffect, useLayoutEffect, useSyncExternalStore } = React;
+  const plainText = node => node.value ?? (node.children || []).map(plainText).join('');
+  // 目录取正文各级标题；行号和阅读区元素上的 data-note-line 对得上，点了就滚过去。
+  const outlineOf = view => {
+    const items = [];
+    const walk = node => {
+      if (!node) return;
+      if (node.type === 'heading') { const text = plainText(node).trim(); if (text) items.push({ level: node.level || 1, line: node.line, text }); return; }
+      node.children?.forEach(walk);
+    };
+    walk(view);
+    return items;
+  };
+  const linkStates = { missing: '未创建', ambiguous: '多个同名', attachment: '附件', fragment_missing: '定位缺失', fragment_ambiguous: '定位重名', invalid: '无效' };
+  const sideGlyph = { outline: 'outline', backlinks: 'backlink', outgoing: 'outlink' };
+
+  /** 阅读区右侧栏：目录、反链、出链三页，和 Obsidian 的右栏一个用法。 */
+  function NoteSide({ note, tab, setTab, outline, activeLine, onHeading, onOpen, openLink, disabled, t, help }) {
+    const backlinks = note.backlinks || [];
+    // 反链按来源笔记归组：数字是提到几次，同一行只列一次。
+    const groups = [];
+    for (const item of backlinks) {
+      let group = groups.find(value => value.path === item.path);
+      if (!group) groups.push(group = { path: item.path, title: item.title, count: 0, items: [] });
+      group.count += 1;
+      if (!group.items.some(value => value.line === item.line)) group.items.push(item);
+    }
+    // 出链同一目标只列一次；没找到的目标标出原因，点了照常给出提示和候选。
+    const links = [];
+    (note.links || []).forEach((link, index) => {
+      const key = link.status === 'resolved' ? link.path : `${link.status}:${link.target}`;
+      if (!links.some(value => value.key === key)) links.push({ key, link, index });
+    });
+    const tabs = [['outline', '目录', outline.length], ['backlinks', '反链', note.totalBacklinks ?? backlinks.length], ['outgoing', '出链', links.length]];
+    const top = Math.min(...outline.map(item => item.level));
+    const empty = text => h('p', { className: 'ww-side-empty' }, text);
+    let panel;
+    if (tab === 'outline') panel = outline.length ? h('nav', { className: 'ww-side-outline', 'aria-label': '目录' }, ...outline.map(item => h('button', { type: 'button', key: item.line, className: item.line === activeLine ? 'ww-current' : undefined, 'aria-current': item.line === activeLine ? 'location' : undefined, style: { paddingInlineStart: `${10 + (item.level - top) * 14}px` }, title: item.text, onClick: () => onHeading(item.line) }, item.text))) : empty('这篇笔记没有小标题');
+    else if (note.relationsIssue) panel = empty(t('relationsUnavailable'));
+    else if (tab === 'backlinks') panel = groups.length ? h('div', { className: 'ww-side-links' }, ...groups.map(group => h('section', { key: group.path, className: 'ww-side-group' },
+      h('button', { type: 'button', className: 'ww-side-note', disabled, title: group.path, onClick: () => onOpen({ path: group.path }) }, h(Glyph, { name: 'file', size: 14 }), h('span', { className: 'ww-side-text' }, h('strong', null, group.title)), h('em', null, group.count)),
+      ...group.items.map(item => h('button', { type: 'button', key: item.line, className: 'ww-side-snippet', disabled, title: `第 ${item.line} 行`, onClick: () => onOpen({ path: item.path, targetLine: item.line }) }, item.property ? h('span', { className: 'ww-tag' }, `属性 · ${item.property}`) : item.context || `第 ${item.line} 行`)))),
+      note.totalBacklinks > backlinks.length && help('truncated')) : empty(t('noBacklinks'));
+    else panel = links.length ? h('div', { className: 'ww-side-links' }, ...links.map(({ key, link, index }) => {
+      // 没写别名的链接只显示笔记名，所在文件夹放在下面一行小字。
+      const resolved = link.status === 'resolved', parts = (resolved ? link.path : link.label === link.target ? link.target.split('#')[0] : link.label).replace(/\.md$/i, '').split('/');
+      return h('button', { type: 'button', key, className: resolved ? 'ww-side-note' : 'ww-side-note ww-unresolved', disabled, title: link.path || link.target, onClick: () => openLink(`whalewing-link/${index}.md`) }, h(Glyph, { name: 'file', size: 14 }),
+        h('span', { className: 'ww-side-text' }, h('strong', null, parts.at(-1) || link.target), parts.length > 1 && h('small', null, parts.slice(0, -1).join('/'))), !resolved && h('em', null, linkStates[link.status] || link.status));
+    })) : empty('没有链到别的笔记');
+    return h('aside', { className: 'ww-note-side', 'aria-label': '目录与链接' },
+      h('div', { className: 'ww-side-tabs', role: 'tablist' }, ...tabs.map(([id, label, count]) => h('button', { type: 'button', key: id, role: 'tab', 'aria-selected': tab === id, onClick: () => setTab(id) }, h(Glyph, { name: sideGlyph[id], size: 14 }), label, count > 0 && h('em', null, count)))),
+      h('div', { className: 'ww-side-panel', role: 'tabpanel' }, panel));
+  }
   /** 目录分页只持有可重建列表；打开笔记仍从知识服务读取正文。 */
   function Directory({ api, t, directory = '', selected, disabled, onSelect, selectedPaths, onToggle, version = 0 }) {
     const [listing, setListing] = useState(null);
@@ -28,13 +80,13 @@ export function createView(kit) {
     }, [directory, offset, version, retry]);
     // Host 在同一目录下统一分页文件夹与笔记，偏移不能仅计数文件。
     const pageSize = (listing?.folders.length || 0) + (listing?.notes.length || 0);
-    return h('div', { className: 'yj-directory', role: 'group', 'aria-label': directory || t('allNotes') },
+    return h('div', { className: 'ww-directory', role: 'group', 'aria-label': directory || t('allNotes') },
       error && h('div', { role: 'alert' }, error, h('button', { type: 'button', onClick: () => setRetry(value => value + 1) }, t('directoryRetry'))),
-      !listing && !error && h('span', { className: 'yj-spinner', role: 'status', 'aria-label': t('directoryLoading') }),
-      ...(listing?.folders || []).map(folder => h('div', { key: folder.path }, h('button', { type: 'button', className: 'yj-folder', title: folder.name, 'aria-expanded': expanded.includes(folder.path), onClick: () => setExpanded(value => value.includes(folder.path) ? value.filter(path => path !== folder.path) : [...value, folder.path]) }, h('span', { className: expanded.includes(folder.path) ? 'yj-folder-chevron yj-expanded' : 'yj-folder-chevron' }, h(Glyph, { name: 'chevron', size: 12 })), h(Glyph, { name: 'folder', size: 15 }), h('span', { className: 'yj-tree-title' }, folder.name)),
+      !listing && !error && h('span', { className: 'ww-spinner', role: 'status', 'aria-label': t('directoryLoading') }),
+      ...(listing?.folders || []).map(folder => h('div', { key: folder.path }, h('button', { type: 'button', className: 'ww-folder', title: folder.name, 'aria-expanded': expanded.includes(folder.path), onClick: () => setExpanded(value => value.includes(folder.path) ? value.filter(path => path !== folder.path) : [...value, folder.path]) }, h('span', { className: expanded.includes(folder.path) ? 'ww-folder-chevron ww-expanded' : 'ww-folder-chevron' }, h(Glyph, { name: 'chevron', size: 12 })), h(Glyph, { name: 'folder', size: 15 }), h('span', { className: 'ww-tree-title' }, folder.name)),
         expanded.includes(folder.path) && h(Directory, { api, t, directory: folder.path, selected, disabled, onSelect, selectedPaths, onToggle, version }))),
-      ...(listing?.notes || []).map(item => h('div', { key: item.path, className: 'yj-note-row' }, h('input', { type: 'checkbox', checked: selectedPaths.includes(item.path), 'aria-label': t('selectForQuestion', { name: item.title }), disabled: disabled || (!selectedPaths.includes(item.path) && selectedPaths.length >= 12), onChange: event => onToggle(item.path, event.target.checked) }), h('button', { type: 'button', className: `yj-note ${selected === item.path ? 'yj-selected' : ''}`, disabled, onClick: () => onSelect(item), title: `${item.title}\n${item.path}` }, h(Glyph, { name: 'file', size: 14 }), h('span', { className: 'yj-tree-title' }, item.title)))),
-      listing && (offset > 0 || listing.total > pageSize) && h('div', { className: 'yj-row' }, h('button', { type: 'button', disabled: disabled || loading || Boolean(error) || offset !== listing.offset || offset === 0, onClick: () => setOffset(pages.current.pop() || 0) }, t('previous')), h('button', { type: 'button', disabled: disabled || loading || Boolean(error) || offset !== listing.offset || !listing.truncated || pageSize === 0, onClick: () => { pages.current.push(listing.offset); setOffset(listing.offset + pageSize); } }, t('next'))));
+      ...(listing?.notes || []).map(item => h('div', { key: item.path, className: 'ww-note-row' }, h('input', { type: 'checkbox', checked: selectedPaths.includes(item.path), 'aria-label': t('selectForQuestion', { name: item.title }), disabled: disabled || (!selectedPaths.includes(item.path) && selectedPaths.length >= 12), onChange: event => onToggle(item.path, event.target.checked) }), h('button', { type: 'button', className: `ww-note ${selected === item.path ? 'ww-selected' : ''}`, disabled, onClick: () => onSelect(item), title: `${item.title}\n${item.path}` }, h(Glyph, { name: 'file', size: 14 }), h('span', { className: 'ww-tree-title' }, item.title)))),
+      listing && (offset > 0 || listing.total > pageSize) && h('div', { className: 'ww-row' }, h('button', { type: 'button', disabled: disabled || loading || Boolean(error) || offset !== listing.offset || offset === 0, onClick: () => setOffset(pages.current.pop() || 0) }, t('previous')), h('button', { type: 'button', disabled: disabled || loading || Boolean(error) || offset !== listing.offset || !listing.truncated || pageSize === 0, onClick: () => { pages.current.push(listing.offset); setOffset(listing.offset + pageSize); } }, t('next'))));
   }
 
   function useDirectorySplit(active) {
@@ -61,7 +113,7 @@ export function createView(kit) {
     }, [active]);
     const range = limits(available);
     const value = clamp(width);
-    return { frame, width: value, separator: {
+    return { frame, width: value, available, separator: {
       role: 'separator', tabIndex: 0, 'aria-orientation': 'vertical', 'aria-valuemin': Math.round(range.min), 'aria-valuemax': Math.round(Math.max(range.min, range.max)), 'aria-valuenow': Math.round(value),
       onPointerDown: event => { if (event.button !== 0 || gesture.current) return; event.preventDefault(); event.currentTarget.focus(); gesture.current = { id: event.pointerId, target: event.currentTarget, x: event.clientX, width: value }; event.currentTarget.setPointerCapture(event.pointerId); },
       onPointerMove: event => { const drag = gesture.current; if (!drag || event.pointerId !== drag.id) return; event.preventDefault(); setWidth(clamp(drag.width + event.clientX - drag.x)); },
@@ -101,6 +153,13 @@ export function createView(kit) {
     const [graphCenter, setGraphCenter] = useState('');
     const [directoryVersion, setDirectoryVersion] = useState(0);
     const history = useRef([]);
+    const scrollRef = useRef(null), spyFrame = useRef(0), spyPause = useRef(0);
+    const [sideTab, setSideTab] = useState('outline');
+    const [sideOpen, setSideOpen] = useState(true);
+    const [sideOverlay, setSideOverlay] = useState(false);
+    const [propsOpen, setPropsOpen] = useState(true);
+    const [activeLine, setActiveLine] = useState(0);
+    const outline = note ? outlineOf(note.view) : [];
     const dirty = content !== (note?.content || '');
     const selectedPaths = workbench.internal.assistant()?.selectedPaths || [];
     const setSelectedPaths = value => workbench.assistant.setContext(typeof value === 'function' ? value(selectedPaths) : value);
@@ -195,16 +254,66 @@ export function createView(kit) {
     };
     bind({ refresh: refreshTab, blocked: dirty, guard: () => dirty || conflict || readbackPath ? t('draftWarning') : '', onError });
     useLayoutEffect(() => { workbench.internal.assistant()?.currentNote(note?.path || '', dirty); }, [note?.path, dirty]);
-    const markdown = createMarkdown(h, { busy, dirty, openLink });
+    const markdown = createMarkdown(h, { busy, dirty, openLink, linkClass: index => note?.links?.[index] && note.links[index].status !== 'resolved' ? 'ww-unresolved' : undefined });
+    // 滚到不晚于这一行的最后一块正文；属性里的链接落在属性区。从反链跳过来时让那一段闪一下，好找。
+    const scrollToLine = (line, { smooth = false, flash = false } = {}) => {
+      const box = scrollRef.current;
+      if (!box?.querySelectorAll) return;
+      let target = null, best = 0;
+      for (const element of box.querySelectorAll('.ww-reader :is(p,li,h1,h2,h3,h4,h5,h6,pre,blockquote,tr,.ww-note-props)[data-note-line]')) {
+        const value = Number(element.dataset.noteLine);
+        if (value <= line && value >= best) { target = element; best = value; }
+      }
+      if (!target) return;
+      box.scrollTo({ top: Math.max(0, target.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop - 12), behavior: smooth ? 'smooth' : 'auto' });
+      if (flash) { target.classList.remove('ww-flash'); void target.offsetWidth; target.classList.add('ww-flash'); }
+    };
+    // 目录跟着阅读位置走：最后一个越过顶部的标题是当前标题，滚到底时算最后一个；点目录跳转的那一小会儿不改，停在点的那一项。
+    const spy = () => {
+      const box = scrollRef.current;
+      if (!box?.querySelectorAll || !outline.length || typeof requestAnimationFrame !== 'function' || Date.now() < spyPause.current) return;
+      cancelAnimationFrame(spyFrame.current);
+      spyFrame.current = requestAnimationFrame(() => {
+        const headings = [...box.querySelectorAll('.ww-reader :is(h1,h2,h3,h4,h5,h6)[data-note-line]')], edge = box.getBoundingClientRect().top + 80;
+        let current = outline[0].line;
+        if (box.scrollTop > 0 && box.scrollTop + box.clientHeight >= box.scrollHeight - 4 && headings.length) current = Number(headings.at(-1).dataset.noteLine);
+        else for (const element of headings) { if (element.getBoundingClientRect().top <= edge) current = Number(element.dataset.noteLine); else break; }
+        setActiveLine(current);
+      });
+    };
+    useLayoutEffect(() => {
+      if (!note || editing) return;
+      setActiveLine(outline[0]?.line || 0);
+      if (location > 1) scrollToLine(location, { flash: true });
+      else scrollRef.current?.scrollTo?.({ top: 0 });
+      spy();
+    }, [note, location, editing]);
+    useEffect(() => () => { if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(spyFrame.current); }, []);
+    // 右侧栏：知识区够宽时和正文并排（默认打开），窄时点按钮才浮出来，跳转后自动收起。
+    const readerWide = directorySplit.available - directorySplit.width - 8 >= 760;
+    const sideShown = Boolean(note) && !editing && (readerWide ? sideOpen : sideOverlay);
+    const toggleSide = () => readerWide ? setSideOpen(value => !value) : setSideOverlay(value => !value);
+    const fromSide = action => (...args) => { if (!readerWide) setSideOverlay(false); return action(...args); };
+    // 笔记属性放在大标题下面（和 Obsidian 一样）；属性里的链接能点，只显示笔记名（完整路径在悬停提示里），没找到的目标显示成虚线。
+    const properties = note?.properties?.length ? h('details', { key: 'properties', className: 'ww-note-props', 'data-note-line': 1, open: propsOpen, onToggle: event => setPropsOpen(event.currentTarget.open) }, h('summary', null, '笔记属性'),
+      h('dl', null, ...note.properties.flatMap(({ key, values }) => [h('dt', { key: `k:${key}` }, key), h('dd', { key: `v:${key}` }, values.length ? values.map((value, i) => value.link !== undefined && note.links?.[value.link]
+        ? h('button', { type: 'button', key: i, className: note.links[value.link].status === 'resolved' ? 'ww-prop-link' : 'ww-prop-link ww-unresolved', disabled: busy || dirty, title: note.links[value.link].path || note.links[value.link].target, onClick: () => openLink(`whalewing-link/${value.link}.md`) }, value.text.split('/').at(-1))
+        : h('span', { key: i }, value.text)) : h('span', { className: 'ww-prop-empty' }, '没有值'))]))) : null;
+    const readerBody = () => {
+      const children = note.view?.type === 'root' ? note.view.children || [] : null;
+      if (!children) return h(React.Fragment, null, properties, markdown(note.view));
+      const lead = children[0]?.type === 'heading' && children[0].level === 1 ? 1 : 0;
+      return h('div', { 'data-note-line': note.view.line }, ...children.slice(0, lead).map((node, i) => markdown(node, i)), properties, ...children.slice(lead).map((node, i) => markdown(node, i + lead)));
+    };
     let graphView;
     if (graph) {
       const paged = graph.offset > 0 || graph.total > graph.nodes.length;
-      graphView = h('section', { className: 'yj-graph-workspace', 'aria-label': t(graphCenter ? 'localGraph' : 'graph') },
-        graph.nodes.length ? h(GraphCanvas, { graph, selectedPath: path, disabled: busy || dirty, onOpenNote: selectNote, label: t(graphCenter ? 'localGraph' : 'graph'), resetLabel: t('resetGraph'), subscribeTheme: api.subscribeTheme, loadingLabel: graphLoadingLabel.current, canvasErrorLabel: t('graphCanvasError'), dataErrorLabel: t('graphDataError') }) : h('div', { className: 'yj-graph-empty' }, help('graphEmpty')),
-        missingGraph && h('div', { className: 'yj-graph-missing', role: 'status' }, h('h3', null, missingGraph.title), help('missingGraphNote'), h('h4', null, t('missingGraphSources')),
+      graphView = h('section', { className: 'ww-graph-workspace', 'aria-label': t(graphCenter ? 'localGraph' : 'graph') },
+        graph.nodes.length ? h(GraphCanvas, { graph, selectedPath: path, disabled: busy || dirty, onOpenNote: selectNote, label: t(graphCenter ? 'localGraph' : 'graph'), resetLabel: t('resetGraph'), subscribeTheme: api.subscribeTheme, loadingLabel: graphLoadingLabel.current, canvasErrorLabel: t('graphCanvasError'), dataErrorLabel: t('graphDataError') }) : h('div', { className: 'ww-graph-empty' }, help('graphEmpty')),
+        missingGraph && h('div', { className: 'ww-graph-missing', role: 'status' }, h('h3', null, missingGraph.title), help('missingGraphNote'), h('h4', null, t('missingGraphSources')),
           ...missingGraph.sources.map(source => h('div', { key: `${source.path}:${source.line}` }, h('button', { type: 'button', disabled: busy || dirty, onClick: () => selectNote({ path: source.path, targetLine: source.line }) }, `${source.title} · ${source.line}`))), button('closePanel', () => setMissingGraph(null))),
         // 完整单页只呈现画布；有界响应确有省略时才说明范围，不将局部图冒称全库。
-        (paged || graph.omittedEdges > 0) && h('div', { className: 'yj-graph-controls', 'aria-label': t('graphRange') },
+        (paged || graph.omittedEdges > 0) && h('div', { className: 'ww-graph-controls', 'aria-label': t('graphRange') },
           paged && button('previous', () => loadGraph(graphCenter, Math.max(0, graph.offset - status.limits.maxGraphNodes)), graph.offset === 0),
           paged && h('span', null, t('graphPage', { from: graph.nodes.length ? graph.offset + 1 : 0, to: graph.offset + graph.nodes.length, total: graph.total })),
           paged && button('next', () => loadGraph(graphCenter, graph.offset + graph.nodes.length), graph.offset + graph.nodes.length >= graph.total || !graph.nodes.length),
@@ -215,48 +324,49 @@ export function createView(kit) {
     // 页头一句现状：知识库在哪；插件更新时员工改过的规则和模板保留原样，也写在这里（每次读状态时现查）。
     const kept = status?.bundle?.kept || [];
     const summary = !status ? t('preparing') : !status.initialized ? '' : [`知识库在 ${status.root}`, kept.length > 0 && `你改过 ${kept.length} 个规则或模板，插件更新时保留了你的版本`, status.bundle?.issue && `规则和模板没能更新：${status.bundle.issue}，下次打开会再试`].filter(Boolean).join(' · ');
-    body = h('section', { className: 'yj-knowledge' },
-      h('header', { className: 'yj-pagehead yj-knowledge-head' }, h('div', null, h('h2', null, '个人知识'), summary && h('p', { title: kept.length ? kept.join('\n') : undefined }, summary))),
-      h('div', { className: 'yj-knowledge-toolbar' },
-        h('label', { className: 'yj-search' }, h(Glyph, { name: 'search', size: 16 }), h('input', { 'aria-label': t('query'), placeholder: t('searchPlaceholder'), value: query, disabled: busy, onChange: event => setQuery(event.target.value), onKeyDown: event => { if (event.key === 'Enter') run(async () => { const value = await refreshNotes(); return () => applyNotes(value); }); } })),
-        button('search', () => run(async () => { const value = await refreshNotes(); return () => applyNotes(value); }), !status?.initialized, { className: 'yj-ghost' }),
-        button('newNote', newNote, !status?.initialized || dirty || Boolean(readbackPath), { className: 'yj-ghost' }),
-        button('graph', () => loadGraph(''), !status?.initialized || dirty || conflict || Boolean(readbackPath), { className: 'yj-ghost' }),
+    body = h('section', { className: 'ww-knowledge' },
+      h('header', { className: 'ww-pagehead ww-knowledge-head' }, h('div', null, h('h2', null, '个人知识'), summary && h('p', { title: kept.length ? kept.join('\n') : undefined }, summary))),
+      h('div', { className: 'ww-knowledge-toolbar' },
+        h('label', { className: 'ww-search' }, h(Glyph, { name: 'search', size: 16 }), h('input', { 'aria-label': t('query'), placeholder: t('searchPlaceholder'), value: query, disabled: busy, onChange: event => setQuery(event.target.value), onKeyDown: event => { if (event.key === 'Enter') run(async () => { const value = await refreshNotes(); return () => applyNotes(value); }); } })),
+        button('search', () => run(async () => { const value = await refreshNotes(); return () => applyNotes(value); }), !status?.initialized, { className: 'ww-ghost' }),
+        button('newNote', newNote, !status?.initialized || dirty || Boolean(readbackPath), { className: 'ww-ghost' }),
+        button('graph', () => loadGraph(''), !status?.initialized || dirty || conflict || Boolean(readbackPath), { className: 'ww-ghost' }),
         h(ActionMenu, { label: t('libraryTools'), iconOnly: true }, button('localGraph', () => loadGraph(note.path), !note || dirty || conflict || Boolean(readbackPath)), button('validate', () => run(async () => { const value = await command('validate'); return () => setValidation(value); }), !status?.initialized),
           h('details', null, h('summary', null, t('restore')), row(field('restorePath', restorePath, setRestorePath), button('restore', () => run(async () => { await command('restore', { path: restorePath, expectedHash: '' }); const value = await readAfterMutation(restorePath); const refreshed = await refreshAfterMutation(); return () => { setNote(value); setPath(value.path); setContent(value.content); setConflict(false); setEditing(false); setGraph(null); graphRequest.current = null; applyRefreshed(refreshed); }; }, 'restored'), !status?.initialized || !restorePath.trim() || dirty || Boolean(readbackPath) || Boolean(note?.readOnly && note.path === restorePath)))),
           h('details', null, h('summary', null, t('root')), status ? h('p', null, status.root, status.locationNotice && h('span', null, status.locationNotice)) : help('preparing')))),
-      validation && h(Modal, { title: t('validation'), onClose: () => setValidation(null), className: 'yj-confirm' }, h('div', { className: 'yj-confirm-body' }, h('p', null, t(validation.valid ? 'valid' : 'invalid', { count: validation.notes })), ...(validation.issues || []).map((issue, i) => h('p', { key: i }, issue))), h('footer', { className: 'yj-dialog-actions' }, button('closePanel', () => setValidation(null), false, { className: 'yj-primary' }))),
+      validation && h(Modal, { title: t('validation'), onClose: () => setValidation(null), className: 'ww-confirm' }, h('div', { className: 'ww-confirm-body' }, h('p', null, t(validation.valid ? 'valid' : 'invalid', { count: validation.notes })), ...(validation.issues || []).map((issue, i) => h('p', { key: i }, issue))), h('footer', { className: 'ww-dialog-actions' }, button('closePanel', () => setValidation(null), false, { className: 'ww-primary' }))),
       // search 的截断只描述当前搜索列表，不代表独立目录或图谱缺失数据。
       Boolean(query.trim()) && notes.length > 0 && truncated && help('truncated'),
-      h('div', { className: 'yj-knowledge-split', ref: directorySplit.frame, style: { '--yj-directory-width': `${directorySplit.width}px` } }, h('aside', { className: 'yj-note-tree', 'aria-label': t('notes') },
-        query.trim() ? notes.length ? notes.map(item => h('div', { key: item.path, className: 'yj-note-row' },
+      h('div', { className: 'ww-knowledge-split', ref: directorySplit.frame, style: { '--ww-directory-width': `${directorySplit.width}px` } }, h('aside', { className: 'ww-note-tree', 'aria-label': t('notes') },
+        query.trim() ? notes.length ? notes.map(item => h('div', { key: item.path, className: 'ww-note-row' },
           h('input', { type: 'checkbox', checked: selectedPaths.includes(item.path), 'aria-label': t('selectForQuestion', { name: item.title || item.path }), disabled: busy || (!selectedPaths.includes(item.path) && selectedPaths.length >= 12), onChange: event => { setSelectedPaths(event.target.checked ? [...selectedPaths, item.path] : selectedPaths.filter(value => value !== item.path)); } }),
-          h('button', { type: 'button', className: 'yj-note', disabled: busy || dirty, title: `${item.title || item.path}\n${item.path}`, onClick: () => selectNote(item) }, h('span', { className: 'yj-tree-title' }, item.title || item.path)))) : help('emptyNotes') : h(Directory, { api, t, selected: path, disabled: busy || dirty, onSelect: selectNote, selectedPaths, version: directoryVersion, onToggle: (name, selected) => { setSelectedPaths(value => selected ? [...value, name] : value.filter(path => path !== name)); } })),
-        h('div', { ...directorySplit.separator, className: 'yj-directory-separator', 'aria-label': t('directoryResize') }),
-        h('div', { className: graphView ? 'yj-note-canvas yj-graph-mode' : 'yj-note-canvas' }, graphView || h(React.Fragment, null, h('div', { className: 'yj-note-toolbar' }, h('details', { className: 'yj-note-path', open: editing }, h('summary', { title: path }, h(Glyph, { name: 'file', size: 14 }), path.split('/').at(-1) || t('noteDetails')), field('notePath', path, setPath, { readOnly: Boolean(note || readbackPath) })),
+          h('button', { type: 'button', className: 'ww-note', disabled: busy || dirty, title: `${item.title || item.path}\n${item.path}`, onClick: () => selectNote(item) }, h('span', { className: 'ww-tree-title' }, item.title || item.path)))) : help('emptyNotes') : h(Directory, { api, t, selected: path, disabled: busy || dirty, onSelect: selectNote, selectedPaths, version: directoryVersion, onToggle: (name, selected) => { setSelectedPaths(value => selected ? [...value, name] : value.filter(path => path !== name)); } })),
+        h('div', { ...directorySplit.separator, className: 'ww-directory-separator', 'aria-label': t('directoryResize') }),
+        h('div', { className: graphView ? 'ww-note-canvas ww-graph-mode' : 'ww-note-canvas' }, graphView || h(React.Fragment, null, h('div', { className: 'ww-note-toolbar' }, h('details', { className: 'ww-note-path', open: editing }, h('summary', { title: path }, h(Glyph, { name: 'file', size: 14 }), path.split('/').at(-1) || t('noteDetails')), field('notePath', path, setPath, { readOnly: Boolean(note || readbackPath) })),
           row(button('read', () => note ? setEditing(false) : selectNote({ path }), !path.trim() || dirty), button('edit', () => { if (!note?.readOnly) setEditing(true); }, !status?.initialized || Boolean(note?.readOnly)), button('back', () => selectNote(history.current.at(-1), true), !history.current.length || dirty)),
-            dirty && h('span', { className: 'yj-draft-chip', role: 'status' }, t('draftDirty'), h('button', { type: 'button', onClick: () => setConfirm({ kind: 'draft' }) }, t('discard')))),
-          note?.readOnly && h('div', { className: 'yj-notice', role: 'status' }, t('noteReadOnly')),
-          editing ? h('label', null, t('content'), h('textarea', { 'aria-label': t('content'), value: content, disabled: busy || !status?.initialized, onChange: (event) => setContent(event.target.value), spellCheck: false })) : note ? h('div', { className: 'yj-reader', 'aria-label': t('reading') },
-            location > 1 && h('div', { className: 'yj-location' }, h('h3', null, t('locate', { line: location })), h('pre', null, note.content.replace(/\r\n/g, '\n').split('\n').slice(location - 1, location + 5).join('\n')), button('clearLocate', () => setLocation(0))),
-            markdown(note.view)) : help('selectNote'),
-          linkIssue && h('div', { className: 'yj-notice', role: 'status' }, t(linkIssue.status === 'ambiguous' ? 'linkAmbiguous' : linkIssue.status.startsWith('fragment_') ? 'fragmentMissing' : linkIssue.status === 'attachment' ? 'linkAttachment' : linkIssue.status === 'invalid' ? 'invalidLink' : 'linkMissing'), `：${linkIssue.target}`,
+            dirty && h('span', { className: 'ww-draft-chip', role: 'status' }, t('draftDirty'), h('button', { type: 'button', onClick: () => setConfirm({ kind: 'draft' }) }, t('discard'))),
+            note && !editing && h('button', { type: 'button', className: 'ww-side-toggle', 'aria-pressed': sideShown, title: sideShown ? '收起目录与链接' : '显示目录与链接', 'aria-label': sideShown ? '收起目录与链接' : '显示目录与链接', onClick: toggleSide }, h(Glyph, { name: 'panel', size: 16 }))),
+          h('div', { className: ['ww-note-body', sideShown && (readerWide ? 'ww-with-side' : 'ww-side-overlay')].filter(Boolean).join(' ') }, h('div', { className: 'ww-note-scroll', ref: scrollRef, onScroll: spy },
+          note?.readOnly && h('div', { className: 'ww-notice', role: 'status' }, t('noteReadOnly')),
+          editing ? h('label', null, t('content'), h('textarea', { 'aria-label': t('content'), value: content, disabled: busy || !status?.initialized, onChange: (event) => setContent(event.target.value), spellCheck: false })) : note ? h('div', { className: 'ww-reader', 'aria-label': t('reading') }, readerBody()) : help('selectNote'),
+          linkIssue && h('div', { className: 'ww-notice', role: 'status' }, t(linkIssue.status === 'ambiguous' ? 'linkAmbiguous' : linkIssue.status.startsWith('fragment_') ? 'fragmentMissing' : linkIssue.status === 'attachment' ? 'linkAttachment' : linkIssue.status === 'invalid' ? 'invalidLink' : 'linkMissing'), `：${linkIssue.target}`,
             ...linkIssue.candidates.map(candidate => h('button', { type: 'button', key: candidate, disabled: busy || dirty, onClick: () => selectNote({ path: candidate }) }, candidate)), linkIssue.candidateTotal > linkIssue.candidates.length && help('truncated'), linkIssue.path && button('read', () => selectNote({ path: linkIssue.path }), dirty)),
-          note?.relationsIssue && h('div', { className: 'yj-notice', role: 'status' }, t('relationsUnavailable'), `：${note.relationsIssue}`),
-          note && !note.relationsIssue && h('details', null, h('summary', null, t('outgoing')), ...(note.links || []).map((link, i) => h('div', { key: i }, h('button', { type: 'button', disabled: busy || dirty, onClick: () => openLink(`whalewing-link/${i}.md`) }, link.label), ` · ${link.status}`))),
-          note && !note.relationsIssue && h('details', { className: 'yj-backlinks' }, h('summary', null, t('backlinks')), note.backlinks?.length ? note.backlinks.map((link, i) => h('button', { type: 'button', key: i, disabled: busy || dirty, onClick: () => selectNote({ path: link.path, targetLine: link.line }) }, `${link.title} · ${link.line}`)) : help('noBacklinks'), note.totalBacklinks > note.backlinks?.length && help('truncated')),
+          note?.relationsIssue && h('div', { className: 'ww-notice', role: 'status' }, t('relationsUnavailable'), `：${note.relationsIssue}`),
           editing && help('draftWarning'),
-          h('details', { className: 'yj-note-actions', open: editing || conflict || Boolean(readbackPath) }, h('summary', null, t('more')), row(button('save', () => run(async () => {
+          h('details', { className: 'ww-note-actions', open: editing || conflict || Boolean(readbackPath) }, h('summary', null, t('more')), row(button('save', () => run(async () => {
             const saved = await command('write', { path, content, expectedHash: note?.hash || '' });
             const value = await readAfterMutation(path); const refreshed = await refreshAfterMutation();
             if (saved.hash !== value.hash) throw Object.assign(new Error(t('conflict')), { code: 'conflict', notePath: path });
             return () => { setNote(value); setPath(value.path); setContent(value.content); setConflict(false); setGraph(null); graphRequest.current = null; applyRefreshed(refreshed); };
           }, 'saved'), !status?.initialized || !path.trim() || Boolean(readbackPath) || Boolean(note?.readOnly)),
-          button('reload', () => selectNote({ path: readbackPath || path }), !readbackPath && (!path.trim() || !conflict)),
+          // 读取最新内容会替换草稿：有没保存的修改时先居中确认（已经写进文件、只是读回失败时不会丢东西，不用确认）。
+          button('reload', () => dirty && !readbackPath ? setConfirm({ kind: 'reload' }) : selectNote({ path: readbackPath || path }), !readbackPath && (!path.trim() || !conflict)),
           h('a', { download: path.split(/[\\/]/).at(-1) || 'note.md', href: `data:text/markdown;charset=utf-8,${encodeURIComponent(content)}` }, t('export')),
           button('remove', () => { if (!note?.readOnly) setConfirm({ kind: 'note', path }); }, !note || dirty || Boolean(readbackPath) || Boolean(note?.readOnly)))),
           (conflict || readbackPath) && help('reloadHelp'),
-           confirm?.kind === 'note' && h(ConfirmDialog, { title: t('noteRemoveTitle'), message: t('confirmRemove'), confirmLabel: t('remove'), cancelLabel: t('cancel'), danger: true, busy, onCancel: () => setConfirm(null), onConfirm: () => run(async () => { await command('remove', { path: note.path, expectedHash: note.hash }); const refreshed = await refreshAfterMutation(); return () => { setNote(null); setPath(''); setContent(''); setConflict(false); setConfirm(null); setGraph(null); graphRequest.current = null; applyRefreshed(refreshed); }; }, 'deleted') })))),
+           confirm?.kind === 'reload' && h(ConfirmDialog, { title: t('reloadConfirmTitle'), message: t('reloadConfirmHelp'), confirmLabel: t('reload'), cancelLabel: t('cancel'), danger: true, busy, onCancel: () => setConfirm(null), onConfirm: () => { setConfirm(null); selectNote({ path: readbackPath || path }); } }),
+           confirm?.kind === 'note' && h(ConfirmDialog, { title: t('noteRemoveTitle'), message: t('confirmRemove'), confirmLabel: t('remove'), cancelLabel: t('cancel'), danger: true, busy, onCancel: () => setConfirm(null), onConfirm: () => run(async () => { await command('remove', { path: note.path, expectedHash: note.hash }); const refreshed = await refreshAfterMutation(); return () => { setNote(null); setPath(''); setContent(''); setConflict(false); setConfirm(null); setGraph(null); graphRequest.current = null; applyRefreshed(refreshed); }; }, 'deleted') })),
+          sideShown && h(NoteSide, { note, tab: sideTab, setTab: setSideTab, outline, activeLine, onHeading: fromSide(line => { spyPause.current = Date.now() + 900; setActiveLine(line); scrollToLine(line, { smooth: true }); }), onOpen: fromSide(selectNote), openLink: fromSide(openLink), disabled: busy || dirty, t, help }))))),
 );
 
     body = h(React.Fragment, null, body, confirm?.kind === 'draft' && h(ConfirmDialog, { title: t('draftDiscardTitle'), message: t('confirmDiscard'), confirmLabel: t('discard'), cancelLabel: t('cancel'), danger: true, busy, onCancel: () => setConfirm(null), onConfirm: () => { setContent(note?.content || ''); if (!note) setPath(''); setConfirm(null); notify(t('draftDiscarded')); } }));

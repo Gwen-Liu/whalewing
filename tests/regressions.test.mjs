@@ -54,7 +54,8 @@ test('损坏sources元素归一为稳定错误，不抛TypeError', async t => {
   await library.files.atomic(library.location(name, 'active'), malformed);
   await assert.rejects(library.read(name), { code: 'SKILL_SOURCE' });
   const listed = await library.list();
-  assert.match(listed.skills[0].issue, /SKILL_SOURCE/);
+  // 错误码只在 error.code 里；列表的诊断只留原句。
+  assert.equal(listed.skills[0].issue, '技能缺少可核对的知识来源');
 });
 
 test('旧活动文件损坏且新发布发现失败时，新活动入口必须撤下', async t => {

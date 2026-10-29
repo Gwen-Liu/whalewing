@@ -15,7 +15,7 @@ export function knowledgeContract(z) {
     z.strictObject({ action: z.literal('question'), question: text.trim().min(1).max(4000), paths: z.array(notePath).max(12) }),
   ]);
   const note = z.strictObject({ path: text, content: text, hash, readOnly: z.boolean() });
-  const link = z.strictObject({ kind: z.enum(['wiki', 'markdown']), label: text, target: text, line: count, status: z.enum(['resolved', 'missing', 'attachment', 'ambiguous', 'fragment_missing', 'fragment_ambiguous', 'invalid']), candidates: z.array(text), candidateTotal: count.optional(), path: text.optional(), targetLine: count.optional(), missingId: text.optional(), missingTitle: text.optional() });
+  const link = z.strictObject({ kind: z.enum(['wiki', 'markdown']), label: text, target: text, line: count, status: z.enum(['resolved', 'missing', 'attachment', 'ambiguous', 'fragment_missing', 'fragment_ambiguous', 'invalid']), candidates: z.array(text), candidateTotal: count.optional(), path: text.optional(), targetLine: count.optional(), missingId: text.optional(), missingTitle: text.optional(), property: text.optional() });
   const view = z.lazy(() => z.strictObject({ type: z.enum(['root', 'group', 'paragraph', 'heading', 'text', 'blockquote', 'code', 'inlineCode', 'strong', 'emphasis', 'delete', 'list', 'listItem', 'thematicBreak', 'break', 'table', 'tableRow', 'tableCell', 'footnoteDefinition', 'link', 'knowledgeLink']), line: count, value: text.optional(), level: z.number().int().min(1).max(6).optional(), ordered: z.boolean().optional(), start: count.optional(), checked: z.boolean().optional(), url: text.optional(), index: count.optional(), children: z.array(view).optional() }));
   // 版本属于整张图，空节点列表也必须拒收不带类型与连接度语义的旧响应。
   const graphResult = z.strictObject({ version: z.literal(2), nodes: z.array(z.discriminatedUnion('kind', [
@@ -30,7 +30,7 @@ export function knowledgeContract(z) {
     note,
     z.strictObject({ path: text, hash }), z.strictObject({ path: text, removed: z.literal(true) }),
     z.strictObject({ valid: z.boolean(), issues: z.array(text), notes: count }),
-    note.extend({ view, links: z.array(link), anchors: z.array(z.strictObject({ kind: z.enum(['heading', 'block']), value: text, line: count })), backlinks: z.array(z.strictObject({ path: text, title: text, line: count })), totalBacklinks: count, relationsIssue: text.optional() }),
+    note.extend({ view, links: z.array(link), anchors: z.array(z.strictObject({ kind: z.enum(['heading', 'block']), value: text, line: count })), properties: z.array(z.strictObject({ key: text, values: z.array(z.strictObject({ text, link: count.optional() })) })).optional(), backlinks: z.array(z.strictObject({ path: text, title: text, line: count, context: text.optional(), property: text.optional() })), totalBacklinks: count, relationsIssue: text.optional() }),
     graphResult,
     z.strictObject({ prompt: text, sources: z.array(z.strictObject({ path: text, absolutePath: text, hash })) }),
   ]);

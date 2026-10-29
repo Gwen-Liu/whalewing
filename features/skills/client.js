@@ -1,9 +1,9 @@
-import { skillLibraryContract } from './contract.js';
+import { skillLibraryContract, isSkillIdentifier } from './contract.js';
 import { registerFeature, useFeature } from '../../src/shell/feature.js';
 
 /** 本页持有自己的草稿、动作和恢复状态；切走时不把状态交给外壳。 */
 export function createView(kit) {
-  const { React, ConfirmDialog } = kit;
+  const { React, ConfirmDialog, useDiscard } = kit;
   const { createElement: h, useState, useRef, useEffect, useLayoutEffect, useSyncExternalStore } = React;
   function SkillEditor({ api, entry, t, onClose, onSaved, notify }) {
     const [name, setName] = useState('');
@@ -16,6 +16,9 @@ export function createView(kit) {
     const saving = useRef(false);
     const modal = useRef(null);
     const lifetime = useRef(null);
+    // 打开（或载入已保存版本）时的正文；之后有改动、或新建时填了标识，关闭前先确认放弃。
+    const [baseline, setBaseline] = useState(content);
+    const [requestClose, discard] = useDiscard({ dirty: content !== baseline || Boolean(name.trim()), onClose, busy });
     useEffect(() => {
       lifetime.current = new AbortController();
       const previous = typeof document === 'undefined' ? null : document.activeElement;
@@ -30,14 +33,20 @@ export function createView(kit) {
     };
     const load = async () => {
       setBusy(true); setError('');
-      try { const actual = await readSaved(); lifetime.current?.signal.throwIfAborted(); if (actual) { current.current = actual; setContent(actual.content); } setUnverified(false); }
+      try { const actual = await readSaved(); lifetime.current?.signal.throwIfAborted(); if (actual) { current.current = actual; setContent(actual.content); setBaseline(actual.content); } setUnverified(false); }
       catch (reason) { setError(reason.message); }
       finally { setBusy(false); }
     };
     const save = async () => {
       if (saving.current || unverified) return;
-      if (!current.current && !createdId.current && !name.trim()) { setError(t('skillIdentifierHelp')); return; }
-      createdId.current ||= current.current ? null : `${name.trim()}/SKILL.md`;
+      if (!current.current && !createdId.current) {
+        // 标识不合规就不发请求，说明规则；标识框照常可改。
+        const identifier = name.trim();
+        if (!identifier) { setError(t('skillIdentifierHelp')); return; }
+        if (!isSkillIdentifier(identifier)) { setError(t('skillIdentifierRule')); return; }
+        // 发出新建前固定身份：宿主可能已经写入但回读没成功，重试或载入都只认这个标识，不另建一份。
+        createdId.current = `${identifier}/SKILL.md`;
+      }
       const before = current.current;
       let accepted;
       saving.current = true; setBusy(true); setError('');
@@ -56,16 +65,18 @@ export function createView(kit) {
         try {
           const actual = await readSaved();
           if (accepted && actual?.hash === accepted.hash && actual.content === accepted.content) { current.current = actual; await onSaved(actual); return; }
+          // 新建被宿主明确拒绝、这个标识下也确实没有文件：没写入，放开标识让员工改；拿不准时保持固定，避免重复新建。
+          if (!before && !accepted && reason.answered && actual === null) createdId.current = null;
           // 已有不同版本保留草稿，只有员工明确载入后才采用新的写前哈希。
           setUnverified(Boolean(actual && (actual.id !== before?.id || actual.hash !== before?.hash)));
         } catch { setUnverified(true); }
         setError(reason.message);
       } finally { saving.current = false; if (!lifetime.current?.signal.aborted) setBusy(false); }
     };
-    return h('dialog', { ref: modal, className: 'yj-editor yj-page', 'aria-label': t(entry ? 'editSkill' : 'newSkill'), onCancel: event => { event.preventDefault(); if (!busy) onClose(); } },
-      h('header', { className: 'yj-header' }, h('h2', null, t(entry ? 'editSkill' : 'newSkill')), h('button', { type: 'button', disabled: busy, onClick: onClose, 'aria-label': t('close') }, '×')),
-      h('div', { className: 'yj-editor-body' }, !entry && h('label', null, t('skillIdentifier'), h('input', { value: name, disabled: busy || Boolean(createdId.current), onChange: event => setName(event.target.value), placeholder: 'my-skill' }), h('small', null, t('skillIdentifierHelp'))), entry?.origin === 'builtin' && h('p', { className: 'yj-notice' }, t('skillBuiltinHelp')), h('label', null, t('skillContent'), h('textarea', { value: content, disabled: busy, onChange: event => setContent(event.target.value), spellCheck: false })), unverified && h('p', { className: 'yj-notice' }, t('skillReadback'), h('button', { type: 'button', onClick: load, disabled: busy }, t('skillLoadSaved')))),
-      h('footer', { className: 'yj-row' }, h('button', { type: 'button', disabled: busy, onClick: onClose }, t('cancelEdit')), h('button', { type: 'button', className: 'yj-primary', disabled: busy || unverified, onClick: save }, t('saveSkill'))));
+    return h(React.Fragment, null, h('dialog', { ref: modal, className: 'ww-editor ww-page', 'aria-label': t(entry ? 'editSkill' : 'newSkill'), onCancel: event => { event.preventDefault(); requestClose(); }, onClick: event => { if (event.target === event.currentTarget) requestClose(); } },
+      h('header', { className: 'ww-header' }, h('h2', null, t(entry ? 'editSkill' : 'newSkill')), h('button', { type: 'button', disabled: busy, onClick: requestClose, 'aria-label': t('close') }, '×')),
+      h('div', { className: 'ww-editor-body' }, !entry && h('label', null, t('skillIdentifier'), h('input', { value: name, disabled: busy || Boolean(createdId.current), onChange: event => setName(event.target.value), placeholder: 'my-skill' }), h('small', null, t('skillIdentifierHelp'))), entry?.origin === 'builtin' && h('p', { className: 'ww-notice' }, t('skillBuiltinHelp')), h('label', null, t('skillContent'), h('textarea', { value: content, disabled: busy, onChange: event => setContent(event.target.value), spellCheck: false })), unverified && h('p', { className: 'ww-notice' }, t('skillReadback'), h('button', { type: 'button', onClick: load, disabled: busy }, t('skillLoadSaved')))),
+      h('footer', { className: 'ww-row' }, h('button', { type: 'button', disabled: busy, onClick: requestClose }, t('cancelEdit')), h('button', { type: 'button', className: 'ww-primary', disabled: busy || unverified, onClick: save }, t(entry ? 'skillSaveChanges' : 'skillCreate')))), discard);
   }
 
   return function SkillsView({ active, workbench }) {
@@ -104,19 +115,19 @@ export function createView(kit) {
     const count = filter => skills.filter(item => matches(item, filter)).length;
     const keyword = skillQuery.trim().toLowerCase();
     const shown = skills.filter(item => matches(item, skillFilter) && (!keyword || `${item.name} ${item.description}`.toLowerCase().includes(keyword)));
-    const chip = (filter, label) => h('button', { type: 'button', key: filter, className: 'yj-chip', 'aria-pressed': skillFilter === filter, onClick: () => setSkillFilter(filter) }, label, h('small', null, String(count(filter))));
+    const chip = (filter, label) => h('button', { type: 'button', key: filter, className: 'ww-chip', 'aria-pressed': skillFilter === filter, onClick: () => setSkillFilter(filter) }, label, h('small', null, String(count(filter))));
     const summary = [`${skillPage.total} 项`, count('mine') > 0 && `我的 ${count('mine')}`, count('updated') > 0 && `${count('updated')} 项原件有更新`, count('review') > 0 && `${count('review')} 项待复核`].filter(Boolean).join(' · ');
-    const skillRow = item => h('button', { type: 'button', className: `yj-skill-row${skill?.id === item.id ? ' yj-current' : ''}`, key: item.id, disabled: busy || !item.actions.includes('read'), onClick: () => run(async () => { const value = await skillCommand('read', { id: item.id }); if (!value.entry) throw new Error(t('skillMissing')); return () => { setSkill(value.entry); setConfirm(null); }; }) }, item.name, h('small', { title: item.discovery === 'catalogued' ? t('skillHelp') : undefined }, t(item.origin), item.state && ` · ${t(item.state)}`, ` · ${t(item.discovery)}`), h('small', { className: 'yj-clamp', title: item.description }, item.description),
-      (item.baseUpdated || item.review) && h('span', { className: 'yj-skill-tags' }, item.baseUpdated && h('span', { className: 'yj-tag yj-tag-warn' }, t('skillBaseUpdatedShort')), item.review && h('span', { className: 'yj-tag yj-tag-warn' }, '待复核')), item.issue && h('span', { className: 'yj-error' }, `${t('skillIssue')}: ${item.issue}`));
-    const groups = [['mine', '我的'], ['evolution', '从知识提炼'], ['builtin', '系统内置']].map(([group, label]) => { const list = shown.filter(item => groupOf(item) === group); return list.length > 0 && h(React.Fragment, { key: group }, h('p', { className: 'yj-skill-group' }, label), ...list.map(skillRow)); });
+    const skillRow = item => h('button', { type: 'button', className: `ww-skill-row${skill?.id === item.id ? ' ww-current' : ''}`, key: item.id, disabled: busy || !item.actions.includes('read'), onClick: () => run(async () => { const value = await skillCommand('read', { id: item.id }); if (!value.entry) throw new Error(t('skillMissing')); return () => { setSkill(value.entry); setConfirm(null); }; }) }, item.name, h('small', { title: item.discovery === 'catalogued' ? t('skillHelp') : undefined }, t(item.origin), item.state && ` · ${t(item.state)}`, ` · ${t(item.discovery)}`), h('small', { className: 'ww-clamp', title: item.description }, item.description),
+      (item.baseUpdated || item.review) && h('span', { className: 'ww-skill-tags' }, item.baseUpdated && h('span', { className: 'ww-tag ww-tag-warn' }, t('skillBaseUpdatedShort')), item.review && h('span', { className: 'ww-tag ww-tag-warn' }, '待复核')), item.issue && h('span', { className: 'ww-error' }, `${t('skillIssue')}: ${item.issue}`));
+    const groups = [['mine', '我的'], ['evolution', '从知识提炼'], ['builtin', '系统内置']].map(([group, label]) => { const list = shown.filter(item => groupOf(item) === group); return list.length > 0 && h(React.Fragment, { key: group }, h('p', { className: 'ww-skill-group' }, label), ...list.map(skillRow)); });
     // 来源笔记变了的提炼技能照常可用，只提示复核。
     const reviewText = review => [review.changed.length > 0 && `来源笔记有改动：${review.changed.join('、')}。`, review.missing.length > 0 && `来源笔记找不到（可能移动或删除了）：${review.missing.join('、')}。`, review.otherVault && '来源在另一个知识库，暂时没法核对。', '技能照常可用；可以和小鲸核对后重新提炼。'].filter(Boolean).join('');
-    body = h('section', { className: 'yj-skill-library' },
-      h('header', { className: 'yj-pagehead' }, h('div', null, h('h2', null, t('skillLibrary')), h('p', null, summary)), h('div', { className: 'yj-pagehead-actions' }, button('refine', () => openAssistant(t('refinePrompt')), dirty), button('newSkill', () => setSkillEditor(null), false, { className: 'yj-primary' }))),
-      h('div', { className: 'yj-skill-filters' }, h('label', { className: 'yj-search' }, h('input', { type: 'search', value: skillQuery, placeholder: '名字或用途', 'aria-label': '查找技能', onChange: event => setSkillQuery(event.target.value) })), chip('all', '全部'), chip('mine', '我的'), chip('evolution', '提炼'), chip('builtin', '系统'), chip('updated', '有更新'), chip('review', '待复核')),
-      h('div', { className: 'yj-split yj-skill-split' }, h('div', { className: 'yj-list yj-skill-list' }, skills.length ? (shown.length ? groups : h('p', { className: 'yj-muted', role: 'status' }, '没有匹配的技能，换个词或筛选试试')) : help('emptySkills'), row(button('previous', () => pageSkills(skillPages.current.at(-1), 'previous'), !skillPages.current.length), button('next', () => pageSkills(skillPage.offset + skills.length, 'next'), !skillPage.truncated || !skills.length))),
-        skill ? h('article', { className: 'yj-card yj-skill-detail yj-meander' }, h('h3', null, skill.name), row(skill.actions.includes('update') && button('editSkill', () => run(async () => { const current = await api.resolveSkillEdit(skill, operation.current.controller.signal); if (!current) throw new Error(t('skillMissing')); return () => setSkillEditor(current); })), ...['remove', 'reset'].filter(action => skill.actions.includes(action)).map(action => button(action === 'remove' ? 'removeSkill' : 'resetSkill', () => setConfirm({ kind: `skill-${action}`, id: skill.id })))),
-          skill.origin === 'evolution' && button('skillEdit', () => openAssistant(t('skillEditPrompt', { reference: JSON.stringify({ name: skill.name, state: skill.state, hash: skill.hash }) }))), skill.issue && h('div', { className: 'yj-notice yj-error', role: 'status' }, `${t('skillIssue')}: ${skill.issue}`), skill.baseUpdated && h('div', { className: 'yj-notice', role: 'status' }, t('skillBaseUpdated')), skill.review && h('div', { className: 'yj-notice', role: 'status' }, h('span', { className: 'yj-tag yj-tag-warn' }, '待复核'), ' ', reviewText(skill.review)), h('pre', null, skill.content), skill.sourcePaths && h('h3', null, t('sourcePaths')), h('ul', null, ...(skill.sourcePaths || []).map((source) => h('li', { key: source }, source))),
+    body = h('section', { className: 'ww-skill-library' },
+      h('header', { className: 'ww-pagehead' }, h('div', null, h('h2', null, t('skillLibrary')), h('p', null, summary)), h('div', { className: 'ww-pagehead-actions' }, button('refine', () => openAssistant(t('refinePrompt')), dirty), button('newSkill', () => setSkillEditor(null), false, { className: 'ww-primary' }))),
+      h('div', { className: 'ww-skill-filters' }, h('label', { className: 'ww-search' }, h('input', { type: 'search', value: skillQuery, placeholder: '名字或用途', 'aria-label': '查找技能', onChange: event => setSkillQuery(event.target.value) })), chip('all', '全部'), chip('mine', '我的'), chip('evolution', '提炼'), chip('builtin', '系统'), chip('updated', '有更新'), chip('review', '待复核')),
+      h('div', { className: 'ww-split ww-skill-split' }, h('div', { className: 'ww-list ww-skill-list' }, skills.length ? (shown.length ? groups : h('p', { className: 'ww-muted', role: 'status' }, '没有匹配的技能，换个词或筛选试试')) : help('emptySkills'), row(button('previous', () => pageSkills(skillPages.current.at(-1), 'previous'), !skillPages.current.length), button('next', () => pageSkills(skillPage.offset + skills.length, 'next'), !skillPage.truncated || !skills.length))),
+        skill ? h('article', { className: 'ww-card ww-skill-detail ww-meander' }, h('h3', null, skill.name), row(skill.actions.includes('update') && button('editSkill', () => run(async () => { const current = await api.resolveSkillEdit(skill, operation.current.controller.signal); if (!current) throw new Error(t('skillMissing')); return () => setSkillEditor(current); })), ...['remove', 'reset'].filter(action => skill.actions.includes(action)).map(action => button(action === 'remove' ? 'removeSkill' : 'resetSkill', () => setConfirm({ kind: `skill-${action}`, id: skill.id })))),
+          skill.origin === 'evolution' && button('skillEdit', () => openAssistant(t('skillEditPrompt', { reference: JSON.stringify({ name: skill.name, state: skill.state, hash: skill.hash }) }))), skill.issue && h('div', { className: 'ww-notice ww-error', role: 'status' }, `${t('skillIssue')}: ${skill.issue}`), skill.baseUpdated && h('div', { className: 'ww-notice', role: 'status' }, t('skillBaseUpdated')), skill.review && h('div', { className: 'ww-notice', role: 'status' }, h('span', { className: 'ww-tag ww-tag-warn' }, '待复核'), ' ', reviewText(skill.review)), h('pre', null, skill.content), skill.sourcePaths && h('h3', null, t('sourcePaths')), h('ul', null, ...(skill.sourcePaths || []).map((source) => h('li', { key: source }, source))),
           ['remove', 'reset'].map(action => confirm?.kind === `skill-${action}` && confirm.id === skill.id && h(ConfirmDialog, { key: action, title: t(action === 'remove' ? 'skillRemoveTitle' : 'skillResetTitle'), message: t(action === 'remove' ? 'skillConfirmRemove' : 'skillConfirmReset'), confirmLabel: t(action === 'remove' ? 'removeSkill' : 'resetSkill'), cancelLabel: t('cancel'), danger: action === 'remove', busy, onCancel: () => setConfirm(null), onConfirm: () => run(async () => { const result = await skillCommand(action, { id: skill.id, expectedHash: skill.hash, ...(skill.baseHash === undefined ? {} : { expectedBaseHash: skill.baseHash }) }); if ((await skillCommand('read', { id: skill.id })).entry !== null) throw new Error(t('skillReadback')); const base = action === 'reset' ? (await skillCommand('read', { id: result.baseId })).entry : null; const value = await skillCommand('list'); return () => { adoptSkills(value); setSkill(base); setConfirm(null); }; }, action === 'remove' ? 'skillRemoved' : 'skillResetDone') })),
           skill.origin === 'evolution' && skill.state !== 'candidate' && row(
           button(skill.state === 'active' ? 'disable' : 'restoreSkill', () => run(async () => { await skillCommand(skill.state === 'active' ? 'disable' : 'restore', { name: skill.name, expectedHash: skill.hash }); const value = await skillCommand('list'); return () => { adoptSkills(value); setSkill(null); setConfirm(null); }; }, 'skillToggled')),

@@ -26,9 +26,27 @@ const guide = [
 const inputCodes = /^(INPUT|VALIDATION|QUERY|OFFSET|ACTION|DOMAIN|QUESTION|EVENT_LIMIT|INDEX_LIMIT|ZODERROR)$/;
 const network = /fetch failed|ECONN|ETIMEDOUT|ENOTFOUND|network|timeout/i;
 
+/**
+ * 校验失败时原句是一段 JSON（每条问题带 code、path、message）。员工只该看到写给人看的那句：
+ * 取出其中的中文说明；全是英文默认句时换成通用说法。JSON、字段路径和英文原句不展示（开发者控制台里有原文）。
+ * 不是这种格式的原句原样返回；JSON 前面的说明（如文件名）保留。
+ */
+export function readableInput(message) {
+  const text = String(message ?? ''), start = text.indexOf('[');
+  if (start < 0) return text;
+  let issues;
+  try { issues = JSON.parse(text.slice(start)); } catch { return text; }
+  if (!Array.isArray(issues) || !issues.length || !issues.every(issue => issue && typeof issue === 'object' && typeof issue.code === 'string')) return text;
+  const own = [...new Set(issues.map(issue => String(issue.message ?? '').trim()).filter(line => /[一-鿿]/.test(line)))];
+  return `${text.slice(0, start).trim()}${own.length ? own.join('；') : '有一项内容的格式或长度不对，请检查后重试'}`;
+}
+
 /** 返回 { text, origin }：text 直接展示给员工。 */
 export function explainError(code, message = '', domains = []) {
   const key = code === undefined || code === null ? '' : String(code).toUpperCase();
+  message = readableInput(message);
+  // 宿主报错的原句常带“错误码: ”前缀（如“SKILL_FORMAT: 技能需要名称、说明和正文”），员工只看后半句。
+  if (key && message.toUpperCase().startsWith(`${key}: `)) message = message.slice(key.length + 2);
   if (/^SESSION_(MIGRATION|UNCONFIRMED|CREATED_DIFFERENT|ARCHIVED)$/.test(key)) return { text: message, origin: 'session' };
   // 功能声明为“原句即说明”的错误码：宿主写的就是给员工看的具体原因和处理办法（如电子书格式不支持）。
   if (message && domains.some(domain => (domain.messageCodes ?? []).includes(key))) return { text: message, origin: key };

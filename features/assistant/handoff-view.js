@@ -3,7 +3,7 @@ import { handoffText } from './client-presentation.js';
 // 与 handoff.js 的工具名一致；浏览器端不引入 Host 工具定义。
 const toolName = 'whalewing_handoff';
 // 卡片也出现在专家任务的对话里（鲸翼页面之外），自带样式；颜色直接取 DSH 变量，跟着员工的皮肤走。
-const handoffCss = '.yj-handoff{display:flex;flex-direction:column;gap:8px;margin:6px 0;padding:12px 14px;border:1px solid var(--dsw-alias-border-l2);border-radius:14px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-size:13.5px;line-height:1.6}.yj-handoff>.yj-row{display:flex;align-items:center;flex-wrap:wrap;gap:8px}.yj-handoff>.yj-row>span{flex:1;min-width:0;font-weight:500}.yj-handoff>.yj-row>button{height:30px;padding:0 12px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;font-weight:500;cursor:pointer}.yj-handoff>.yj-row>button:first-of-type{border-color:var(--dsw-alias-button-primary-fill,var(--dsw-alias-label-primary));background:var(--dsw-alias-button-primary-fill,var(--dsw-alias-label-primary));color:var(--dsw-alias-label-primary-foreground,var(--dsw-alias-bg-layer-1))}.yj-handoff details{color:var(--dsw-alias-label-secondary);font-size:13px}.yj-handoff summary{cursor:pointer}';
+const handoffCss = '.ww-handoff{display:flex;flex-direction:column;gap:8px;margin:6px 0;padding:12px 14px;border:1px solid var(--dsw-alias-border-l2);border-radius:14px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-size:13.5px;line-height:1.6}.ww-handoff>.ww-row{display:flex;align-items:center;flex-wrap:wrap;gap:8px}.ww-handoff>.ww-row>span{flex:1;min-width:0;font-weight:500}.ww-handoff>.ww-row>button{height:30px;padding:0 12px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;font-weight:500;cursor:pointer}.ww-handoff>.ww-row>button:first-of-type{border-color:var(--dsw-alias-button-primary-fill,var(--dsw-alias-label-primary));background:var(--dsw-alias-button-primary-fill,var(--dsw-alias-label-primary));color:var(--dsw-alias-label-primary-foreground,var(--dsw-alias-bg-layer-1))}.ww-handoff details{color:var(--dsw-alias-label-secondary);font-size:13px}.ww-handoff summary{cursor:pointer}';
 const format = (template, values = {}) => template.replace(/\{(\w+)\}/g, (match, key) => Object.hasOwn(values, key) ? String(values[key]) : match);
 const zhText = (key, values) => format(handoffText[key].zh, values);
 const firstLine = value => value.split('\n').map(line => line.trim()).find(Boolean) ?? '';
@@ -77,15 +77,15 @@ export function registerHandoffView(ctx, kit, api) {
     input: () => ctx.get('conversation')?.input, notify: api.notify, clipboard: () => globalThis.navigator?.clipboard, text,
   });
   function HandoffRow(props) {
-    if (props.phase === 'preparing') return h('div', { className: 'yj-muted', 'data-tool': toolName }, text('preparing'));
+    if (props.phase === 'preparing') return h('div', { className: 'ww-muted', 'data-tool': toolName }, text('preparing'));
     const value = readHandoff(props.block);
-    if (value.state !== 'done') return h('div', { className: 'yj-muted', 'data-tool': toolName, 'data-state': value.state }, text(value.state, { title: value.title, message: value.message || text('errorUnknown') }));
+    if (value.state !== 'done') return h('div', { className: 'ww-muted', 'data-tool': toolName, 'data-state': value.state }, text(value.state, { title: value.title, message: value.message || text('errorUnknown') }));
     const { meta } = value;
-    return h('div', { className: 'yj-handoff', 'data-tool': toolName, 'data-state': 'done' }, h('style', null, handoffCss),
-      h('div', { className: 'yj-row' },
+    return h('div', { className: 'ww-handoff', 'data-tool': toolName, 'data-state': 'done' }, h('style', null, handoffCss),
+      h('div', { className: 'ww-row' },
         h('span', null, text('done', { expert: meta.expertName, title: meta.title })),
-        h('button', { type: 'button', className: 'yj-icon-button', onClick: () => handoff.open(meta) }, text('open')),
-        h('button', { type: 'button', className: 'yj-icon-button', onClick: () => handoff.copy(meta) }, text('copy'))),
+        h('button', { type: 'button', className: 'ww-icon-button', onClick: () => handoff.open(meta) }, text('open')),
+        h('button', { type: 'button', className: 'ww-icon-button', onClick: () => handoff.copy(meta) }, text('copy'))),
       h('details', null, h('summary', null, text('draft')), ...meta.draft.split('\n').map(line => h('div', null, line || ' '))));
   }
   ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({ name: 'tool.call.toolview', key: toolName }, HandoffRow));

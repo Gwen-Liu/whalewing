@@ -9,7 +9,7 @@ const button = (tree, label) => {
   assert.ok(found, `按钮 ${label} 存在`);
   return found;
 };
-const cards = f => nodes(f.render()).filter(node => node.type === 'article' && node.props.className === 'yj-card');
+const cards = f => nodes(f.render()).filter(node => node.type === 'article' && node.props.className === 'ww-card');
 
 test('恢复原版可以只选几项：确认框列出改过的内容并标出原版有更新的，只提交选中的字段', async () => {
   let data = [{ ...roles[0], customized: ['prompt', 'skills'], baseUpdated: ['prompt'] }, roles[1]];
@@ -23,7 +23,7 @@ test('恢复原版可以只选几项：确认框列出改过的内容并标出�
   } });
   button(cards(f)[0], '恢复原版').props.onClick();
   const dialog = () => nodes(f.render()).find(node => node.type === 'dialog' && JSON.stringify(node).includes('选择要换回原版的内容：'));
-  const options = nodes(dialog()).filter(node => node.type === 'label' && node.props.className === 'yj-check');
+  const options = nodes(dialog()).filter(node => node.type === 'label' && node.props.className === 'ww-check');
   assert.deepEqual(options.map(text), ['提示词（原版有更新）', '技能']);
   nodes(options[1]).find(node => node.type === 'input').props.onChange({ target: { checked: false } });
   await button(dialog(), '恢复原版').props.onClick();
@@ -60,6 +60,6 @@ test('由内置专家转来的自定义专家同时有恢复原版和删除；�
   button(card, '编辑专家').props.onClick();
   const editor = nodes(f.render()).find(node => typeof node.type === 'function' && node.type.name === 'ExpertEditor');
   const render = f.isolate(editor); render(); f.flushEffects(); await new Promise(setImmediate);
-  const notice = nodes(render()).find(node => node.type === 'p' && node.props.className === 'yj-notice');
+  const notice = nodes(render()).find(node => node.type === 'p' && node.props.className === 'ww-notice');
   assert.match(text(notice), /^原版有更新：提示词。/);
 });

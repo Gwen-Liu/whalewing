@@ -3,15 +3,18 @@ import { aiWebEntries, aiWebGroup } from './catalog.js';
 import { findAiWebEntries, openAiWebsite } from './client-api.js';
 
 /** 组件可常驻挂载；隐藏时没有网络、登录或会话初始化动作。 */
-export function createAiWebView(React) {
+/** useDiscard：外壳的“有改动先确认放弃”；单独测试视图时不传，关闭直接关。 */
+export function createAiWebView(React, { useDiscard = ({ onClose }) => [onClose, null] } = {}) {
   const { createElement: h, useState, useRef, useEffect, useSyncExternalStore } = React;
-  const avatar = entry => entry.avatar ? h('img', { src: entry.avatar, alt: '', width: 48, height: 48, className: 'yj-avatar', style: { objectFit: 'contain', background: 'var(--yj-ai-plate,#fff)', padding: 6, boxSizing: 'border-box' } }) : h('span', { className: 'yj-avatar', 'aria-hidden': true, style: { display: 'grid', placeItems: 'center', width: 48, height: 48, fontSize: 22, background: 'var(--dsw-alias-interactive-bg-hover)' } }, Array.from(entry.name.trim())[0] || 'AI');
+  const avatar = entry => entry.avatar ? h('img', { src: entry.avatar, alt: '', width: 48, height: 48, className: 'ww-avatar', style: { objectFit: 'contain', background: 'var(--ww-ai-plate,#fff)', padding: 6, boxSizing: 'border-box' } }) : h('span', { className: 'ww-avatar', 'aria-hidden': true, style: { display: 'grid', placeItems: 'center', width: 48, height: 48, fontSize: 22, background: 'var(--dsw-alias-interactive-bg-hover)' } }, Array.from(entry.name.trim())[0] || 'AI');
   function Editor({ entry, removing, manageAiWeb, onSaved, onClose, notify }) {
     const [draft, setDraft] = useState(() => ({ name: entry?.name ?? '', url: entry?.url ?? '', description: entry?.description ?? '', avatar: entry?.avatar ?? null }));
     const [busy, setBusy] = useState(false), [uploading, setUploading] = useState(false), [recovery, setRecovery] = useState(null);
     // 报错走右上角提示，不在表单底部插入一行。
     const setError = message => { if (message) notify?.(message, { kind: 'error' }); };
     const identity = useRef(entry ?? { id: `custom-${globalThis.crypto.randomUUID()}`, revision: 0 });
+    // 底部按钮在表单外面（和其它抽屉一样固定在底部），靠 form 属性仍算这张表单的按钮：点“添加”、在输入框里按回车都照常提交。
+    const [formId] = useState(() => `ww-ai-web-form-${identity.current.id}`);
     const dialog = useRef(null), lock = useRef(false), alive = useRef(true), uploadTask = useRef(null), request = useRef(null);
     useEffect(() => {
       const previous = globalThis.document?.activeElement;
@@ -20,6 +23,9 @@ export function createAiWebView(React) {
       return () => { alive.current = false; uploadTask.current?.abort(); request.current?.abort(); dialog.current?.close(); previous?.focus(); };
     }, []);
     const update = (key, value) => setDraft(current => ({ ...current, [key]: value }));
+    // 打开时的样子；之后有改动，关闭前先确认放弃（删除确认不算编辑）。
+    const [baseline] = useState(() => JSON.stringify(draft));
+    const [requestClose, discard] = useDiscard({ dirty: !removing && JSON.stringify(draft) !== baseline, onClose, busy });
     const upload = async event => {
       const file = event.target.files?.[0]; event.target.value = '';
       if (!file) return;
@@ -54,16 +60,22 @@ export function createAiWebView(React) {
         } catch { /* 保留草稿与固定身份；读回失败不自动再次写入。 */ }
       } finally { lock.current = false; if (alive.current) setBusy(false); }
     };
-    const close = () => { if (!lock.current) onClose(); };
-    return h('dialog', { ref: dialog, className: removing ? 'yj-modal yj-confirm yj-page' : 'yj-editor yj-page', 'aria-label': removing ? '删除 AI 入口' : entry ? '编辑 AI 入口' : '添加 AI 入口', onCancel: event => { event.preventDefault(); close(); }, onClick: event => { if (event.target === event.currentTarget) { const rect = event.currentTarget.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) close(); } } },
-      h('header', { className: 'yj-header' }, h('h2', null, removing ? '删除 AI 入口' : entry ? '编辑 AI 入口' : '添加 AI 入口'), h('button', { type: 'button', disabled: busy, onClick: close, 'aria-label': '关闭 AI 入口编辑' }, '×')),
-      h('form', { onSubmit: save, className: 'yj-editor-body' }, removing ? h('p', null, `确认删除“${entry.name}”？网站账号及浏览器会话保持不变`) : h(React.Fragment, null,
-        h('div', { className: 'yj-avatar-picker' }, avatar(draft), h('div', { className: 'yj-avatar-side' },
-          h('div', { className: 'yj-avatar-actions' }, h('label', { className: 'yj-avatar-upload' }, '上传头像', h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', disabled: busy || uploading, onChange: upload })), h('button', { type: 'button', disabled: busy || uploading, onClick: () => update('avatar', null) }, '使用名字首字')),
-          h('p', { className: 'yj-help' }, 'PNG、JPEG 或 WebP，不超过 512 KiB；宽和高均须小于 300 像素'))),
-        ...[['name', '名字', 80], ['url', '网址', 2048], ['description', '描述（选填）', 400]].map(([key, label, maxLength]) => h('label', { key, className: 'yj-field' }, label, h('input', { type: key === 'url' ? 'url' : 'text', required: key !== 'description', autoFocus: key === 'name', maxLength, value: draft[key], disabled: busy, placeholder: key === 'url' ? 'https://…' : '', onChange: event => update(key, event.target.value) })))),
-        recovery && h('p', { className: 'yj-notice' }, '发现已保存的版本，当前输入仍保留', h('button', { type: 'button', disabled: busy, onClick: () => { identity.current = recovery; setDraft({ name: recovery.name, url: recovery.url, description: recovery.description, avatar: recovery.avatar }); setRecovery(null); setError(''); } }, '加载已保存版本')),
-        h('footer', { className: 'yj-dialog-actions' }, h('button', { type: 'button', disabled: busy, onClick: close }, '取消'), h('button', { type: 'submit', disabled: busy || uploading || !!recovery, className: removing ? 'yj-danger' : 'yj-primary' }, busy ? '正在保存…' : uploading ? '正在检查头像…' : removing ? '确认删除' : entry ? '保存修改' : '添加'))));
+    const close = () => { if (!lock.current) requestClose(); };
+    const cancel = h('button', { type: 'button', disabled: busy, onClick: close }, '取消');
+    const submit = h('button', { type: 'submit', form: formId, disabled: busy || uploading || !!recovery, className: removing ? 'ww-danger' : 'ww-primary' }, busy ? '正在保存…' : uploading ? '正在检查头像…' : removing ? '确认删除' : entry ? '保存修改' : '添加');
+    const recoveryNotice = recovery && h('p', { className: 'ww-notice' }, '发现已保存的版本，当前输入仍保留', h('button', { type: 'button', disabled: busy, onClick: () => { identity.current = recovery; setDraft({ name: recovery.name, url: recovery.url, description: recovery.description, avatar: recovery.avatar }); setRecovery(null); setError(''); } }, '加载已保存版本'));
+    // 删除是居中确认框，按钮跟在说明后面；添加、编辑是右侧抽屉，和外壳 Drawer、专家抽屉同一种结构：正文滚动，底部按钮固定。
+    const body = removing ? [h('form', { id: formId, onSubmit: save, className: 'ww-editor-body' }, h('p', null, `确认删除“${entry.name}”？网站账号及浏览器会话保持不变`), recoveryNotice, h('footer', { className: 'ww-dialog-actions' }, cancel, submit))] : [
+      h('form', { id: formId, onSubmit: save, className: 'ww-editor-body' },
+        h('div', { className: 'ww-avatar-picker' }, avatar(draft), h('div', { className: 'ww-avatar-side' },
+          h('div', { className: 'ww-avatar-actions' }, h('label', { className: 'ww-avatar-upload' }, '上传头像', h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', disabled: busy || uploading, onChange: upload })), h('button', { type: 'button', disabled: busy || uploading, onClick: () => update('avatar', null) }, '使用名字首字')),
+          h('p', { className: 'ww-help' }, 'PNG、JPEG 或 WebP，不超过 512 KiB；宽和高均须小于 300 像素'))),
+        ...[['name', '名字', 80], ['url', '网址', 2048], ['description', '描述（选填）', 400]].map(([key, label, maxLength]) => h('label', { key, className: 'ww-field' }, label, h('input', { type: key === 'url' ? 'url' : 'text', required: key !== 'description', autoFocus: key === 'name', maxLength, value: draft[key], disabled: busy, placeholder: key === 'url' ? 'https://…' : '', onChange: event => update(key, event.target.value) })))),
+      recoveryNotice,
+      h('footer', { className: 'ww-row' }, cancel, submit)];
+    return h(React.Fragment, null, h('dialog', { ref: dialog, className: removing ? 'ww-modal ww-confirm ww-page' : 'ww-editor ww-page', 'aria-label': removing ? '删除 AI 入口' : entry ? '编辑 AI 入口' : '添加 AI 入口', onCancel: event => { event.preventDefault(); close(); }, onClick: event => { if (event.target === event.currentTarget) { const rect = event.currentTarget.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) close(); } } },
+      h('header', { className: 'ww-header' }, h('h2', null, removing ? '删除 AI 入口' : entry ? '编辑 AI 入口' : '添加 AI 入口'), h('button', { type: 'button', disabled: busy, onClick: close, 'aria-label': '关闭 AI 入口编辑' }, '×')),
+      ...body), discard);
   }
   // 工具栏是当前工作台的只读投影，不取得会话、登录或导航的第二 owner。
   let toolbar = null;
@@ -86,7 +98,8 @@ export function createAiWebView(React) {
       h('button', { type: 'button', style, onClick: value.back }, '返回工作台'),
       value.failure && h('button', { type: 'button', style, title: value.failure.message, onClick: value.back, 'aria-label': '打开失败，返回工作台重试' }, '打开失败'));
   }
-  function AiWebView({ active = true, sessionId, openBrowser, focusBrowser, restoreBrowser, manageAiWeb, notify, ActionMenu }) {
+  /** remembered：原版 DSH 上本机记下的正在用的入口 id（空串表示没有）；宿主适配版不传，由页面自己记着。 */
+  function AiWebView({ active = true, sessionId, openBrowser, focusBrowser, restoreBrowser, manageAiWeb, notify, ActionMenu, remembered }) {
     const [query, setQuery] = useState('');
     const [failure, setFailureValue] = useState(null);
     const setFailure = value => {
@@ -96,8 +109,10 @@ export function createAiWebView(React) {
     };
     const [opened, setOpened] = useState('');
     const [busy, setBusy] = useState(false);
-    const [selected, setSelected] = useState('');
+    const [selected, setSelected] = useState(remembered ?? '');
     const [catalog, setCatalog] = useState(aiWebEntries), [loading, setLoading] = useState(false), [editor, setEditor] = useState(null);
+    // 原版打开 AI 后工作台会卸载，回来时按记下的入口标“正在用”；记下的会话不在了就清掉。入口删了由目录读回清掉。
+    useEffect(() => { if (remembered !== undefined) setSelected(remembered); }, [remembered]);
     // 失败只在右上角提示，并给出重试；不在卡片上方插入整行把卡片往下挤。
     const setCatalogError = message => { if (message) notify?.(message, { kind: 'error', action: { label: '刷新入口', run: () => refresh() } }); };
     const loadingRequest = useRef(null), catalogCurrent = useRef(aiWebEntries);
@@ -148,7 +163,7 @@ export function createAiWebView(React) {
       try {
         if (resumeOnly) {
           if (typeof focusBrowser !== 'function') throw new Error('DSH 浏览器尚未就绪，请稍后重试');
-          await focusBrowser(controller.signal);
+          await focusBrowser(controller.signal, entry);
         } else await openAiWebsite(entry.id, openBrowser, controller.signal, catalog);
         if (!live.current || controller.signal.aborted) return;
         if (!resumeOnly && catalogCurrent.current.some(current => current.id === entry.id)) {
@@ -175,29 +190,29 @@ export function createAiWebView(React) {
     const entryMenu = entry => ActionMenu ? h(ActionMenu, { label: `${entry.name} · 入口操作`, iconOnly: true },
       h('button', { type: 'button', onClick: () => setEditor({ entry }), disabled: !active || !manageAiWeb }, '编辑'),
       h('button', { type: 'button', onClick: () => setEditor({ entry, removing: true }), disabled: !active || !manageAiWeb }, '删除'))
-      : h('div', { className: 'yj-row' }, h('button', { type: 'button', onClick: () => setEditor({ entry }), disabled: !active || !manageAiWeb, 'aria-label': `编辑 ${entry.name}` }, '编辑'), h('button', { type: 'button', onClick: () => setEditor({ entry, removing: true }), disabled: !active || !manageAiWeb, 'aria-label': `删除 ${entry.name}` }, '删除'));
-    const status = busy && h('span', { className: 'yj-ai-status', role: 'status' }, h('span', { className: 'yj-spinner', 'aria-hidden': true }), '正在打开', h('button', { type: 'button', onClick: cancel }, '取消打开'));
+      : h('div', { className: 'ww-row' }, h('button', { type: 'button', onClick: () => setEditor({ entry }), disabled: !active || !manageAiWeb, 'aria-label': `编辑 ${entry.name}` }, '编辑'), h('button', { type: 'button', onClick: () => setEditor({ entry, removing: true }), disabled: !active || !manageAiWeb, 'aria-label': `删除 ${entry.name}` }, '删除'));
+    const status = busy && h('span', { className: 'ww-ai-status', role: 'status' }, h('span', { className: 'ww-spinner', 'aria-hidden': true }), '正在打开', h('button', { type: 'button', onClick: cancel }, '取消打开'));
     // 打开过一个 AI 再回来，入口照常列着，正在用的那个标出来，不再只剩一行工具条。
     const current = selected && catalog.find(entry => entry.id === selected);
-    const tile = entry => h('article', { key: entry.id, className: `yj-ai-tile${entry.id === selected ? ' yj-ai-current' : ''}` },
-      h('button', { type: 'button', className: 'yj-ai-open', disabled: busy || !active, onClick: () => open(entry), 'aria-label': `打开 ${entry.name}`, title: entry.description || undefined },
-        avatar(entry), h('span', { className: 'yj-ai-name' }, h('strong', null, entry.name), h('small', null, entry.id === selected ? '正在用' : entry.provider || '自定义'))),
-      !entry.builtin && entryMenu(entry), entry.id === selected && h('i', { className: 'yj-orn-wave', 'aria-hidden': true }));
+    const tile = entry => h('article', { key: entry.id, className: `ww-ai-tile${entry.id === selected ? ' ww-ai-current' : ''}` },
+      h('button', { type: 'button', className: 'ww-ai-open', disabled: busy || !active, onClick: () => open(entry), 'aria-label': `打开 ${entry.name}`, title: entry.description || undefined },
+        avatar(entry), h('span', { className: 'ww-ai-name' }, h('strong', null, entry.name), h('small', null, entry.id === selected ? '正在用' : entry.provider || '自定义'))),
+      !entry.builtin && entryMenu(entry), entry.id === selected && h('i', { className: 'ww-orn-wave', 'aria-hidden': true }));
     // 添加入口与“添加专家”同一种加号卡片，放在“我的入口”末尾；搜索时收起。
-    const addCard = !query.trim() && h('button', { type: 'button', className: 'yj-card yj-add-card', disabled: !active || !manageAiWeb || loading, onClick: () => setEditor({ entry: null }), 'aria-haspopup': 'dialog' }, h('span', { className: 'yj-add-mark', 'aria-hidden': true }, '+'), h('h2', null, '添加 AI'));
+    const addCard = !query.trim() && h('button', { type: 'button', className: 'ww-card ww-add-card', disabled: !active || !manageAiWeb || loading, onClick: () => setEditor({ entry: null }), 'aria-haspopup': 'dialog' }, h('span', { className: 'ww-add-mark', 'aria-hidden': true }, '+'), h('h2', null, '添加 AI'));
     const groups = [['cn', '国内'], ['global', '海外 · 需海外网络'], ['mine', '我的入口']].map(([group, label]) => {
       const list = entries.filter(entry => aiWebGroup(entry) === group), add = group === 'mine' && addCard;
-      return (list.length > 0 || add) && h('section', { key: group, className: 'yj-ai-group', 'aria-label': label },
-        h('p', { className: 'yj-ai-group-label' }, label, group === 'cn' && h('i', { className: 'yj-cloud', 'aria-hidden': true })),
-        h('div', { className: 'yj-ai-grid' }, ...list.map(tile), add));
+      return (list.length > 0 || add) && h('section', { key: group, className: 'ww-ai-group', 'aria-label': label },
+        h('p', { className: 'ww-ai-group-label' }, label, group === 'cn' && h('i', { className: 'ww-cloud', 'aria-hidden': true })),
+        h('div', { className: 'ww-ai-grid' }, ...list.map(tile), add));
     });
-    return h('section', { hidden: !active, 'aria-label': 'AI 网页', className: 'yj-ai-web' },
-      h('header', { className: 'yj-pagehead' }, h('div', null, h('h2', null, 'AI 网页'), h('p', null, current ? `正在用 ${current.name} · 登录和额度由各家决定，鲸翼不读 Cookie` : `${catalog.length} 个入口 · 登录和额度由各家决定，鲸翼不读 Cookie`)),
-        h('div', { className: 'yj-pagehead-actions' }, status,
-          h('label', { className: 'yj-ai-search' }, h('span', null, '查找 AI'), h('input', { type: 'search', value: query, placeholder: '名字、厂商或用途', onChange: event => setQuery(event.target.value) })),
-          current && h('button', { type: 'button', className: 'yj-primary', disabled: busy || !active, onClick: resume }, '继续使用'))),
+    return h('section', { hidden: !active, 'aria-label': 'AI 网页', className: 'ww-ai-web' },
+      h('header', { className: 'ww-pagehead' }, h('div', null, h('h2', null, 'AI 网页'), h('p', null, current ? `正在用 ${current.name} · 登录和额度由各家决定，鲸翼不读 Cookie` : `${catalog.length} 个入口 · 登录和额度由各家决定，鲸翼不读 Cookie`)),
+        h('div', { className: 'ww-pagehead-actions' }, status,
+          h('label', { className: 'ww-ai-search' }, h('span', null, '查找 AI'), h('input', { type: 'search', value: query, placeholder: '名字、厂商或用途', onChange: event => setQuery(event.target.value) })),
+          current && h('button', { type: 'button', className: 'ww-primary', disabled: busy || !active, onClick: resume }, '继续使用'))),
       ...groups,
-      query.trim() && !entries.length && h('p', { className: 'yj-muted', role: 'status' }, '没有匹配的 AI 入口，换个关键词试试'),
+      query.trim() && !entries.length && h('p', { className: 'ww-muted', role: 'status' }, '没有匹配的 AI 入口，换个关键词试试'),
       active && editor && h(Editor, { key: editor.entry?.id ?? 'new', ...editor, manageAiWeb, notify, onSaved: acceptSaved, onClose: () => setEditor(null) }));
   }
   AiWebView.Toolbar = Toolbar;

@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 import { renderArtifacts } from '../scripts/build.mjs';
-import { loadModelWorldPortraits } from '../src/model-world-portraits.js';
+import { loadModelWorldPortraits, loadLargePortrait, largePortraitChunk, largePortraitChunks } from '../src/model-world-portraits.js';
+import { modelWorldPortraitIds } from '../src/model-world-roster.js';
 import { loadExpertAvatars } from '../src/expert-avatars.js';
 import { parts } from '../features/index.js';
 import { worldAttributions } from '../features/model-world/model-world.js';
@@ -49,11 +50,11 @@ async function loader(transport) {
   return { system, requests, target, sandbox, load: name => ownerRequire.async('./' + name), row };
 }
 
-// 三块浏览器脚本合计上限。2026-10-25 0.1.1 工具台字体裁成常用字子集后重定基线：
+// 三块浏览器脚本合计上限。2026-10-25 0.1.1 办公工坊字体裁成常用字子集后重定基线：
 // 实测 client.js 1,167,699 + client.model-world.js 746,690 + client.toolbox.js 12,651,308 = 14,565,697 字节，加 256 KiB 余量。
 const browserBudget = 14827841;
 test('入口与所有浏览器脚本总量均不超过体积基线，资源完整且入口最后发布', () => {
-  const bytes = Object.entries(artifacts).filter(([name]) => /^client(?:\..+)?\.js$/.test(name)).map(([name, text]) => ({ name, bytes: Buffer.byteLength(text) }));
+  const bytes = Object.entries(artifacts).filter(([name]) => /^client(?:\..+)?\.js$/.test(name) && !largePortraitChunks.includes(name)).map(([name, text]) => ({ name, bytes: Buffer.byteLength(text) }));
   assert.deepEqual(bytes.map(item => item.name).sort(), ['client.js', 'client.model-world.js', 'client.toolbox.js']);
   assert.ok(Buffer.byteLength(artifacts['client.js']) <= browserBudget);
   assert.ok(bytes.reduce((total, item) => total + item.bytes, 0) <= browserBudget, JSON.stringify(bytes));
@@ -62,6 +63,29 @@ test('入口与所有浏览器脚本总量均不超过体积基线，资源完�
   for (const data of Object.values(loadExpertAvatars())) assert.ok(artifacts['client.js'].includes(data));
   assert.ok(artifacts['client.toolbox.js'].startsWith(`/*!\n${utilityNotice}\n*/\n`), '完整批准许可随实际Worker分发');
   assert.ok(!artifacts['client.js'].includes(utilityNotice));
+});
+
+// 2026-10-27 立绘查看大图：19 张 4K 原图各一个按需分块，只在员工点开那一张时下载，不计入上面三块常驻脚本的基线。
+// 实测单块最大 1,085,118 字节、合计 16,053,865 字节（约 15.3 MiB）。
+test('立绘大图每张一个分块，只含自己那张并带许可声明，单块和合计体积有界', () => {
+  assert.deepEqual(Object.keys(artifacts).filter(name => name.startsWith('client.portrait-')).sort(), [...largePortraitChunks].sort());
+  let total = 0;
+  for (const id of modelWorldPortraitIds) {
+    const source = artifacts[largePortraitChunk(id)], data = loadLargePortrait(id), size = Buffer.byteLength(source);
+    assert.ok(source.startsWith('/*! 立绘 © 鲸翼 WhaleWing，依 CC BY-NC-SA 4.0 授权'), id);
+    assert.ok(source.includes(JSON.stringify(data)), id);
+    for (const other of ['client.js', 'client.model-world.js', 'client.toolbox.js']) assert.ok(!artifacts[other].includes(data), `${id} 不进 ${other}`);
+    assert.ok(size <= 1.1 * 1024 * 1024, `${id} ${size}`); total += size;
+  }
+  assert.ok(total <= 16.5 * 1024 * 1024, String(total));
+});
+
+test('真实原生loader按需取得立绘大图分块，得到那张立绘的数据地址', async () => {
+  const f = await loader();
+  const chunk = await f.load('client.portrait-openai.js');
+  assert.equal(chunk.source, loadLargePortrait('openai'));
+  assert.match(f.requests.at(-1), /client\.portrait-openai\.js\?rev=first$/);
+  assert.equal(await f.load('client.portrait-openai.js'), chunk, '同一张只下载一次');
 });
 
 test('真实原生loader仅按需下载，同flight合并，工厂同步且成功缓存复用', async () => {
@@ -106,7 +130,17 @@ test('真实原生loader丢弃旧代在途结果，按新revision重新取得分
   assert.match(f.requests.at(-1), /rev=second$/);
 });
 
-for (const [id, label, method] of [['toolbox', '工具台', 'createViews'], ['model-world', '模型世界', 'createView']]) {
+test('模型世界把立绘编号换成对应的大图分块，格式不对的编号不发请求', async t => {
+  const calls = []; let options, f;
+  f = await fixture({ loadChunk: async name => { calls.push(name); return name === './client.model-world.js' ? { createView: (React, value) => { options = value; return () => React.createElement('span', null, '分块已显示'); } } : { source: `data:${name}` }; } });
+  t.after(() => f.unmount());
+  await button(f, '模型世界').props.onClick(); await tick(f);
+  assert.equal(await options.loadLarge('deepseek-flash'), 'data:./client.portrait-deepseek-flash.js');
+  await assert.rejects(options.loadLarge('../client'), /立绘编号无效/);
+  assert.deepEqual(calls, ['./client.model-world.js', './client.portrait-deepseek-flash.js']);
+});
+
+for (const [id, label, method] of [['toolbox', '办公工坊', 'createViews'], ['model-world', '模型世界', 'createView']]) {
   const module = (React, mounted) => {
     const ChunkProbeView = props => { mounted.push(props); return React.createElement('span', null, '分块已显示'); };
     return { [method]: () => method === 'createViews' ? { ToolboxView: ChunkProbeView } : ChunkProbeView };
@@ -157,9 +191,9 @@ for (const mode of ['源码', '生成物']) test(`${mode}相同编译产物的�
   const a = await instance('甲'), b = await instance('乙');
   for (const key of ['plugin', 'react', 'ctx', 'browser', 'document', 'timers', 'storage', 'disposed']) assert.notEqual(a.f[key], b.f[key], key);
   a.f.storage.set('隔离', '甲'); assert.equal(b.f.storage.has('隔离'), false);
-  await button(a.f, '工具台').props.onClick(); await tick(a.f);
+  await button(a.f, '办公工坊').props.onClick(); await tick(a.f);
   assert.equal(a.pending.length, 1); assert.equal(b.pending.length, 0);
-  await button(b.f, '工具台').props.onClick(); await tick(b.f);
+  await button(b.f, '办公工坊').props.onClick(); await tick(b.f);
   button(a.f, '停止等待').props.onClick(); await tick(a.f);
   a.resolve(0); await tick(a.f); assert.equal(a.mounted.length, 0);
   assert.equal(b.pending.length, 1); assert.equal(b.mounted.length, 0);
@@ -177,16 +211,16 @@ for (const mode of ['源码', '生成物']) test(`${mode}相同编译产物的�
 });
 
 // 真实产物走同一工作台fixture，不用假视图掩盖分块导出或参数接线错误。
-test('真实生成主入口与两个分块展示工具和模型页，默认加载不取得重资源', async t => {
+test('真实生成主入口与两个分块展示办公工坊和模型页，默认加载不取得重资源', async t => {
   const f = await fixture({ clientSource: artifacts['client.js'], chunkSources: artifacts,
     world: async input => ({ ok: true, value: { action: input.action, available: false, refreshing: false,
       acceptedAt: null, generatedAt: null, sources: {}, modelCount: 0, vendors: [], leagues: [],
       lastRefresh: null, attributions: structuredClone(worldAttributions), index: { source: 'bundled', asOf: '2026-10-21', version: '4.3', key: 'none', error: null }, models: [], total: 0, offset: 0, limit: 12, unknownDates: 0 } }) });
   t.after(() => f.unmount());
   assert.equal(f.calls.filter(([kind]) => kind === 'world').length, 0);
-  await button(f, '工具台').props.onClick();
+  await button(f, '办公工坊').props.onClick();
   for (let i = 0; i < 3; i++) await tick(f);
-  assert.ok(nodes(f.render()).some(node => node.type === 'input' && node.props['aria-label'] === '搜索工具'));
+  assert.ok(nodes(f.render()).some(node => node.type === 'input' && node.props['aria-label'] === '搜索功能项'));
   await button(f, '模型世界').props.onClick();
   for (let i = 0; i < 3; i++) await tick(f);
   assert.deepEqual(f.calls.filter(([kind]) => kind === 'world'), [['world', { action: 'list', limit: 12, offset: 0 }]]);

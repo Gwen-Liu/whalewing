@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "noticeSha256": "0a8d0a51b2ef8330e1058b460038367f9596884cd8fed20106b4d1be41a0e2bd",
+  "noticeSha256": "2f9c9a372b338e300e343043c076167ac4d64c00923a1e03a638958a14081a6e",
   "packages": [
     {
       "name": "exceljs",

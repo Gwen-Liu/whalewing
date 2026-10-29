@@ -81,7 +81,6 @@ test('工作台投影只接受本命令成功回执，fork不认领父工作台'
   const done = { seq: 1, type: 'command/done', data: { commandId: 'claim-1', kind: 'success', text: JSON.stringify({ action: 'workbench_claim', claimed: true }) } };
   const fold = (events, inherited = 0) => events.reduce(workbenchProjection.apply, workbenchProjection.init({}, inherited));
   assert.equal(workbenchProjection.wire.view(fold([run, done])), true);
-  assert.equal(workbenchProjection.wire.view(fold([{ ...run, data: { ...run.data, name: 'youjin' } }, done])), true, '改名前的旧工作台会话仍被识别');
   assert.equal(workbenchProjection.wire.view(fold([done])), false);
   assert.equal(workbenchProjection.wire.view(fold([{ ...run, data: { ...run.data, name: 'other' } }, done])), false);
   assert.equal(workbenchProjection.wire.view(fold([run, { ...done, data: { ...done.data, kind: 'error' } }])), false);

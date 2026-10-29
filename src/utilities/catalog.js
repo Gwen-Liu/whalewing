@@ -1,4 +1,4 @@
-/** 工具台目录：按办公场景分成几个工具，每个工具里有多项功能（参考 WPS 等办公套件的组织方式）。 */
+/** 办公工坊目录：按办公场景分成几个分类，每个分类里有多个功能项（参考 WPS 等办公套件的组织方式）。 */
 const images = '.png,.jpg,.jpeg,.jfif,.webp,.avif,.gif,.bmp,.ico';
 const media = '.mp4,.mov,.m4v,.webm,.mkv,.avi,.mp3,.m4a,.aac,.wav,.flac,.ogg,.opus';
 const fn = (id, title, brief, accept, extra = {}) => ({ id, title, brief, accept, ...extra });
@@ -9,13 +9,13 @@ export const utilityTools = Object.freeze([
     fn('pdf-word', 'PDF 转 Word', '文字型 PDF 转成可编辑文档', '.pdf', { description: '按页重建可编辑的文字，不恢复原排版、图片和表格。扫描件（图片 PDF）无法转换。' }),
     fn('images-pdf', '图片转 PDF', '多张截图、照片按顺序合成 PDF', images, { multiple: true }),
     fn('pdf-images', 'PDF 转图片', '每页导出为 PNG', '.pdf'),
-    fn('image-format', '图片转格式', 'PNG、JPG、WebP、AVIF、GIF 等互转', images, { multiple: true, action: 'image', mode: 'convert', keywords: 'png jpg jpeg jfif webp avif gif bmp ico 图片格式 照片 图标 favicon', description: '读取 PNG、JPEG（含 .jfif）、WebP、AVIF、GIF、BMP、ICO，输出 PNG、JPEG、WebP 或 ICO 图标；默认保持原尺寸。与“图片处理 → 压缩与转格式”是同一功能。' }),
+    fn('image-format', '图片转格式', 'PNG、JPG、WebP、AVIF、GIF 等互转', images, { multiple: true, action: 'image', mode: 'convert', keywords: 'png jpg jpeg jfif webp avif gif bmp ico 图片格式 照片 图标 favicon', description: '读取 PNG、JPEG（含 .jfif）、WebP、AVIF、GIF、BMP、ICO，输出 PNG、JPEG、WebP 或 ICO 图标；默认保持原尺寸。与“图片处理 → 压缩与转格式”是同一功能项。' }),
     fn('table-convert', 'Excel / CSV 互转', '导入模板与文本数据互换', '.xlsx,.csv'),
     fn('excel-json', 'Excel 转 JSON', '为接口联调生成数据', '.xlsx', { sheet: true }),
     fn('word-text', 'Word 转 TXT', '导出段落和表格中的文字', '.docx'),
     fn('media', '提取文档图片', '取出 Word、Excel、PPT 里的原始图片', '.docx,.xlsx,.pptx'),
   ] },
-  { id: 'pdf', title: 'PDF 工具', brief: '合并拆分、压缩、整理页面、页码水印', icon: 'pdf', color: '#dc2626', functions: [
+  { id: 'pdf', title: 'PDF 处理', brief: '合并拆分、压缩、整理页面、页码水印', icon: 'pdf', color: '#dc2626', functions: [
     fn('pdf-merge', '合并 PDF', '按选择顺序合并多个文件', '.pdf', { multiple: true }),
     fn('pdf-split', '拆分 PDF', '每页单独保存', '.pdf'),
     fn('pdf-compress', '压缩 PDF', '缩小扫描件和图片多的 PDF', '.pdf', { keywords: 'pdf压缩 压缩pdf 减小 变小 体积 文件太大', description: '只重新处理 PDF 里的图片：按档位降低分辨率和 JPEG 质量，文字、矢量和页面不变。以文字和字体为主的 PDF 基本压不动，压后没有变小时不生成新文件。' }),
@@ -64,12 +64,12 @@ export const utilityTools = Object.freeze([
   ] },
 ].map(tool => Object.freeze({ ...tool, functions: Object.freeze(tool.functions.map(item => Object.freeze({ ...item, tool: tool.id, group: tool.title }))) })));
 
-/** 扁平功能列表：工具内的每项功能都有唯一 id；action 存在时与另一项共用同一处理实现。 */
+/** 扁平功能项列表：分类内的每个功能项都有唯一 id；action 存在时与另一项共用同一处理实现。 */
 export const utilityCatalog = Object.freeze(utilityTools.flatMap(tool => tool.functions));
 
 /** 尚未内置的常见需求：搜到时明确说明，不把搜索结果当成能力承诺。 */
 export const utilityGaps = Object.freeze([
-  { words: ['heic', 'heif'], text: 'HEIC / HEIF 照片：当前客户端不能本地解码，请先在手机或相册里导出为 JPEG 再转换' },
+  { words: ['heic', 'heif'], text: 'HEIC / HEIF 照片：当前客户端不能本地解码，请先在手机或相册里导出为 JPEG 或 PNG 再转换' },
   { words: ['tif', 'tiff'], text: 'TIFF 图片尚未内置转换' },
   { words: ['svg'], text: 'SVG 转位图尚未内置；“生成二维码”可以直接输出 SVG' },
   { words: ['ocr', '文字识别', '识别文字', '提字', '扫描件'], text: 'OCR 文字识别（图片、扫描件提取文字）尚未内置' },
@@ -81,16 +81,28 @@ export const utilityGaps = Object.freeze([
 const tokenPattern = /[a-z0-9+#]+|[^\sa-z0-9+#.]+/g;
 const normalize = value => value.toLowerCase().replace(/[，。、,;；:：/／|·()（）“”"']/g, ' ');
 const searchText = item => normalize([item.title, item.keywords].filter(Boolean).join(' '));
-/** 每个功能可被搜索的文字：工具名、标题、简介、别名和支持的扩展名；详细说明里的限制性文字不参与，避免误中。 */
+/** 每个功能项可被搜索的文字：分类名、标题、简介、别名和支持的扩展名；详细说明里的限制性文字不参与，避免误中。 */
 const haystacks = new Map(utilityCatalog.map(item => [item.id, normalize([item.group, item.title, item.brief, item.keywords, (item.accept || '').replace(/[.,]/g, ' '), /jpe?g/.test(item.accept || '') ? 'jpg jpeg' : ''].filter(Boolean).join(' '))]));
 
-/** 词序无关、大小写无关：查询里每个词都在功能文字中出现才算命中；标题或别名直接命中的排在前面，其余按目录顺序。 */
+/**
+ * 词序无关、大小写无关：查询里每个词都在功能项文字中出现才算命中。标题或别名直接命中的排最前，其次是分类名命中的，其余按目录顺序。
+ * “工具”是员工找分类的习惯说法（“PDF 工具”“图片工具”），不当作搜索词：去掉后改为分类名命中的排最前，PDF 处理的功能项排在格式转换前面；只搜“工具”时列出全部。
+ */
 export function searchUtilities(query) {
-  const tokens = normalize(String(query || '')).match(tokenPattern) || [];
-  if (!tokens.length) return [];
+  const text = String(query || ''), tokens = normalize(text.replace(/工具/g, ' ')).match(tokenPattern) || [];
+  if (!tokens.length) return /工具/.test(text) ? utilityTools.flatMap(tool => tool.functions.map(item => ({ tool, item }))) : [];
   const hits = utilityTools.flatMap(tool => tool.functions.filter(item => tokens.every(token => haystacks.get(item.id).includes(token))).map(item => ({ tool, item })));
-  const direct = hit => tokens.every(token => searchText(hit.item).includes(token)) ? 0 : 1;
-  return hits.map((hit, order) => ({ hit, order, rank: direct(hit) })).sort((a, b) => a.rank - b.rank || a.order - b.order).map(entry => entry.hit);
+  const direct = hit => tokens.every(token => searchText(hit.item).includes(token)), inGroup = hit => tokens.every(token => normalize(hit.item.group).includes(token));
+  const rank = /工具/.test(text) ? hit => inGroup(hit) ? 0 : direct(hit) ? 1 : 2 : hit => direct(hit) ? 0 : inGroup(hit) ? 1 : 2;
+  return hits.map((hit, order) => ({ hit, order, rank: rank(hit) })).sort((a, b) => a.rank - b.rank || a.order - b.order).map(entry => entry.hit);
+}
+
+/** 常见但暂不支持的图片格式（按扩展名）：选文件时就提示，处理时用同一句话说明失败原因；其余返回空字符串。 */
+export function unsupportedImageReason(name) {
+  const extension = /\.([^.]+)$/.exec(String(name || ''))?.[1].toLowerCase();
+  if (extension === 'heic' || extension === 'heif') return 'HEIC / HEIF 照片暂不支持，当前客户端不能本地解码，请先在手机或相册里导出为 JPEG 或 PNG 再来处理';
+  if (['tif', 'tiff', 'svg'].includes(extension)) return `${extension.toUpperCase()} 图片尚不支持，请先导出为 JPEG 或 PNG 再来处理`;
+  return '';
 }
 
 /** 查询提到尚未内置的能力时返回说明。 */

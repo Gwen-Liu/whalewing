@@ -1,11 +1,26 @@
-/** 输入、存储与客户端读回共享入口字段和 URL 校验。 */
+/**
+ * 网址哪里不合格，写成员工看得懂的一句话；合格返回空串。
+ * 空网址由“请填写网址”那条说明，这里不重复报。
+ */
+function urlProblem(value) {
+  if (!value) return '';
+  if (/[\u0000- \u007f]/u.test(value)) return '网址里不能有空格或换行';
+  let parsed;
+  try { parsed = new URL(value); } catch { return '网址不完整，请填写以 http:// 或 https:// 开头的完整网址'; }
+  if (!['https:', 'http:'].includes(parsed.protocol)) return '网址只能以 http:// 或 https:// 开头';
+  if (parsed.username || parsed.password) return '网址里不能带账号密码，请去掉其中的“账号:密码@”';
+  if (!parsed.hostname) return '网址不完整，请填写以 http:// 或 https:// 开头的完整网址';
+  return '';
+}
+
+/** 输入、存储与客户端读回共享入口字段和 URL 校验。员工会看到的校验说明都写成中文的具体原因。 */
 export function aiWebContract(z) {
   const text = z.string(), id = text.regex(/^(?:[a-z][a-z0-9-]{0,79})$/);
-  const url = text.trim().min(1).max(2048).refine(value => {
-    try { const parsed = new URL(value); return ['https:', 'http:'].includes(parsed.protocol) && !!parsed.hostname && !parsed.username && !parsed.password && !/[\u0000-\u0020\u007f]/u.test(value); }
-    catch { return false; }
-  }, '网址须为不含账号密码的完整 HTTP 或 HTTPS 地址').transform(value => new URL(value).href);
-  const fields = z.strictObject({ name: text.trim().min(1).max(80), url, description: text.trim().max(400).default(''), avatar: text.max(700000).nullable().default(null) });
+  const url = text.trim().min(1, '请填写网址').max(2048, '网址太长，不能超过 2048 个字符').superRefine((value, ctx) => {
+    const problem = urlProblem(value);
+    if (problem) ctx.addIssue({ code: 'custom', message: problem });
+  }).transform(value => new URL(value).href);
+  const fields = z.strictObject({ name: text.trim().min(1, '请填写名字').max(80, '名字不能超过 80 个字'), url, description: text.trim().max(400, '描述不能超过 400 个字').default(''), avatar: text.max(700000).nullable().default(null) });
   const revision = z.number().int().nonnegative();
   const entry = fields.extend({ id, revision, builtin: z.boolean(), provider: text.max(100), keywords: text.max(400) });
   const input = z.discriminatedUnion('action', [z.strictObject({ action: z.literal('list') }),

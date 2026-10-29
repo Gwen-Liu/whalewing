@@ -14,7 +14,7 @@ export function registerEntries(ctx, kit, api) {
     // 子会话先恢复宿主保存的草稿，再允许讨论入口合入文字；不读取或重建宿主草稿。
     useEffect(() => api.mountAssistantInput(sessionId), [api, sessionId]);
     // 空白原生会话还没有 viewArea；常驻占位保证首条消息前输入框也停靠底部。
-    return h('div', { className: 'yj-assistant-chat' }, renderSlot('conversation.session', { view: 'chat' }));
+    return h('div', { className: 'ww-assistant-chat' }, renderSlot('conversation.session', { view: 'chat' }));
   }
 
       function AssistantViews(props) { return h(AssistantChat, { ...props, api }); }

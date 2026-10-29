@@ -3,6 +3,7 @@ import ExcelJS from 'exceljs';
 import { Document, Packer, Paragraph, Table, TableRow, TableCell, TextRun } from 'docx';
 import { Inflate, zipSync } from 'fflate';
 import { DOMParser } from '@xmldom/xmldom';
+import { unsupportedImageReason } from './catalog.js';
 
 export const LIMITS = Object.freeze({ file: 25 * 1024 ** 2, input: 100 * 1024 ** 2, output: 100 * 1024 ** 2, entry: 25 * 1024 ** 2, unpacked: 100 * 1024 ** 2, entries: 2000, cells: 100000, wordCells: 20000, pixels: 32000000, text: 2 * 1024 ** 2, images: 20 });
 const encoder = new TextEncoder();
@@ -14,22 +15,44 @@ const C = 'http://schemas.openxmlformats.org/package/2006/content-types';
 const types = { docx: ['word/document.xml', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml'], xlsx: ['xl/workbook.xml', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml'], pptx: ['ppt/presentation.xml', 'application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml'] };
 const fail = message => { throw new Error(message); };
 
-/** 在读取 File 前检查员工选件的数量、扩展名和字节预算。 */
-export function validateFiles(files, kind) {
+const allowedExtensions = { image: ['png', 'jpg', 'jpeg', 'jfif', 'webp', 'avif', 'gif', 'bmp', 'ico'], 'word-excel': ['docx'], 'excel-word': ['xlsx'], 'excel-sheets': ['xlsx'], 'excel-csv': ['xlsx'], 'excel-json': ['xlsx'], 'csv-excel': ['csv'], media: ['docx', 'xlsx', 'pptx'], text: ['txt', 'csv', 'json'], zip: [], hash: [] };
+/** 整批的检查：文件个数、功能项是否已知、每项是不是带名字和大小的文件。 */
+function checkSelection(files, kind) {
   if (!Array.isArray(files) || !files.length || files.length > (['image', 'zip'].includes(kind) ? LIMITS.images : 1)) fail(['image', 'zip'].includes(kind) ? '请选择 1–20 个文件' : '请选择一个文件');
-  const allowed = { image: ['png', 'jpg', 'jpeg', 'jfif', 'webp', 'avif', 'gif', 'bmp', 'ico'], 'word-excel': ['docx'], 'excel-word': ['xlsx'], 'excel-sheets': ['xlsx'], 'excel-csv': ['xlsx'], 'excel-json': ['xlsx'], 'csv-excel': ['csv'], media: ['docx', 'xlsx', 'pptx'], text: ['txt', 'csv', 'json'], zip: [], hash: [] }[kind];
-  if (!allowed) fail('未知工具');
+  const allowed = allowedExtensions[kind];
+  if (!allowed) fail('未知功能项');
+  if (files.some(file => !file || typeof file.name !== 'string' || !Number.isSafeInteger(file.size))) fail('所选文件信息无效，请重新选择');
+  return allowed;
+}
+/** 单个文件不合格的原因（大小、格式），合格时返回空字符串。 */
+function fileProblem(file, kind, allowed) {
+  if (kind === 'text' && (file.size < 1 || file.size > LIMITS.text)) return '文本文件须为 2 MiB 以内的非空文件';
+  if (file.size > LIMITS.file) return '超过单个文件 25 MiB 的上限';
+  if (file.size < (['zip', 'hash'].includes(kind) ? 0 : 1)) return '文件是空的';
+  // 常见但尚未支持的图片格式给出可操作的说明，而不是笼统的扩展名错误。
+  if (kind === 'image' && unsupportedImageReason(file.name)) return unsupportedImageReason(file.name);
+  if (allowed.length && !allowed.includes(file.name.split('.').pop().toLowerCase())) return '文件扩展名与功能项要求不符';
+  return '';
+}
+
+/** 在读取 File 前检查员工选件的数量、扩展名和字节预算；任何一个文件不合格都整体停止。 */
+export function validateFiles(files, kind) {
+  const allowed = checkSelection(files, kind);
   let size = 0;
   for (const file of files) {
-    if (!file || typeof file.name !== 'string' || !Number.isSafeInteger(file.size) || file.size < (['zip', 'hash'].includes(kind) ? 0 : 1) || file.size > (kind === 'text' ? LIMITS.text : LIMITS.file)) fail(kind === 'text' ? '文本文件须为 2 MiB 以内的非空文件' : '每个文件须在 25 MiB 以内，Office 与图片文件应非空');
-    const extension = file.name.split('.').pop().toLowerCase();
-    // 常见但尚未支持的图片格式给出可操作的说明，而不是笼统的扩展名错误。
-    if (kind === 'image' && ['heic', 'heif'].includes(extension)) fail('HEIC / HEIF 照片暂不支持：当前客户端不能本地解码，请先在手机或相册里导出为 JPEG');
-    if (kind === 'image' && ['tif', 'tiff', 'svg'].includes(extension)) fail(`${extension.toUpperCase()} 图片尚不支持，请先导出为 PNG 或 JPEG`);
-    if (allowed.length && !allowed.includes(extension)) fail('文件扩展名与工具要求不符');
+    const problem = fileProblem(file, kind, allowed);
+    if (problem) fail(problem);
     size += file.size;
   }
   if (size > LIMITS.input) fail('总输入超过 100 MiB');
+}
+
+/** 批量处理用：个数和总输入整批检查；单个文件不合格只返回它的原因（按选件顺序），由调用方记入明细、其余照常处理。不合格的文件不读取，也不计入总输入。 */
+export function screenFiles(files, kind) {
+  const allowed = checkSelection(files, kind);
+  const problems = files.map(file => fileProblem(file, kind, allowed));
+  if (files.reduce((size, file, index) => problems[index] ? size : size + file.size, 0) > LIMITS.input) fail('总输入超过 100 MiB');
+  return problems;
 }
 
 /** 严格 UTF-8；错误编码不以替换字符写入下载产物。 */
@@ -515,7 +538,7 @@ export async function convertSpreadsheet(bytes, name, mode, sheetName) {
   result.files[0].mime = 'text/csv;charset=utf-8'; return result;
 }
 
-/** 明确输入与操作的小工具；只返回可下载文本，所有转换均不执行内容。 */
+/** 文字处理和二维码这类明确输入与操作的功能项；只返回可下载文本，所有转换均不执行内容。 */
 export function smallTextTool(tool, text, options = {}) {
   if (typeof text !== 'string' || encoder.encode(text).length > LIMITS.text) fail('文本输入超过 2 MiB');
   let result, summary;
@@ -564,7 +587,7 @@ export function smallTextTool(tool, text, options = {}) {
     if (!Number.isInteger(options.count) || options.count < 1 || options.count > 1000) fail('UUID 数量须为 1–1,000');
     if (typeof globalThis.crypto?.randomUUID !== 'function') fail('当前环境缺少安全 UUID 生成能力');
     result = Array.from({ length: options.count }, () => crypto.randomUUID()).join('\n'); summary = `已生成 ${options.count} 个 UUID v4`;
-  } else fail('未知文本工具');
+  } else fail('未知文字功能项');
   return textOutput(result, `${tool}-结果.txt`, summary);
 }
 
@@ -580,7 +603,7 @@ export async function fileTool(tool, files, options = {}) {
     const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(value => value.toString(16).padStart(2, '0')).join('');
     return textOutput(`${hash}  ${files[0].name}\n`, 'SHA256.txt', expected ? hash === expected ? '摘要一致；不代表文件来源可信' : '摘要不一致' : '已计算 SHA-256；摘要不证明来源可信');
   }
-  if (tool !== 'zip') fail('未知文件工具');
+  if (tool !== 'zip') fail('未知文件功能项');
   const entries = Object.create(null), seen = new Set();
   for (const file of files) {
     if (/[\\/:\x00-\x1f]/.test(file.name) || ['.', '..'].includes(file.name) || seen.has(file.name.toLowerCase())) fail('文件名不安全或存在同名文件，请先改名');

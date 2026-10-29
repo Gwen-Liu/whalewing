@@ -17,6 +17,7 @@ import { SkillLibrary } from '../src/skills.js';
 import { SkillFiles } from '../src/skill-files.js';
 import { skillLibraryContract } from '../features/skills/contract.js';
 import { WhalewingSkillProvider } from '../src/skill-provider.js';
+import { explainError } from '../src/shell/presentation-content.js';
 import Whalewing from '../index.js';
 
 const text = (name, body = '读取输入，执行任务并检查结果。') => `---\nname: ${name}\ndescription: 任务需要时执行本方法并核对输入和结果\n---\n${body}\n`;
@@ -181,6 +182,73 @@ test('损坏正文修复与新增共享名称唯一校验，碰撞不覆盖而�
   const repaired = await library.manage({ action: 'update', id: broken.id, expectedHash: broken.hash, content: text('repaired-distinct') });
   assert.equal(repaired.entry.name, 'repaired-distinct');
   assert.equal((await library.catalog()).entries.filter(entry => entry.name === 'collision').length, 1);
+});
+
+/** 期望这次调用被拒，返回拒绝的错误。 */
+const rejection = (promise, label) => promise.then(() => assert.fail(`${label}：不应保存`), error => error);
+
+// SKL-06 界面说明（技能标识只能用英文小写字母、数字、连字符）；需求§技能成长（企业技能包不管叫什么名字都能读写）；决策 2026-10-13（报错说清原因、不显示内部错误码）
+test('新增技能标识不合规时不读不写、说明标识规则；合规标识照常新建，已有的企业技能包目录名不受限', async t => {
+  const { library } = await setup(t);
+  await library.ensureReady();
+  const before = (await fs.readdir(library.root)).sort();
+  for (const id of ['中文技能/SKILL.md', 'has space/SKILL.md', 'UPPER/SKILL.md', 'bad!/SKILL.md', '-lead/SKILL.md', 'double--dash/SKILL.md', `${'a'.repeat(81)}/SKILL.md`, '中文.md', 'a/b/SKILL.md']) {
+    const error = await rejection(library.manage({ action: 'create', id, content: text('legal-name'), expectedHash: '' }), id);
+    assert.equal(error.code, 'SKILL_NAME', id);
+    const shown = explainError(error.code, error.message).text;
+    assert.match(shown, /技能标识只能用英文小写字母、数字和连字符/, `${id}：提示说明标识规则，实际是“${shown}”`);
+    assert.doesNotMatch(shown, /[A-Z]{2,}_[A-Z]{2,}/, `${id}：提示不带内部错误码`);
+  }
+  assert.deepEqual((await fs.readdir(library.root)).sort(), before, '技能目录里没有多出目录或文件');
+  assert.equal((await library.manage({ action: 'create', id: 'good-name/SKILL.md', content: text('good-name'), expectedHash: '' })).entry.name, 'good-name');
+  assert.equal((await library.manage({ action: 'create', id: 'flat-name.md', content: text('flat-name'), expectedHash: '' })).entry.name, 'flat-name');
+  await library.files.atomic('企业 技能包/SKILL.md', text('company-pack'));
+  const company = (await library.manage({ action: 'read', id: '企业 技能包/SKILL.md' })).entry;
+  assert.equal(company.name, 'company-pack');
+  const edited = (await library.manage({ action: 'update', id: company.id, expectedHash: company.hash, content: text('company-pack', '改过的做法') })).entry;
+  assert.match(edited.content, /改过的做法/);
+});
+
+// SKL-07 需求§技能成长（技能需要名称、说明和正文）；决策 2026-10-13（报错说清原因、不写工程用语）
+test('技能内容格式不对时不写入，逐项说清是名称、说明、正文还是属性区的问题，员工看到的提示不带错误码', async t => {
+  const { library } = await setup(t);
+  for (const [label, content, reason] of [
+    ['名称有大写和空格', text('Bad Name'), /名称（name）只能用英文小写字母、数字和连字符/],
+    ['没有属性区', '# 做法\n读取输入。\n', /开头要有属性区/],
+    ['缺名称', '---\ndescription: 任务需要时执行本方法\n---\n读取输入。\n', /缺少名称/],
+    ['缺说明', '---\nname: no-description\n---\n读取输入。\n', /缺少说明/],
+    ['正文为空', '---\nname: no-body\ndescription: 任务需要时执行本方法\n---\n\n', /缺少正文/],
+  ]) {
+    const error = await rejection(library.manage({ action: 'create', id: 'format-check/SKILL.md', content, expectedHash: '' }), label);
+    assert.equal(error.code, 'SKILL_FORMAT', label);
+    const shown = explainError(error.code, error.message).text;
+    assert.match(shown, reason, `${label}：实际是“${shown}”`);
+    assert.doesNotMatch(shown, /[A-Z]{2,}_[A-Z]{2,}/, `${label}：提示不带内部错误码`);
+    assert.equal(await library.files.read('format-check/SKILL.md'), null, `${label}：没有写入`);
+  }
+  assert.equal((await library.manage({ action: 'create', id: 'format-check/SKILL.md', content: text('format-check'), expectedHash: '' })).entry.name, 'format-check', '改好后能保存');
+});
+
+// 决策 2026-10-13（报错说清原因、不显示内部错误码）：技能列表和详情里“待处理”直接显示 issue，不经过报错翻译
+test('技能列表里的待处理诊断只留中文原句，不夹“错误码: ”', async t => {
+  const { library } = await setup(t); await library.ensureReady();
+  const issues = async () => Object.fromEntries((await library.catalog()).entries.filter(entry => entry.issue).map(entry => [entry.id, entry.issue]));
+  library.dependencies.projectSkills = async () => ({ candidates: [], complete: true });
+  await library.files.atomic('good.md', text('good'));
+  await library.files.atomic('broken.md', '缺少属性区');
+  await fs.writeFile(await library.files.resolve('invalid.md'), Buffer.from([0xff, 0xfe]));
+  const first = await issues();
+  assert.deepEqual(first, {
+    'broken.md': '技能内容开头要有属性区：用两行 --- 包住，里面写 name 和 description',
+    'good.md': '用户技能候选读取暂停：技能不是有效 UTF-8，原件保留',
+    'invalid.md': '技能不是有效 UTF-8，原件保留',
+  });
+  assert.equal((await library.manage({ action: 'read', id: 'broken.md' })).entry.issue, first['broken.md'], '详情里同一句');
+  await fs.rm(await library.files.resolve('invalid.md'));
+  library.dependencies.projectSkills = async () => { const error = new Error('SKILL_ROOT: 技能目录暂时读不了'); error.code = 'SKILL_ROOT'; throw error; };
+  const second = await issues();
+  assert.equal(second['good.md'], '用户技能候选读取失败：技能目录暂时读不了');
+  for (const issue of [...Object.values(first), ...Object.values(second)]) assert.doesNotMatch(issue, /\b[A-Z][A-Z0-9_]{2,}: /, `不夹错误码：${issue}`);
 });
 
 for (const action of ['remove', 'reset']) test(`${action}最后快照之后新增资源仍随整bundle搬移，不递归删除`, async t => {

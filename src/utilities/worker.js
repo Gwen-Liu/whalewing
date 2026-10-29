@@ -29,7 +29,7 @@ export async function runUtility(request, progress) {
   if (tool === 'excel-word') return excelToWord(bytes, name, options?.sheetName);
   if (tool === 'media') return extractMedia(bytes, name);
   if (['csv-excel', 'excel-csv', 'excel-json'].includes(tool)) return convertSpreadsheet(bytes, name, tool, options?.sheetName);
-  throw new Error('未知工具');
+  throw new Error('未知功能项');
 }
 
 if (typeof self !== 'undefined' && typeof self.postMessage === 'function' && typeof document === 'undefined') {

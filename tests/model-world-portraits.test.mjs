@@ -7,6 +7,7 @@ import sharp from 'sharp';
 import { modelWorldPortraitFiles, loadModelWorldPortraits } from '../src/model-world-portraits.js';
 import { modelWorldVendorIds, modelWorldPortraitIds, portraitIdFor } from '../src/model-world-roster.js';
 import { renderPortrait, portraitSize, cutout } from '../scripts/portraits.mjs';
+import { loadLargePortrait } from '../src/model-world-portraits.js';
 
 const directory = new URL('../content/model-world/portraits/', import.meta.url);
 const originals = new URL('../art/model-world/', import.meta.url);
@@ -65,6 +66,21 @@ test('缩略图可由仓库内原图确定性重建，白底已抠成透明', as
     const corner = await sharp(rebuilt).ensureAlpha().extract({ left: 0, top: 0, width: 1, height: 1 }).raw().toBuffer();
     assert.equal(corner[3], 0, `${id} 左上角应为透明背景`);
   }
+});
+
+// 2026-10-27 用户要求立绘可以点开看大图并保存，清晰度定为 4K 原图：大图就是原图本身，只随按需分块分发，原图文件不直接进安装包。
+test('查看用大图就是 4K 原图：2160×3840、白底、单张有界，不直接进安装包', async () => {
+  const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  for (const id of modelWorldPortraitIds) {
+    const stored = readFileSync(new URL(`${id}.webp`, originals));
+    assert.equal(loadLargePortrait(id), `data:image/webp;base64,${stored.toString('base64')}`, `${id} 原样使用，不重新压缩`);
+    const meta = await sharp(stored).metadata();
+    assert.equal(meta.format, 'webp'); assert.equal(meta.width, 2160, id); assert.equal(meta.height, 3840, id);
+    assert.ok(stored.length < 850 * 1024, `${id} ${stored.length}`);
+    const corner = await sharp(stored).extract({ left: 0, top: 0, width: 1, height: 1 }).raw().toBuffer();
+    assert.ok(Math.min(...corner) > 230, `${id} 左上角保留白底`);
+  }
+  assert.ok(!manifest.files.some(entry => entry === 'art' || entry.startsWith('art/model-world')), '原图和大图都不直接进安装包');
 });
 
 test('抠图只清除与边缘连通的白底，角色内部被线条围住的白色保留', () => {

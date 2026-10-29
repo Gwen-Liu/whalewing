@@ -323,7 +323,7 @@ async function distributionPolicy() {
   const avatars = await readFile(new URL('../tests/expert-avatars.test.mjs', import.meta.url), 'utf8');
   for (const [, file, hash] of avatars.matchAll(/'([a-z0-9-]+.webp)': '([a-f0-9]{64})'/g)) binary.set(`avatars/${file}`, { kind: 'webp', sha256: hash });
   binary.set('utilities/NotoSansSC-Regular.otf', { kind: 'otf', sha256: audit.assets.find(asset => asset.file === 'NotoSansSC-Regular.otf').sha256 });
-  // 学习原件已移到独立书库（不随插件分发），这里只剩工具台许可声明一份逐字节原文。
+  // 学习原件已移到独立书库（不随插件分发），这里只剩办公工坊许可声明一份逐字节原文。
   return { binary, raw: new Map([
     ['utilities/THIRD_PARTY_NOTICES.txt', audit.noticeSha256],
   ]) };

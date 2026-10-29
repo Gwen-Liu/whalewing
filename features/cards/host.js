@@ -57,13 +57,17 @@ export default class Cards extends Service {
 
     ctx.effect(() => () => { this.libraryLifecycle.abort(new Error('书架服务已卸载')); return this.resource.close(); });
   }
-  /** 书架的全部操作；方法名与 action 一一对应。 */
+  /**
+   * 书架的全部操作；方法名与 action 一一对应。
+   * 报错必须带 details（空对象也要带）：DSH 的连接层只认 details 是对象的失败回复，缺了整条回复被当成坏回复，
+   * 员工只看到“插件内部出错（gateway/internal）”，书架写好的原因和办法（如“用 Calibre 转成 EPUB”）就丢了。
+   */
   async manageLibrary(raw, signal) {
     try {
       const { action, ...input } = contract.library.manage.parse(raw);
       signal = AbortSignal.any([this.libraryLifecycle.signal, ...(signal ? [signal] : [])]);
       return contract.library.result.parse(await this.library[action](input, signal));
-    } catch (error) { throw new RemoteError(error.code || error.name || 'ERROR', String(error.message).slice(0, 400)); }
+    } catch (error) { throw new RemoteError(error.code || error.name || 'ERROR', String(error.message).slice(0, 400), {}); }
   }
 
   newsOwner(signal) { return this.resource.get(signal); }

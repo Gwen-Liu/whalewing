@@ -123,15 +123,15 @@ test('补读计划：跳到旧月份后往上滚用 after，其余从最新的�
   assert.equal(featuredIndex('2026-10-24', 6), tipIndex('2026-10-24', 6), '当天首页与首页技巧卡同源');
 });
 
-test('词条中英一致、都以 tips 开头；样式类只用 yj-tips / yj-ruler，深色走 light-dark，减少动态去掉动画', () => {
+test('词条中英一致、都以 tips 开头；样式类只用 ww-tips / ww-ruler，深色走 light-dark，减少动态去掉动画', () => {
   assert.deepEqual(Object.keys(zh).sort(), Object.keys(en).sort());
   for (const key of Object.keys(zh)) assert.match(key, /^tips[A-Z]/, key);
   assert.equal(zh.tipsMonths.split('|').length, 12); assert.equal(en.tipsWeekdays.split('|').length, 7);
-  const classes = new Set([...styles.matchAll(/\.(yj-[a-z0-9-]+)/g)].map(match => match[1]));
-  for (const name of classes) assert.ok(/^yj-(tips|ruler)(-|$)/.test(name) || ['yj-modal', 'yj-page', 'yj-header'].includes(name), name);
+  const classes = new Set([...styles.matchAll(/\.(ww-[a-z0-9-]+)/g)].map(match => match[1]));
+  for (const name of classes) assert.ok(/^ww-(tips|ruler)(-|$)/.test(name) || ['ww-modal', 'ww-page', 'ww-header'].includes(name), name);
   assert.ok(styles.includes('light-dark(#9333ea,#cc9bfd)'));
   assert.ok(styles.includes('@media(prefers-reduced-motion:reduce)'));
-  assert.equal([...styles.matchAll(/(^|})\.yj-modal\.yj-page\[open\]\{/g)].length, 0, '不改共用弹窗的选择器');
+  assert.equal([...styles.matchAll(/(^|})\.ww-modal\.ww-page\[open\]\{/g)].length, 0, '不改共用弹窗的选择器');
 });
 
 // —— 组件：最小 hooks 运行时，直接渲染 TipsPage ——
@@ -221,7 +221,7 @@ function mount(props = {}) {
   const react = runtime(), h = react.React.createElement;
   const Glyph = function Glyph({ name }) { return h('svg', { 'data-glyph': name }); };
   const Modal = function Modal({ title, onClose, className, children }) {
-    return h('dialog', { className: ['yj-modal yj-page', className].filter(Boolean).join(' '), 'aria-label': title }, h('header', { className: 'yj-header' }, h('h2', null, title), h('button', { type: 'button', onClick: onClose, 'aria-label': title }, '×')), children);
+    return h('dialog', { className: ['ww-modal ww-page', className].filter(Boolean).join(' '), 'aria-label': title }, h('header', { className: 'ww-header' }, h('h2', null, title), h('button', { type: 'button', onClick: onClose, 'aria-label': title }, '×')), children);
   };
   const { TipsPage } = createTipsView({ React: react.React, Glyph, Modal });
   const errors = [], links = [], events = [];
@@ -249,18 +249,18 @@ test('进入时先读日期索引和最新 30 期：页头、当天首页、今�
   const tree = await page.settle(), body = text(tree);
   assert.ok(body.includes('每天 08:00 随每日资讯整理 · 共 7 期'));
   assert.equal(page.api.calls.length, 2, '最新 30 期已经覆盖全部，不再多读');
-  const featured = tipIndex('2026-10-24', 6), feature = classed(tree, 'yj-tips-feature')[0];
+  const featured = tipIndex('2026-10-24', 6), feature = classed(tree, 'ww-tips-feature')[0];
   assert.equal(feature.props['data-tip'], `2026-10-24#${featured}`);
   assert.ok(text(feature).includes(`当天首页${String(featured + 1).padStart(2, '0')}`));
-  assert.equal(classed(classed(tree, 'yj-tips-day')[0], 'yj-tips-row').length, 5, '其余 5 条排两列');
+  assert.equal(classed(classed(tree, 'ww-tips-day')[0], 'ww-tips-row').length, 5, '其余 5 条排两列');
   assert.ok(body.includes('24') && body.includes('10 月 · 周六') && body.includes('今天'));
-  assert.ok(text(classed(tree, 'yj-tips-day')[1]).includes('部分来源失败'));
+  assert.ok(text(classed(tree, 'ww-tips-day')[1]).includes('部分来源失败'));
   assert.ok(body.includes('21–22未整理 · 这两天 08:00 时 DSH 没有运行，或整理没有完成'));
   assert.ok(body.includes('当天来源里没有可照着做的技巧'));
   assert.ok(body.includes('1–18未整理 · 这 18 天'));
   assert.ok(body.includes('2026 年 9 月'));
   assert.ok(body.includes('2025 年 12 月 8 日 · 第一期'));
-  assert.equal(classed(tree, 'yj-ruler-arm').length, 1); assert.equal(classed(tree, 'yj-ruler-year').length, 1);
+  assert.equal(classed(tree, 'ww-ruler-arm').length, 1); assert.equal(classed(tree, 'ww-ruler-year').length, 1);
   page.unmount();
 });
 
@@ -272,7 +272,7 @@ test('面包屑回首页、编辑来源；停用时换成“到卡片设置开�
   page.render({ busy: true });
   assert.equal(buttons(page.tree, '编辑来源')[0].props.disabled, true);
   page.render({ busy: false, field: { name: 'AI 使用技巧', enabled: false, deleted: false } });
-  assert.ok(text(classed(page.tree, 'yj-tips-crumbs')[0]).includes('已停用'));
+  assert.ok(text(classed(page.tree, 'ww-tips-crumbs')[0]).includes('已停用'));
   press(buttons(page.tree, '到卡片设置开启')[0]);
   assert.deepEqual(page.events, ['back', 'edit', 'edit']);
   page.render({ field: { name: 'AI 使用技巧', enabled: false, deleted: true } });
@@ -288,7 +288,7 @@ test('一期都没有：隐藏横臂和竖臂，只画今天的空心节点和�
   const page = mount({ api: server({ hooks: { days: () => ({ fieldId: 'ai-tips', first: null, days: [] }), reports: () => ({ reports: [], nextBefore: null }) } }) });
   const tree = await page.settle();
   assert.ok(text(tree).includes('还没有技巧。第一期会在 08:00 随每日资讯整理好，DSH 需要开着。'));
-  assert.equal(classed(tree, 'yj-ruler-arm').length + classed(tree, 'yj-ruler-year').length, 0);
+  assert.equal(classed(tree, 'ww-ruler-arm').length + classed(tree, 'ww-ruler-year').length, 0);
   assert.ok(text(tree).includes('每天 08:00 随每日资讯整理') && !text(tree).includes('共 0 期'));
   page.unmount();
 });
@@ -299,13 +299,13 @@ test('日期索引没读出来：不显示曲尺，按 reports 往下读并在�
   let tree = await page.settle();
   assert.equal(page.errors[0].message, '日期索引没读出来，刻度尺先不显示：索引坏了');
   assert.equal(page.errors[0].action.label, '重试');
-  assert.equal(classed(tree, 'yj-ruler-arm').length, 0);
+  assert.equal(classed(tree, 'ww-ruler-arm').length, 0);
   assert.ok(text(tree).includes('2026-10-24 第 1 条技巧'));
   assert.ok(page.api.calls.some(call => call.before === cutoff('2026-10-20')), '离底部近时用 nextBefore 取更早的');
-  assert.ok(text(classed(tree, 'yj-tips-more')[0]).includes('正在读取更早的技巧'), '还有更早的：底部转圈');
+  assert.ok(text(classed(tree, 'ww-tips-more')[0]).includes('正在读取更早的技巧'), '还有更早的：底部转圈');
   fail = false; page.errors[0].action.run();
   tree = await page.settle();
-  assert.equal(classed(tree, 'yj-ruler-arm').length, 1, '重试后刻度尺出来');
+  assert.equal(classed(tree, 'ww-ruler-arm').length, 1, '重试后刻度尺出来');
   page.unmount();
 });
 
@@ -314,11 +314,11 @@ test('索引和日报都没读出来：时间线中央写原因，“重新读�
   const broken = () => { if (fail) throw new Error('网络断了'); };
   const page = mount({ api: server({ hooks: { days: broken, reports: broken } }) });
   let tree = await page.settle();
-  assert.ok(text(classed(tree, 'yj-tips-error')[0]).includes('技巧历史没读出来：网络断了'));
+  assert.ok(text(classed(tree, 'ww-tips-error')[0]).includes('技巧历史没读出来：网络断了'));
   assert.equal(page.errors.length, 0, '整页说明原因，不再弹提示');
   fail = false; press(buttons(tree, '重新读取')[0]);
   tree = await page.settle();
-  assert.equal(classed(tree, 'yj-tips-error').length, 0);
+  assert.equal(classed(tree, 'ww-tips-error').length, 0);
   assert.ok(text(tree).includes('共 7 期'));
   page.unmount();
 });
@@ -327,13 +327,13 @@ test('没读取的日子按估算高度放骨架，取回后换成正文；某�
   let fail = true;
   const page = mount({ api: server({ page: 1, hooks: { reports: input => { if (input.before && fail) throw new Error('超时'); } } }) });
   let tree = await page.settle();
-  const day23 = classed(tree, 'yj-tips-day')[1];
+  const day23 = classed(tree, 'ww-tips-day')[1];
   assert.ok(text(day23).includes('这一段没读出来'), '失败原位留一行');
   assert.equal(page.errors.at(-1).message, '这一段技巧没读出来：超时');
   assert.deepEqual(page.api.calls.filter(call => call.before).map(call => call.before), [cutoff('2026-10-24')], '失败后不反复请求');
   fail = false; press(buttons(day23, '重新读取')[0]);
   tree = await page.settle();
-  assert.ok(text(classed(tree, 'yj-tips-day')[1]).includes('2026-10-23 第 1 条技巧'));
+  assert.ok(text(classed(tree, 'ww-tips-day')[1]).includes('2026-10-23 第 1 条技巧'));
   assert.ok(page.api.calls.filter(call => call.before).length >= 2);
   page.unmount();
 });
@@ -342,33 +342,33 @@ test('点主卡或任一行打开详情：序号、当天首页、发布时间�
   const page = mount();
   let tree = await page.settle();
   const featured = tipIndex('2026-10-24', 6);
-  press(classed(tree, 'yj-tips-feature')[0]);
+  press(classed(tree, 'ww-tips-feature')[0]);
   tree = page.render();
-  let dialog = classed(tree, 'yj-tips-detail')[0];
+  let dialog = classed(tree, 'ww-tips-detail')[0];
   assert.equal(dialog.props['aria-label'], `2026-10-24 第 ${featured + 1} 条技巧`);
   assert.ok(text(dialog).includes(`AI 使用技巧 · 10 月 24 日 · 第 ${featured + 1} / 6 条`));
   assert.ok(text(dialog).includes('当天首页'));
   assert.ok(text(dialog).includes(`${featured % 2 ? '宝玉' : 'Anthropic 工程博客'} · 10 月 23 日 21:40 发布`), '发布时间按北京时间');
-  assert.ok(text(classed(dialog, 'yj-tips-guide')[0]).includes(`第 ${featured + 1} 条的做法`));
+  assert.ok(text(classed(dialog, 'ww-tips-guide')[0]).includes(`第 ${featured + 1} 条的做法`));
   assert.ok(page.links.includes(`https://www.example.org/2026-10-24/${featured}`));
-  assert.ok(text(classed(dialog, 'yj-tips-origin')[0]).includes(`example.org/2026-10-24/${featured} ↗`));
+  assert.ok(text(classed(dialog, 'ww-tips-origin')[0]).includes(`example.org/2026-10-24/${featured} ↗`));
   // 一路往后翻到 10/23 的第一条。
-  for (let i = featured; i < 6; i++) { press(buttons(classed(page.tree, 'yj-tips-detail')[0], '下一条')[0]); page.render(); }
-  dialog = classed(page.tree, 'yj-tips-detail')[0];
+  for (let i = featured; i < 6; i++) { press(buttons(classed(page.tree, 'ww-tips-detail')[0], '下一条')[0]); page.render(); }
+  dialog = classed(page.tree, 'ww-tips-detail')[0];
   assert.ok(text(dialog).includes('10 月 23 日 · 第 1 / 4 条'));
-  press(buttons(dialog, '上一条')[0]); dialog = classed(page.render(), 'yj-tips-detail')[0];
+  press(buttons(dialog, '上一条')[0]); dialog = classed(page.render(), 'ww-tips-detail')[0];
   assert.ok(text(dialog).includes('10 月 24 日 · 第 6 / 6 条'));
   // 第一条往前到头置灰；关闭后弹窗消失。
-  for (let i = 0; i < 5; i++) { press(buttons(classed(page.tree, 'yj-tips-detail')[0], '上一条')[0]); page.render(); }
-  dialog = classed(page.tree, 'yj-tips-detail')[0];
+  for (let i = 0; i < 5; i++) { press(buttons(classed(page.tree, 'ww-tips-detail')[0], '上一条')[0]); page.render(); }
+  dialog = classed(page.tree, 'ww-tips-detail')[0];
   assert.ok(text(dialog).includes('第 1 / 6 条'));
   assert.equal(buttons(dialog, '上一条')[0].props.disabled, true);
   press(all(dialog, node => node.type === 'button' && text(node) === '×')[0]);
-  assert.equal(classed(page.render(), 'yj-tips-detail').length, 0);
+  assert.equal(classed(page.render(), 'ww-tips-detail').length, 0);
   // 行也能打开；最早一期最后一条的“下一条”置灰。先用键盘 End 把时间线带到最早一期。
   key(all(page.tree, node => node.props?.role === 'slider')[0], 'End'); page.render();
-  press(classed(page.tree, 'yj-tips-row').find(row => row.props['data-tip'] === '2025-12-08#1') ?? classed(page.tree, 'yj-tips-feature').find(card => card.props['data-tip'] === '2025-12-08#1'));
-  dialog = classed(page.render(), 'yj-tips-detail')[0];
+  press(classed(page.tree, 'ww-tips-row').find(row => row.props['data-tip'] === '2025-12-08#1') ?? classed(page.tree, 'ww-tips-feature').find(card => card.props['data-tip'] === '2025-12-08#1'));
+  dialog = classed(page.render(), 'ww-tips-detail')[0];
   assert.ok(text(dialog).includes('12 月 8 日 · 第 2 / 2 条'));
   assert.equal(buttons(dialog, '下一条')[0].props.disabled, true);
   page.unmount();
@@ -379,17 +379,17 @@ test('详情切到还没读取的日期：先用 before 取再切；读取失败
   const page = mount({ api: server({ page: 1, hooks: { reports: input => { if (input.before && (auto || fail)) { auto = false; throw new Error('超时'); } } } }) });
   let tree = await page.settle();
   const featured = tipIndex('2026-10-24', 6);
-  press(classed(tree, 'yj-tips-feature')[0]); page.render();
-  for (let i = featured; i < 5; i++) { press(buttons(classed(page.tree, 'yj-tips-detail')[0], '下一条')[0]); page.render(); }
+  press(classed(tree, 'ww-tips-feature')[0]); page.render();
+  for (let i = featured; i < 5; i++) { press(buttons(classed(page.tree, 'ww-tips-detail')[0], '下一条')[0]); page.render(); }
   fail = true;
-  press(buttons(classed(page.tree, 'yj-tips-detail')[0], '下一条')[0]);
-  assert.equal(all(classed(page.render(), 'yj-tips-detail')[0], node => node.props?.['aria-busy'] === true).length, 1, '按钮上显示小转圈');
+  press(buttons(classed(page.tree, 'ww-tips-detail')[0], '下一条')[0]);
+  assert.equal(all(classed(page.render(), 'ww-tips-detail')[0], node => node.props?.['aria-busy'] === true).length, 1, '按钮上显示小转圈');
   tree = await page.settle();
-  assert.ok(text(classed(tree, 'yj-tips-detail')[0]).includes('第 6 / 6 条'), '失败停在当前条');
+  assert.ok(text(classed(tree, 'ww-tips-detail')[0]).includes('第 6 / 6 条'), '失败停在当前条');
   assert.equal(page.errors.at(-1).message, '没读到 10 月 23 日的技巧');
   fail = false; page.errors.at(-1).action.run();
   tree = await page.settle();
-  assert.ok(text(classed(tree, 'yj-tips-detail')[0]).includes('10 月 23 日 · 第 1 / 4 条'));
+  assert.ok(text(classed(tree, 'ww-tips-detail')[0]).includes('10 月 23 日 · 第 1 / 4 条'));
   assert.deepEqual(page.api.calls.at(-1), { action: 'reports', fieldId: 'ai-tips', before: cutoff('2026-10-24') });
   page.unmount();
 });
@@ -405,11 +405,11 @@ test('竖臂是可聚焦的 slider：↑↓ 按有技巧的日子、PageUp/PageD
   assert.equal(slider().props['aria-valuetext'], '2026 年 10 月 23 日，4 条');
   key(slider(), 'PageDown'); page.render();
   assert.equal(slider().props['aria-valuetext'], '2026 年 9 月 30 日，2 条');
-  assert.ok(classed(page.tree, 'yj-ruler-month-on').some(node => text(node).startsWith('9 月')), '所在月的标签加深');
+  assert.ok(classed(page.tree, 'ww-ruler-month-on').some(node => text(node).startsWith('9 月')), '所在月的标签加深');
   key(slider(), 'End'); tree = page.render();
   assert.equal(slider().props['aria-valuetext'], '2025 年 12 月 8 日，2 条');
   assert.equal(all(tree, node => node.props?.['data-year'] === 2025)[0].props['aria-pressed'], true, '滚过 1 月 1 日后年份轴选中 2025');
-  assert.deepEqual(classed(tree, 'yj-ruler-month').map(node => text(node)), ['12 月1 期'], '竖臂换成 2025 年 12 月一段');
+  assert.deepEqual(classed(tree, 'ww-ruler-month').map(node => text(node)), ['12 月1 期'], '竖臂换成 2025 年 12 月一段');
   key(slider(), 'Home'); page.render();
   assert.equal(slider().props['aria-valuetext'], '2026 年 10 月 24 日，6 条');
   page.unmount();
@@ -420,21 +420,21 @@ test('横臂年份轴：点年份跳到该年最新一期；月格可点，没�
   let tree = await page.settle();
   const labels = all(tree, node => node.props?.['data-year']);
   assert.deepEqual(labels.map(node => text(node)), ['20266 期', '20251 期']);
-  const cells = classed(tree, 'yj-ruler-cell');
+  const cells = classed(tree, 'ww-ruler-cell');
   assert.equal(cells.length, 10 + 12, '2026 年只画到 10 月');
   const august = cells.find(cell => cell.props.title.startsWith('2026 年 8 月'));
   assert.equal(august.props['aria-disabled'], true); assert.equal(august.props.title, '2026 年 8 月 · 没有技巧');
   assert.equal(cells.find(cell => cell.props.title.startsWith('2026 年 9 月')).props.title, '2026 年 9 月 · 2 期');
   press(labels[1]); tree = page.render();
   assert.equal(all(tree, node => node.props?.['data-year'] === 2025)[0].props['aria-pressed'], true);
-  press(classed(tree, 'yj-ruler-cell').find(cell => cell.props.title.startsWith('2026 年 9 月'))); page.render();
+  press(classed(tree, 'ww-ruler-cell').find(cell => cell.props.title.startsWith('2026 年 9 月'))); page.render();
   assert.equal(all(page.tree, node => node.props?.role === 'slider')[0].props['aria-valuetext'], '2026 年 9 月 30 日，2 条');
   // ←/→ 切换年份。
   all(page.tree, node => node.props?.role === 'toolbar')[0].props.onKeyDown({ key: 'ArrowLeft', preventDefault() {} }); page.render();
   assert.equal(all(page.tree, node => node.props?.['data-year'] === 2025)[0].props['aria-pressed'], true);
   // 竖臂月标签跳到该月最新一期。
   key(all(page.tree, node => node.props?.role === 'slider')[0], 'Home'); page.render();
-  press(classed(page.tree, 'yj-ruler-month').find(node => text(node).startsWith('9 月'))); page.render();
+  press(classed(page.tree, 'ww-ruler-month').find(node => text(node).startsWith('9 月'))); page.render();
   assert.equal(all(page.tree, node => node.props?.role === 'slider')[0].props['aria-valuetext'], '2026 年 9 月 30 日，2 条');
   page.unmount();
 });
@@ -443,11 +443,11 @@ test('从首页技巧卡进入：滚到那天，当天首页那条（或指定�
   const featured = tipIndex('2026-10-24', 6);
   const page = mount({ focus: { date: '2026-10-24', index: featured } });
   const tree = await page.settle();
-  assert.ok(String(classed(tree, 'yj-tips-feature')[0].props.className).includes('yj-tips-flash'));
+  assert.ok(String(classed(tree, 'ww-tips-feature')[0].props.className).includes('ww-tips-flash'));
   page.unmount();
   const other = mount({ focus: { date: '2026-10-23', index: 2 } });
   const next = await other.settle();
-  assert.ok(String(all(next, node => node.props?.['data-tip'] === '2026-10-23#2')[0].props.className).includes('yj-tips-flash'));
+  assert.ok(String(all(next, node => node.props?.['data-tip'] === '2026-10-23#2')[0].props.className).includes('ww-tips-flash'));
   other.unmount();
 });
 
@@ -455,11 +455,11 @@ test('旧格式条目只有 summary：主卡说明和引导块都显示 summary 
   const legacy = { ...report(['2026-10-24', 1]), items: [{ title: '旧格式的一条技巧', summary: '旧格式的做法说明', importance: '重要', relevance: '相关', workImpact: '影响', eventKey: 'old', sources: [{ ...candidate('2026-10-24', 0), url: '' }] }] };
   const page = mount({ api: server({ hooks: { days: () => ({ fieldId: 'ai-tips', first: '2026-10-24', days: [{ date: '2026-10-24', cutoff: cutoff('2026-10-24'), count: 1, status: 'complete' }] }), reports: () => ({ reports: [legacy], nextBefore: null }) } }) });
   let tree = await page.settle();
-  assert.ok(text(classed(tree, 'yj-tips-feature')[0]).includes('旧格式的做法说明'));
-  press(classed(tree, 'yj-tips-feature')[0]); tree = page.render();
-  const dialog = classed(tree, 'yj-tips-detail')[0];
-  assert.ok(text(classed(dialog, 'yj-tips-guide')[0]).includes('旧格式的做法说明'));
-  assert.equal(classed(dialog, 'yj-tips-origin').length + classed(dialog, 'yj-tips-open').length, 0);
+  assert.ok(text(classed(tree, 'ww-tips-feature')[0]).includes('旧格式的做法说明'));
+  press(classed(tree, 'ww-tips-feature')[0]); tree = page.render();
+  const dialog = classed(tree, 'ww-tips-detail')[0];
+  assert.ok(text(classed(dialog, 'ww-tips-guide')[0]).includes('旧格式的做法说明'));
+  assert.equal(classed(dialog, 'ww-tips-origin').length + classed(dialog, 'ww-tips-open').length, 0);
   assert.equal(buttons(dialog, '上一条')[0].props.disabled, true); assert.equal(buttons(dialog, '下一条')[0].props.disabled, true);
   page.unmount();
 });
@@ -467,12 +467,12 @@ test('旧格式条目只有 summary：主卡说明和引导块都显示 summary 
 test('外壳“刷新”改 reloadKey：整页重读索引和最新一页，详情随之关闭', async () => {
   const page = mount({ reloadKey: 0 });
   let tree = await page.settle();
-  press(classed(tree, 'yj-tips-feature')[0]); page.render();
-  assert.equal(classed(page.tree, 'yj-tips-detail').length, 1);
+  press(classed(tree, 'ww-tips-feature')[0]); page.render();
+  assert.equal(classed(page.tree, 'ww-tips-detail').length, 1);
   page.render({ reloadKey: 1 });
   tree = await page.settle();
   assert.deepEqual(page.api.calls.slice(-2), [{ action: 'days', fieldId: 'ai-tips' }, { action: 'reports', fieldId: 'ai-tips' }]);
-  assert.equal(classed(tree, 'yj-tips-detail').length, 0);
+  assert.equal(classed(tree, 'ww-tips-detail').length, 0);
   assert.ok(text(tree).includes('共 7 期'));
   page.unmount();
 });

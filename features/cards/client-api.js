@@ -1,4 +1,5 @@
 import { newsContract } from './contract.js';
+import { readableInput } from '../../src/error-guide.js';
 /** 领域状态与读回只在本模块持有，宿主机制通过显式桥接消费。 */
 export function createCardsClient(bridge, t, z, automation) {
     const { featureRemote, unwrap, failure } = bridge;
@@ -14,8 +15,11 @@ export function createCardsClient(bridge, t, z, automation) {
       return value;
     };
     // 书架：入参和返回都按契约校验；返回种类与 action 对不上时按坏回复处理。
+    // 入参在本地就没过校验时不发请求；界面会拿原句拼“《文件名》+ 原因”，所以原句先换成写给人看的说明，不带校验程序的 JSON。
     const libraryRequest = async (input, signal) => {
-      const parsed = newsSchema.library.manage.parse(input);
+      const checked = newsSchema.library.manage.safeParse(input);
+      if (!checked.success) throw failure(readableInput(checked.error.message), 'input');
+      const parsed = checked.data;
       signal?.throwIfAborted();
       const result = newsSchema.library.result.safeParse(unwrap(await featureRemote('whalewingCards').manageLibrary(parsed, signal)));
       if (!result.success) throw failure(t('badReply'), 'bad_reply');
