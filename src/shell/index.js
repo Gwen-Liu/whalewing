@@ -11,10 +11,13 @@ import { createSharedUi } from './ui.js';
 export function createShell(require, validator, avatars) {
   const { z, formatFileMention } = validator;
   const React = require('react');
-  const { createElement: h, useRef, useEffect, useSyncExternalStore } = React;
+  const { createElement: h, useRef, useState, useEffect, useSyncExternalStore } = React;
+  // 取不到时提示照常显示在原处，只是弹窗开着时点不到。
+  let createPortal = null;
+  try { createPortal = require('react-dom').createPortal ?? null; } catch { /* 宿主没提供 react-dom。 */ }
   const NS = 'whalewing';
-  const { Glyph, Avatar, ActionMenu, Modal, ConfirmDialog, Drawer, useDiscard, Logo, PageHead, avatarArt, presetAvatars } = createSharedUi(React, avatars);
-  const kit = { React, loadChunk: path => require.async(path), Glyph, Avatar, ActionMenu, Modal, ConfirmDialog, Drawer, useDiscard, Logo, PageHead, z, avatarArt, presetAvatars, css, formatFileMention };
+  const { Glyph, Avatar, ActionMenu, useClosedPopover, Modal, ConfirmDialog, Drawer, useDiscard, Logo, PageHead, avatarArt, presetAvatars } = createSharedUi(React, avatars);
+  const kit = { React, loadChunk: path => require.async(path), Glyph, Avatar, ActionMenu, useClosedPopover, Modal, ConfirmDialog, Drawer, useDiscard, Logo, PageHead, z, avatarArt, presetAvatars, css, formatFileMention };
   const Workbench = createWorkbenchView({ React, css, Logo, Modal, ActionMenu });
 
   function registerUi(ctx) {
@@ -41,19 +44,43 @@ export function createShell(require, validator, avatars) {
       const snapshot = () => toast;
       bridge.bindNotify(publish);
       const toastMarks = { success: '✓', error: '!', info: 'i' };
+      /**
+       * 弹窗、抽屉用 showModal 打开时，浏览器把弹层外面的东西都设成点不到，右上角提示也一样（看得见，点不了“重试”和“×”）。
+       * 所以提示显示期间留意最上面那个还开着的模态弹层，提示放进它里面；弹层关了再回到原处。叠着几层时取文档里最后一个。
+       */
+      const topModal = () => [...document.querySelectorAll('dialog[open]')].filter(dialog => dialog.matches(':modal')).at(-1) || null;
+      function useTopModal(active) {
+        const [, redraw] = useState(0);
+        // 渲染时直接定位置：提示一出现就在对的地方，不先在原处出现再挪进弹层（那样会闪一下、进场动画播两遍）。
+        const host = active && createPortal ? topModal() : null;
+        const shown = useRef(host);
+        shown.current = host;
+        useEffect(() => {
+          if (!active || !createPortal) return;
+          const check = () => { if (topModal() !== shown.current) redraw(value => value + 1); };
+          check();
+          const observer = new MutationObserver(check);
+          observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['open'] });
+          return () => observer.disconnect();
+        }, [active]);
+        return host;
+      }
       function Toast() {
         const value = useSyncExternalStore(subscribe, snapshot, snapshot);
         const element = useRef(null);
+        const host = useTopModal(Boolean(value));
         useEffect(() => {
           const node = element.current;
-          // 放进浏览器顶层：盖在编辑弹窗之上，也不受页面布局影响；每条新提示都排到最上面。
+          // 放进浏览器顶层：盖在编辑弹窗之上，也不受页面布局影响；每条新提示、每次换到别的弹层里都排到最上面。
           try { if (node?.matches(':popover-open')) node.hidePopover(); node?.showPopover?.(); } catch { /* 不支持顶层时按普通浮层显示。 */ }
-        }, [value?.id]);
-        return value && h(React.Fragment, null, h('style', null, css), h('div', { ref: element, key: value.id, popover: 'manual', className: `ww-toast ww-toast-${value.kind}`, onMouseEnter: holdToast, onMouseLeave: releaseToast, onFocus: holdToast, onBlur: releaseToast },
+        }, [value?.id, host]);
+        if (!value) return null;
+        const notice = h(React.Fragment, null, h('style', null, css), h('div', { ref: element, key: value.id, popover: 'manual', className: `ww-toast ww-toast-${value.kind}`, onMouseEnter: holdToast, onMouseLeave: releaseToast, onFocus: holdToast, onBlur: releaseToast },
           h('span', { className: 'ww-toast-mark', 'aria-hidden': true }, toastMarks[value.kind] || toastMarks.info),
           h('span', { className: 'ww-toast-text', role: value.kind === 'error' ? 'alert' : 'status' }, value.text),
           value.action && h('button', { type: 'button', className: 'ww-toast-action', onClick: () => { publish(null); return value.action.run(); } }, value.action.label),
           h('button', { type: 'button', className: 'ww-toast-close', onClick: () => publish(null), 'aria-label': t('toastClose') }, '×')));
+        return host ? createPortal(notice, host) : notice;
       }
       // 标准字形作为文字标识，不维护第二套图标库或读取宿主 DOM。
       function Icon({ size }) { return h(Logo, { size }); }

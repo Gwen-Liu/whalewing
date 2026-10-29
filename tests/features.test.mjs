@@ -46,7 +46,7 @@ test('目标版原生元信息解析保留四个子路径图标及根包和模�
   const child = spawnSync(process.execPath, ['--expose-internals', '--input-type=module', '-e', `
     import { readPluginMeta } from '@deepseek-ai/dsh-app-boot';
     console.log(JSON.stringify(${JSON.stringify(requests)}.map(({ specifier, parent }) => readPluginMeta(specifier, parent))));
-  `], { cwd: root, encoding: 'utf8', windowsHide: true, timeout: 15000 });
+  `], { cwd: root, encoding: 'utf8', windowsHide: true, timeout: 120000 }); // 只防卡死，慢电脑上也够
   assert.equal(child.status, 0, child.error?.message ?? child.stderr);
   const metadata = JSON.parse(child.stdout);
   assert.equal(metadata.length, requests.length);

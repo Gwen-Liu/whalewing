@@ -3,7 +3,7 @@ import { zipSync } from 'fflate';
 import qrcode from 'qrcode-generator';
 import jsQR from 'jsqr';
 import { Mp3Encoder } from '@breezystack/lamejs';
-import { LIMITS, validateFiles } from './core.js';
+import { LIMITS, validateFiles, screenFiles, describeProblems, failureReason } from './core.js';
 import { inspectImage, checkDecoded } from './image.js';
 import { safeBase } from './office-tasks.js';
 
@@ -144,18 +144,27 @@ const qrName = (text, index) => `${String(index + 1).padStart(3, '0')}-${text.re
 
 async function qrTask(tool, files, options, text) {
   if (tool === 'qr-read') {
-    needCanvas(); validateFiles(files, 'image');
-    const listing = [], found = [];
-    for (const file of files) {
-      const image = await readImage(file);
-      const pixels = image.context.getImageData(0, 0, image.width, image.height);
-      const code = jsQR(pixels.data, image.width, image.height, { inversionAttempts: 'attemptBoth' });
-      listing.push(`${file.name}：${code ? code.data : '未识别到二维码'}`);
-      if (code) found.push(code.data);
+    // 个数和总输入整批检查；个别图片读不了（太大、格式暂不支持、文件损坏）只记入明细，其余照常识别。
+    needCanvas();
+    const problems = screenFiles(files, 'image'), listing = [], found = [], failures = [];
+    for (const [index, file] of files.entries()) {
+      try {
+        if (problems[index]) fail(problems[index]);
+        const image = await readImage(file);
+        const pixels = image.context.getImageData(0, 0, image.width, image.height);
+        const code = jsQR(pixels.data, image.width, image.height, { inversionAttempts: 'attemptBoth' });
+        listing.push(`${file.name}：${code ? code.data : '未识别到二维码'}`);
+        if (code) found.push(code.data);
+      } catch (error) {
+        failures.push([file.name, failureReason(error)]); listing.push(`${file.name}：失败，${failureReason(error)}`);
+      }
     }
-    if (!found.length) fail('没有在图片中识别到二维码，请换一张更清晰、二维码更完整的图片');
+    if (!found.length) {
+      if (failures.length === files.length) fail(files.length === 1 ? failures[0][1] : `${files.length} 张图片都没能读取：${describeProblems(failures)}`);
+      fail(`没有在图片中识别到二维码，请换一张更清晰、二维码更完整的图片${failures.length ? `；另有图片没能读取：${describeProblems(failures)}` : ''}`);
+    }
     const bytes = new TextEncoder().encode(found.join('\n'));
-    return { summary: `识别到 ${found.length} 个二维码`, files: [resultFile('二维码识别结果.txt', 'text/plain;charset=utf-8', bytes)], listing };
+    return { summary: `识别到 ${found.length} 个二维码${failures.length ? `；${failures.length} 张图片没能读取，原因见明细` : ''}`, files: [resultFile('二维码识别结果.txt', 'text/plain;charset=utf-8', bytes)], listing };
   }
   needCanvas();
   const size = Math.round(Number(options.size) || 512), level = options.level || 'M';

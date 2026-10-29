@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Vault, digest } from '../src/vault.js';
 import { SkillLibrary } from '../src/skills.js';
+import { seedBundledSkills } from './skill-seed.mjs';
 
 const note = body => `---\ntype: atomic\nstatus: seedling\ncreated: 2026-10-11\nupdated: 2026-10-11\naliases: []\n---\n# 来源\n${body}\n`;
 const skill = body => `---\nname: whalewing-user-preserved\ndescription: 使用已经回读的来源执行任务并检查结果\n---\n${body}\n`;
@@ -21,6 +22,7 @@ async function setup(t) {
   });
   const vault = new Vault(path.join(root, 'vault'));
   await vault.initialize();
+  await seedBundledSkills(path.join(root, 'skills'));
   const library = new SkillLibrary(vault, path.join(root, 'skills'));
   return { root, vault, library };
 }

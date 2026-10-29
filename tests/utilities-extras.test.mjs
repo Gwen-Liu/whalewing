@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { mosaic, inpaint, qrMatrix, qrSvg, encodeWav, encodeMp3, extraTask } from '../src/utilities/extras.js';
 import { frameTimes } from '../src/utilities/media-prep.js';
+import { LIMITS } from '../src/utilities/core.js';
 
 // 办公工坊依赖安装在 src/utilities 下，按其位置解析。
 const jsQR = createRequire(new URL('../src/utilities/extras.js', import.meta.url))('jsqr');
@@ -34,6 +35,43 @@ test('二维码：中文内容按 UTF-8 编码，生成后可被识别回原文'
   assert.match(qrSvg(matrix), /^<svg [^>]*viewBox="0 0 \d+ \d+"/);
   assert.throws(() => qrMatrix(''), /请输入二维码内容/);
   assert.throws(() => qrMatrix('x'.repeat(2001)), /过长/);
+});
+
+test('识别二维码：个别图片读不了只记入明细，其余照常识别；都读不了或都没识别到时写明原因', async () => {
+  const text = 'https://example.com/whalewing-qr';
+  const matrix = qrMatrix(text, 'M'), scale = 4, margin = 4, size = (matrix.count + margin * 2) * scale;
+  const pixels = image(size, size, [255, 255, 255, 255]);
+  for (let row = 0; row < matrix.count; row++) for (let column = 0; column < matrix.count; column++) if (matrix.dark(row, column))
+    for (let dy = 0; dy < scale; dy++) for (let dx = 0; dx < scale; dx++) pixels.set([0, 0, 0, 255], (((row + margin) * scale + dy) * size + (column + margin) * scale + dx) * 4);
+  // 文件头写上宽高的 PNG；后台解码用假实现：宽 7 的当作浏览器解不出来，宽等于二维码边长的读出二维码，其余是空白图。
+  const header = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACklEQVR4nGMAAQAABQABDQottAAAAABJRU5ErkJggg==', 'base64');
+  const picture = (name, width) => { const bytes = Uint8Array.from(header), view = new DataView(bytes.buffer); view.setUint32(16, width); view.setUint32(20, width); return { name, size: bytes.length, arrayBuffer: async () => bytes.buffer }; };
+  let reads = 0;
+  const unread = (name, size) => ({ name, size, async arrayBuffer() { reads++; return new ArrayBuffer(size); } });
+  const big = unread('超大.png', LIMITS.file + 1), heic = unread('IMG_0001.HEIC', 64);
+  const saved = ['createImageBitmap', 'OffscreenCanvas'].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]);
+  Object.defineProperty(globalThis, 'createImageBitmap', { configurable: true, value: async blob => { const view = new DataView(await blob.arrayBuffer()), width = view.getUint32(16); if (width === 7) throw new Error('The source image could not be decoded.'); return { width, height: view.getUint32(20), close() {} }; } });
+  Object.defineProperty(globalThis, 'OffscreenCanvas', { configurable: true, value: class {
+    constructor(width, height) { this.width = width; this.height = height; }
+    getContext() { const { width, height } = this; return { drawImage() {}, getImageData: () => ({ data: width === size ? pixels : image(width, height, [255, 255, 255, 255]) }) }; }
+  } });
+  try {
+    const result = await extraTask('qr-read', [picture('码.png', size), big, heic, picture('空白.png', 50), picture('坏图.png', 7)]);
+    assert.equal(new TextDecoder().decode(result.files[0].bytes), text);
+    assert.equal(result.summary, '识别到 1 个二维码；3 张图片没能读取，原因见明细');
+    assert.equal(result.listing.length, 5);
+    assert.equal(result.listing[0], `码.png：${text}`);
+    assert.equal(result.listing[1], '超大.png：失败，超过单个文件 25 MiB 的上限');
+    assert.match(result.listing[2], /^IMG_0001\.HEIC：失败，HEIC.*导出为 JPEG 或 PNG/);
+    assert.equal(result.listing[3], '空白.png：未识别到二维码');
+    assert.equal(result.listing[4], '坏图.png：失败，图片内容无法读取，文件可能已损坏', '浏览器的英文原句不给员工看');
+    assert.equal(reads, 0, '不合格的文件不读取');
+    await assert.rejects(extraTask('qr-read', [big]), /^Error: 超过单个文件 25 MiB 的上限$/);
+    await assert.rejects(extraTask('qr-read', [big, heic]), /^Error: 2 张图片都没能读取：超大\.png：超过单个文件 25 MiB 的上限；IMG_0001\.HEIC：HEIC/);
+    await assert.rejects(extraTask('qr-read', [picture('空白.png', 50), heic]), /^Error: 没有在图片中识别到二维码，请换一张更清晰、二维码更完整的图片；另有图片没能读取：IMG_0001\.HEIC：HEIC/);
+    await assert.rejects(extraTask('qr-read', [picture('空白.png', 50)]), /^Error: 没有在图片中识别到二维码，请换一张更清晰、二维码更完整的图片$/);
+    await assert.rejects(extraTask('qr-read', Array.from({ length: 21 }, () => picture('码.png', size))), /1–20/, '个数仍整批检查');
+  } finally { for (const [key, descriptor] of saved) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key]; } }
 });
 
 test('音频编码：WAV 头部字段正确，MP3 输出为合法帧', () => {

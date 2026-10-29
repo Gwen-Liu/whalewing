@@ -524,6 +524,9 @@ test('删除自定义专家：居中确认框、确认按钮是红色，确认�
     assert.match(await textOf(confirm), /确认删除这位专家/);
     assert.deepEqual(await confirm.locator('footer button').allInnerTexts(), ['取消', '删除专家']);
     assert.ok(await isRed(dialogButton(confirm, '删除专家')), '删除按钮是红色');
+    // 右上角“×”叫“关闭”，不和确认按钮同名：读屏按名字找按钮时分得清哪个是关、哪个是删。
+    assert.equal(await confirm.getByRole('button', { name: '删除专家', exact: true }).count(), 1, '只有确认按钮叫“删除专家”');
+    assert.equal(await confirm.locator('header button').getAttribute('aria-label'), '关闭');
     await dialogButton(confirm, '删除专家').click();
     const done = toast(page, `已删除专家「${name}」`, 'success');
     await done.waitFor();
@@ -578,6 +581,18 @@ test('“开始新任务”打开新会话，输入框左侧选中这位专家�
     const [pickerBox, inputBox, sendBox] = [await picker.boundingBox(), await input.boundingBox(), await send.boundingBox()];
     assert.ok(pickerBox.y >= inputBox.y && pickerBox.y <= sendBox.y + sendBox.height, '专家选择在输入框这一块里');
     assert.ok(pickerBox.x < sendBox.x && pickerBox.x < inputBox.x + inputBox.width / 2, '专家选择在输入框左侧');
+    // 选专家的浮层点别处收起后，点一下就能再打开（原来浮层被浏览器收起时界面没跟上，要点两下）。
+    const panel = page.locator('.ww-expert-picker:visible .ww-picker-popover');
+    await picker.click(); await panel.waitFor();
+    // 点输入框右端（浮层盖在左边，点中间会点到浮层上）。
+    const [field, cover] = [await input.boundingBox(), await panel.boundingBox()], away = { x: field.x + field.width - 8, y: field.y + field.height / 2 };
+    assert.ok(away.x > cover.x + cover.width || away.y < cover.y || away.y > cover.y + cover.height, '点的地方没被浮层盖住');
+    await page.mouse.click(away.x, away.y); await panel.waitFor({ state: 'hidden' });
+    await page.locator('.ww-expert-picker:visible .ww-picker-trigger[aria-expanded="false"]').waitFor({ timeout: 2000 });
+    await picker.click(); await panel.waitFor({ timeout: 3000 });
+    await page.keyboard.press('Escape'); await panel.waitFor({ state: 'hidden' });
+    await picker.click(); await panel.waitFor({ timeout: 3000 });
+    await page.keyboard.press('Escape'); await panel.waitFor({ state: 'hidden' });
     assert.equal(await page.locator('[data-chat-node-key]:visible').count(), 0, '会话里没有消息');
     assert.deepEqual(sent, [], '没有发出消息');
     assert.deepEqual(errors, []);

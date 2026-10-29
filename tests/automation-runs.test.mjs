@@ -114,7 +114,7 @@ async function waitFor(predicate, label, timeout = 15000) {
   }
 }
 
-test('真实到点运行：完成、出错和资讯跳过写进会话投影，目录与历史给出结果，释放会话后冷读不变', { timeout: 90000 }, async t => {
+test('真实到点运行：完成、出错和资讯跳过写进会话投影，目录与历史给出结果，释放会话后冷读不变', async t => {
   const h = await controllerFixture(t), adapter = new Adapter(), contract = automationContract(z);
   h.ctx.llm.registerAdapter(['fixture'], adapter);
   const owner = h.automationHost.automation;

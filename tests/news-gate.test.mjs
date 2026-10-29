@@ -95,7 +95,7 @@ async function harness(t) {
 }
 
 
-test('真实到点、活动登记、JSONL冷读、混合输入、周期推进与核心退出', { timeout: 90000 }, async t => {
+test('真实到点、活动登记、JSONL冷读、混合输入、周期推进与核心退出', async t => {
   const h = await harness(t), { ctx, adapter } = h;
   const owned = await h.create('news'), news = owned.agent;
   const recurring = await ctx.schedule.create(news.id, { title: '保留的周期资讯', prompt: '周期资讯输入', every_seconds: 60 });
@@ -169,7 +169,7 @@ test('真实到点、活动登记、JSONL冷读、混合输入、周期推进与
   });
 });
 
-for (const mode of ['false', 'throw', 'unknown']) test(`跳过说明持久化${mode}：恢复原批次且不自动重试，修复后同源去重`, { timeout: 15000 }, async t => {
+for (const mode of ['false', 'throw', 'unknown']) test(`跳过说明持久化${mode}：恢复原批次且不自动重试，修复后同源去重`, async t => {
   const h = await harness(t), { ctx, adapter } = h, { agent } = await h.create('failed');
   const flush = ctx.sessions.flush.bind(ctx.sessions), errors = [];
   ctx.on('agent/error', payload => errors.push(payload.error));
@@ -195,7 +195,7 @@ for (const mode of ['false', 'throw', 'unknown']) test(`跳过说明持久化${m
   await flush(agent.session); assert.match(await h.disk(agent), /「知识卡片」已关闭/);
 });
 
-for (const mode of ['unload', 'cancel', 'keepInbox']) test(`跳过检查点在途${mode}尊重原生取消与卸载边界`, { timeout: 15000 }, async t => {
+for (const mode of ['unload', 'cancel', 'keepInbox']) test(`跳过检查点在途${mode}尊重原生取消与卸载边界`, async t => {
   const h = await harness(t), { ctx, adapter } = h, { agent } = await h.create('interrupted');
   const flush = ctx.sessions.flush.bind(ctx.sessions), entered = Promise.withResolvers(), release = Promise.withResolvers();
   h.restore(() => { release.resolve(); ctx.sessions.flush = flush; });
@@ -218,7 +218,7 @@ for (const mode of ['unload', 'cancel', 'keepInbox']) test(`跳过检查点在�
   await flush(agent.session); assert.match(await h.disk(agent), /「知识卡片」已关闭/);
 });
 
-test('恢复输入失败显式报错，不把部分恢复当作无损完成', { timeout: 15000 }, async t => {
+test('恢复输入失败显式报错，不把部分恢复当作无损完成', async t => {
   const h = await harness(t), { ctx, adapter } = h, { agent } = await h.create('restore-failed');
   const errors = []; ctx.on('agent/error', payload => errors.push(payload.error));
   const flush = ctx.sessions.flush.bind(ctx.sessions), inject = agent.inject.bind(agent);
@@ -232,7 +232,7 @@ test('恢复输入失败显式报错，不把部分恢复当作无损完成', { 
 });
 
 
-test('说明追加失败退还输入，原生上游拒绝和人工伪造跳过不生成说明', { timeout: 15000 }, async t => {
+test('说明追加失败退还输入，原生上游拒绝和人工伪造跳过不生成说明', async t => {
   const h = await harness(t), { ctx, adapter } = h, { agent } = await h.create('notice-failed');
   const execute = ctx.commands.execute.bind(ctx.commands), errors = [];
   ctx.on('agent/error', payload => errors.push(payload.error));

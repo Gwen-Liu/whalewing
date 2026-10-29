@@ -69,10 +69,8 @@ export function createTipsView(kit) {
       dialog.addEventListener('keydown', onKey);
       return () => dialog.removeEventListener('keydown', onKey);
     }, []);
-    // 外壳弹窗用标题给“×”命名；这里按规格叫“关闭”。每次提交后重设，标题随切换变化时也不会被盖回去。
-    useLayoutEffect(() => { sheet.current?.closest?.('dialog')?.querySelector?.('.ww-header > button')?.setAttribute('aria-label', t('tipsClose')); });
     const item = report.items[index], count = report.items.length, source = item.sources?.[0], name = sourceName(item), link = linkOf(item), lead = leadText(item);
-    return h(Modal, { title: item.title, onClose, className: 'ww-tips-detail' },
+    return h(Modal, { title: item.title, onClose, className: 'ww-tips-detail', closeLabel: t('tipsClose') },
       h('div', { className: 'ww-tips-kicker' },
         h('i', { 'aria-hidden': true }, h(Glyph, { name: 'spark', size: 15 })),
         h('strong', null, t('tipsTitle')),

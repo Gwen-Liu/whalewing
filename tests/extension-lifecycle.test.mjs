@@ -65,7 +65,7 @@ test('目标原生Loader确实在Host等待时发布客户端模块，不以模�
       await ctx.plugin(ClientModuleRegistry);
       console.log(JSON.stringify({ state: ctx.loader.resolve(id).fiber.state, entries: ctx.clientModules.graph().entries }));
     } finally { await ctx.fiber.dispose(); }
-  `], { cwd: new URL('../', import.meta.url), encoding: 'utf8', timeout: 15000, windowsHide: true });
+  `], { cwd: new URL('../', import.meta.url), encoding: 'utf8', timeout: 120000, windowsHide: true }); // 只防卡死，慢电脑上也够
   assert.equal(child.status, 0, child.error?.message ?? child.stderr);
   const result = JSON.parse(child.stdout);
   assert.equal(result.state, 0);

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { unsupportedImageReason } from '../src/utilities/catalog.js';
-import { LIMITS, validateFiles, screenFiles, decodeText, readOfficeZip, inspectOffice, wordToExcel, excelSheets, excelToWord, extractMedia, parseCsv, transformText, convertSpreadsheet, smallTextTool, fileTool } from '../src/utilities/core.js';
+import { LIMITS, validateFiles, screenFiles, describeProblems, failureReason, decodeText, readOfficeZip, inspectOffice, wordToExcel, excelSheets, excelToWord, extractMedia, parseCsv, transformText, convertSpreadsheet, smallTextTool, fileTool } from '../src/utilities/core.js';
 import { inspectImage, convertImages } from '../src/utilities/image.js';
 import { runUtility } from '../src/utilities/worker.js';
 
@@ -327,7 +327,21 @@ test('一批里有超过 25 MiB 的文件或 HEIC 照片时，只有它们记为
     outputs.length = 0;
     await assert.rejects(convertImages([sized('a.png', 10, 10), big], { action: 'image-stitch', format: 'png', direction: 'vertical' }), /超大\.png：.*25 MiB/);
     assert.deepEqual(outputs, []); assert.equal(reads, 0);
+    await assert.rejects(convertImages([big, sized('a.png', 10, 10), heic], { action: 'image-stitch', format: 'png', direction: 'vertical' }), /^Error: 超大\.png：超过单个文件 25 MiB 的上限；IMG_0001\.HEIC：HEIC/, '有几个不合格就都写出来');
+    // 浏览器解码失败的英文原句不给员工看。
+    const decode = globalThis.createImageBitmap;
+    Object.defineProperty(globalThis, 'createImageBitmap', { configurable: true, value: async blob => { if (new DataView(await blob.arrayBuffer()).getUint32(16) === 7) throw new Error('The source image could not be decoded.'); return decode(blob); } });
+    const english = await convertImages([sized('小图.png', 120, 80), sized('坏图.png', 7, 7)], { action: 'image', mode: 'convert', format: 'keep', quality: 0.9 });
+    assert.equal(english.listing[1], '坏图.png：失败，图片内容无法读取，文件可能已损坏');
+    await assert.rejects(convertImages([sized('坏图.png', 7, 7)], { action: 'image', mode: 'convert', format: 'keep', quality: 0.9 }), /^Error: 图片内容无法读取，文件可能已损坏$/);
   });
+});
+
+test('出问题的文件按原因并成一句；英文原句换成中文说明', () => {
+  assert.equal(describeProblems([['a.heic', 'HEIC 暂不支持'], ['ok.png', ''], ['b.heic', 'HEIC 暂不支持'], ['大.png', '超过单个文件 25 MiB 的上限']]), 'a.heic、b.heic：HEIC 暂不支持；大.png：超过单个文件 25 MiB 的上限');
+  assert.equal(describeProblems([['ok.png', '']]), '');
+  assert.equal(failureReason(new Error('PNG 文件头不完整')), 'PNG 文件头不完整');
+  for (const error of [new Error('The source image could not be decoded.'), new Error(''), 'x', undefined]) assert.equal(failureReason(error), '图片内容无法读取，文件可能已损坏');
 });
 
 test('ICO 图标按不超过原图的尺寸打包多帧 PNG；调整尺寸与按目标大小压缩', async () => {

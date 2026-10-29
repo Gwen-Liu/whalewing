@@ -23,7 +23,7 @@ async function setup(t, { mode = 'danger-full-access', approval } = {}) {
   return { ...h, select, visible, execute, ids, assistant: h.mounted.service.registry.bases.get('assistant').fiber };
 }
 
-test('交接工具只在选了小鲸的普通主会话里出现，切换专家、子代理和功能退出都撤回', { timeout: 15000 }, async t => {
+test('交接工具只在选了小鲸的普通主会话里出现，切换专家、子代理和功能退出都撤回', async t => {
   const h = await setup(t);
   assert.equal(h.visible(), undefined);
   await h.select('development'); assert.equal(h.visible(), undefined);
@@ -43,7 +43,7 @@ test('交接工具只在选了小鲸的普通主会话里出现，切换专家�
   await h.assistant.dispose(); await tick(); assert.equal(h.visible(), undefined);
 });
 
-test('交接新建专家任务：选好专家、设标题、不自动发送，结果带打开任务所需的信息', { timeout: 15000 }, async t => {
+test('交接新建专家任务：选好专家、设标题、不自动发送，结果带打开任务所需的信息', async t => {
   const h = await setup(t);
   await h.select();
   const before = new Set(h.ids());
@@ -67,7 +67,7 @@ test('交接新建专家任务：选好专家、设标题、不自动发送，�
   assert.equal(h.visible(task), undefined, '接手的专家看不到交接工具');
 });
 
-test('小鲸在工作区里时，新任务挂到同一工作区', { timeout: 15000 }, async t => {
+test('小鲸在工作区里时，新任务挂到同一工作区', async t => {
   const h = await setup(t);
   await h.select();
   const workspace = await h.ctx.workspaceRegistry.create(h.directory);
@@ -77,7 +77,7 @@ test('小鲸在工作区里时，新任务挂到同一工作区', { timeout: 150
   assert.ok(h.ctx.workspaceRegistry.get(workspace.id).sessionIds.includes(result.meta.sessionId));
 });
 
-test('非完全访问时先走原生审批：拒绝不建任务，批准后才建', { timeout: 15000 }, async t => {
+test('非完全访问时先走原生审批：拒绝不建任务，批准后才建', async t => {
   const asked = [];
   let outcome = 'rejected';
   const h = await setup(t, { mode: 'workspace-write', approval: { request: async request => { asked.push(request); return outcome; } } });
@@ -95,7 +95,7 @@ test('非完全访问时先走原生审批：拒绝不建任务，批准后才�
   assert.equal(h.ids().length, before.length + 1);
 });
 
-test('参数在审批和新建之前校验：不交给小鲸自己、不交给不存在的专家', { timeout: 15000 }, async t => {
+test('参数在审批和新建之前校验：不交给小鲸自己、不交给不存在的专家', async t => {
   const asked = [];
   const h = await setup(t, { mode: 'workspace-write', approval: { request: async request => { asked.push(request); return 'allowed-once'; } } });
   await h.select();

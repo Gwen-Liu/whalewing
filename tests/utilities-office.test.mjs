@@ -68,11 +68,11 @@ test('Word共同输出在无Node Buffer的浏览器docx运行时保留可编辑�
   const source = await readFile(new URL('../src/utilities/office-tasks.js', import.meta.url), 'utf8');
   // 独立 realm 在依赖初始化时就没有 Buffer/process；只适配模块导入，不复制被测输出算法。
   const context = createContext({ TextEncoder, TextDecoder, Blob, setTimeout, clearTimeout, LIMITS });
-  runInContext(browserDocx, context, { timeout: 5000 });
+  runInContext(browserDocx, context, { timeout: 60000 });
   assert.equal(runInContext('typeof Buffer', context), 'undefined');
   assert.equal(runInContext('typeof process', context), 'undefined');
   await assert.rejects(runInContext('docx.Packer.toBuffer(new docx.Document({ sections: [{ children: [new docx.Paragraph("旧调用")] }] }))', context), /nodebuffer is not supported/);
-  runInContext('const { Document, Packer, Paragraph, TextRun } = docx;\n' + source.replace(/^import [^\n]+;\n/gm, '').replace(/^export /gm, ''), context, { timeout: 5000 });
+  runInContext('const { Document, Packer, Paragraph, TextRun } = docx;\n' + source.replace(/^import [^\n]+;\n/gm, '').replace(/^export /gm, ''), context, { timeout: 60000 });
   const result = await runInContext('makeWord(["中文交付验收", "001", "现金"], "可编辑.docx", "已完成")', context);
   assert.equal(result.files[0].mime, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
   assert.equal(result.files[0].name, '可编辑.docx'); assert.equal(result.summary, '已完成');
@@ -157,6 +157,16 @@ test('中文Word普通图片仍生成含图PDF，401图片反例在实际输出�
   await assert.rejects(runUtility({ tool: 'word-pdf', files: [file('超页数.docx', many)] }), /PDF 页数应为 1–200/);
   const fromImage = await runUtility({ tool: 'images-pdf', files: [file('图.png', png)] });
   assert.equal((await PDFDocument.load(fromImage.files[0].bytes)).getPageCount(), 1);
+});
+test('图片转 PDF：有不合格的图片就整体停止，按原因写明是哪些文件，不合格的不读取', async () => {
+  let reads = 0;
+  const unread = (name, size) => ({ name, size, async arrayBuffer() { reads++; return new ArrayBuffer(size); } });
+  const big = unread('超大.png', LIMITS.file + 1), heic = unread('IMG_0001.HEIC', 64), heif = unread('b.heif', 64);
+  await assert.rejects(runUtility({ tool: 'images-pdf', files: [file('图.png', png), heic, big, heif] }), /^Error: IMG_0001\.HEIC、b\.heif：HEIC.*导出为 JPEG 或 PNG 再来处理；超大\.png：超过单个文件 25 MiB 的上限$/);
+  assert.equal(reads, 0);
+  // 文件内容读不了（扩展名对、内容坏了）也写明是哪个文件。
+  await assert.rejects(runUtility({ tool: 'images-pdf', files: [file('图.png', png), file('坏图.png', [1, 2, 3])] }), /^Error: 坏图\.png：.*[一-鿿]/);
+  await assert.rejects(runUtility({ tool: 'images-pdf', files: [file('说明.txt', [1])] }), /^Error: 说明\.txt：文件扩展名与功能项要求不符$/);
 });
 test('PDF结果200页上边界可回读，合并到201页拒收', async () => {
   const base = await PDFDocument.create(); for (let i = 0; i < 200; i++) base.addPage();

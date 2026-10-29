@@ -262,6 +262,8 @@ async function fixture(overrides = {}) {
   }
   const load = name => {
     if (name === 'react') return react;
+    // 假 React 没有传送门：提示照常渲染在原处。
+    if (name === 'react-dom') return {};
     if (name === 'zod') return { z };
     assert.fail(`插件不得导入内部客户端模块：${name}`);
   };
@@ -362,7 +364,9 @@ async function fixture(overrides = {}) {
       const list = (registrations.get(name) || []).filter(item => !select.only || item.options.id === select.only).slice().sort((a, b) => (a.options.order || 0) - (b.options.order || 0));
       return list.map(item => ({ type: item.Component, props: { key: item.options.id, children: [], ...item.options.inject?.(), ...props, t } }));
     };
-    const page = entry.Component({ SessionProvider: 'SessionProvider', ...entry.options.inject?.(), t, ...extra, renderSlot });
+    const entryProps = { SessionProvider: 'SessionProvider', ...entry.options.inject?.(), t, ...extra, renderSlot };
+    // 提示也会随主页面一起渲染；单独渲染提示时给它独立的 hooks，免得按序号撞上主页面的 hooks（会清掉主页面的副作用）。
+    const page = slot === 'shell.overlay' ? { type: entry.Component, props: entryProps } : entry.Component(entryProps);
     // 报错、成功和恢复入口改在右上角提示里显示；主页面渲染时一并带上，断言的是员工实际能看到的内容。
     const overlay = slot === 'main' && entries.get('shell.overlay');
     const tree = expand(overlay ? { type: 'fragment', props: { children: [page, { type: overlay.Component, props: {} }] } } : page, slot, false, seen);

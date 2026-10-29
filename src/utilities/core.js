@@ -55,6 +55,19 @@ export function screenFiles(files, kind) {
   return problems;
 }
 
+/** 把出问题的文件按原因并成一句（“a.heic、b.heic：原因；c.png：原因”），同一原因只说一次。entries 是 [文件名, 原因]，原因为空的跳过。 */
+export function describeProblems(entries) {
+  const groups = new Map();
+  for (const [name, problem] of entries) if (problem) groups.set(problem, [...(groups.get(problem) || []), name]);
+  return [...groups].map(([problem, names]) => `${names.join('、')}：${problem}`).join('；');
+}
+
+/** 单个文件失败时给员工看的原因：浏览器解码失败等英文原句换成中文说明。 */
+export function failureReason(error) {
+  const message = error instanceof Error ? error.message : '';
+  return /[一-鿿]/.test(message) ? message : '图片内容无法读取，文件可能已损坏';
+}
+
 /** 严格 UTF-8；错误编码不以替换字符写入下载产物。 */
 export function decodeText(bytes) {
   if (!(bytes instanceof Uint8Array) || bytes.length > LIMITS.text) fail('文本输入超过 2 MiB');

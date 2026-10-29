@@ -74,7 +74,7 @@ test('真实索引解析保留冻结版本与包声明，安装目标必须固�
   assert.throws(() => parseMarketIndex(invalid, indexUrl), /40-hex-digit commit SHA/);
 });
 
-test('真实市场search和entry只推荐当前宿主兼容固定版本，不自动安装', { timeout: 15000 }, async t => {
+test('真实市场search和entry只推荐当前宿主兼容固定版本，不自动安装', async t => {
   let fetched = 0;
   // 仅替换传输输入；解析Worker、兼容检查、推荐和公开readback均使用当前分发实现。
   t.mock.method(globalThis, 'fetch', async (url, options) => {

@@ -359,7 +359,7 @@ function watchRecovery(h) {
   return () => { assert.equal(flushes, 0, '纯恢复不flush'); assert.equal(attaches, 0, '已有成员不重新挂接'); };
 }
 
-test('实际生成remote绑定拒绝原两参调用，单参恢复到达真实lookup', { timeout: 10000 }, async t => {
+test('实际生成remote绑定拒绝原两参调用，单参恢复到达真实lookup', async t => {
   const h = await controllerFixture(t), id = 'remote-arity';
   const storage = await coldWorkbench(h, id), b = await browser(h, { storage });
   const before = await h.ctx.sessionQuery.readSession(id), verify = watchRecovery(h);
@@ -375,7 +375,7 @@ test('实际生成remote绑定拒绝原两参调用，单参恢复到达真实lo
   assertPureRecoveryEvents(before.events, (await h.ctx.sessionQuery.readSession(id)).events); verify();
 });
 
-test('已有AI会话恢复前取消，不调用生成remote或后续命名打开', { timeout: 10000 }, async t => {
+test('已有AI会话恢复前取消，不调用生成remote或后续命名打开', async t => {
   const h = await controllerFixture(t), id = 'cancel-before-lookup';
   await coldWorkbench(h, id);
   const storage = new Map([['whalewing:aiweb:http://fixture.local', id]]);
@@ -390,7 +390,7 @@ test('已有AI会话恢复前取消，不调用生成remote或后续命名打开
   assert.deepEqual((await h.ctx.sessionQuery.readSession(id)).events, before.events); verify();
 });
 
-test('真实lookup等待中本地取消，原生恢复可完成但不继续AI命名或打开', { timeout: 10000 }, async t => {
+test('真实lookup等待中本地取消，原生恢复可完成但不继续AI命名或打开', async t => {
   const h = await controllerFixture(t), id = 'cancel-during-lookup';
   await coldWorkbench(h, id);
   const storage = new Map([['whalewing:aiweb:http://fixture.local', id]]);
@@ -419,7 +419,7 @@ test('真实lookup等待中本地取消，原生恢复可完成但不继续AI命
   assertPureRecoveryEvents(before.events, (await h.ctx.sessionQuery.readSession(id)).events); verify();
 });
 
-test('已认领且已挂接的冷工作台等待真实commands.list lookup，恢复零命令事件零flush', { timeout: 10000 }, async t => {
+test('已认领且已挂接的冷工作台等待真实commands.list lookup，恢复零命令事件零flush', async t => {
   const h = await controllerFixture(t), storage = await coldWorkbench(h, 'cold-workbench');
   const before = await h.ctx.sessionQuery.readSession('cold-workbench'), verify = watchRecovery(h);
   const entered = Promise.withResolvers(), release = Promise.withResolvers(), open = h.ctx.sessionPersistence.open.bind(h.ctx.sessionPersistence);
@@ -465,7 +465,7 @@ async function commitBrowser(b) {
   }
 }
 
-test('适配版AI网页从已认领冷工作台打开前等待真实只读恢复，不把retain.ready当恢复证据', { timeout: 10000 }, async t => {
+test('适配版AI网页从已认领冷工作台打开前等待真实只读恢复，不把retain.ready当恢复证据', async t => {
   const h = await controllerFixture(t), storage = await coldWorkbench(h, 'cold-ai');
   const before = await h.ctx.sessionQuery.readSession('cold-ai'), verify = watchRecovery(h);
   const entered = Promise.withResolvers(), release = Promise.withResolvers(), open = h.ctx.sessionPersistence.open.bind(h.ctx.sessionPersistence);

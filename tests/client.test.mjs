@@ -2282,14 +2282,25 @@ test('预览租约拒收保留原生会话草稿，原位重试恢复', async ()
   }
 });
 
-test('菜单消费React nativeEvent关闭通知，动作后同步关闭，下一次单击即打开', async () => {
+/** 假的浮层元素：只记下挂上去的 toggle 监听，测试里模拟浏览器自己收起浮层（按 Esc、点别处）。 */
+const popoverElement = () => {
+  const listeners = new Set();
+  return { listeners, hidePopover() {}, addEventListener: (type, listener) => { if (type === 'toggle') listeners.add(listener); }, removeEventListener: (type, listener) => listeners.delete(listener), close: () => { for (const listener of [...listeners]) listener({ newState: 'closed' }); } };
+};
+
+test('菜单在浏览器自己收起浮层时跟着记成已关（DSH 的 React 18 不转发浮层的 toggle），动作后同步关闭，下一次单击即打开', async () => {
   const f = await fixture();
   const menu = nodes(f.render()).find(node => typeof node.type === 'function' && node.type.name === 'ActionMenu');
   const render = f.isolate(menu);
   const trigger = () => nodes(render()).find(node => node.type === 'button');
   const surface = () => nodes(render()).find(node => node.props.popover === 'auto');
+  assert.equal(surface().props.onToggle, undefined, '不靠 React 的 onToggle');
+  const element = popoverElement();
+  surface().props.ref.current = element;
+  render(); f.flushEffects();
+  assert.equal(element.listeners.size, 1, '直接在浮层元素上监听 toggle');
   trigger().props.onClick(); assert.equal(trigger().props['aria-expanded'], true);
-  surface().props.onToggle({ nativeEvent: { newState: 'closed' } });
+  element.close();
   assert.equal(trigger().props['aria-expanded'], false);
   trigger().props.onClick(); assert.equal(trigger().props['aria-expanded'], true);
   surface().props.onClick({ target: { closest: selector => { assert.equal(selector, 'button:not(:disabled)'); return {}; } } });
@@ -2297,13 +2308,19 @@ test('菜单消费React nativeEvent关闭通知，动作后同步关闭，下一
   trigger().props.onClick(); assert.equal(trigger().props['aria-expanded'], true);
 });
 
-test('两个原生专家入口外部关闭后单击重新打开，采用React实际toggle包装', async () => {
+test('两个原生专家入口的浮层被浏览器收起后（点别处、按 Esc），单击一次就重新打开', async () => {
   for (const slot of ['conversation.hero.actions', 'conversation.session.header.actions']) {
     const f = await fixture();
     const render = () => f.render(slot, { useProjection: () => null, useSessions: select => select({ byId: {} }) });
     const trigger = () => nodes(render()).find(node => node.props.className === 'ww-picker-trigger');
+    const panel = () => nodes(render()).find(node => node.props.popover === 'auto');
+    assert.equal(panel().props.onToggle, undefined, '不靠 React 的 onToggle');
+    const element = popoverElement();
+    panel().props.ref.current = element;
+    render(); f.flushEffects();
+    assert.ok(element.listeners.size >= 1, '直接在浮层元素上监听 toggle');
     trigger().props.onClick(); assert.equal(trigger().props['aria-expanded'], true);
-    nodes(render()).find(node => node.props.popover === 'auto').props.onToggle({ nativeEvent: { newState: 'closed' } });
+    element.close();
     assert.equal(trigger().props['aria-expanded'], false);
     trigger().props.onClick(); assert.equal(trigger().props['aria-expanded'], true);
   }
@@ -3834,7 +3851,7 @@ test('书架：全部与分组筛选，分块导入到当前分组并自动补�
   const other = { ...libraryBook, id: '00000000-0000-4000-8000-000000000002', title: '极简项目管理', author: '郭致星', daily: false, groups: [], addedAt: '2026-10-21T02:00:00.000Z', progress: { last: 0, next: 0 } };
   let shelf = { groups: [{ id: groupId, name: '工作' }], books: [{ ...libraryBook, groups: [groupId] }, other] };
   const imported = { ...other, id: '00000000-0000-4000-8000-000000000003', title: '新书', groups: [groupId], daily: true, addedAt: '2026-10-23T02:00:00.000Z' };
-  const entry = { id: 'open-book', title: '开放教材', author: 'OpenStax', description: '开放许可', category: '管理', format: 'MD', size: 2048, url: 'https://raw.githubusercontent.com/gwenliu1025/whalewing-library/main/books/open-book.md', sha256: 'a'.repeat(64), license: 'CC BY 4.0', licenseUrl: 'https://creativecommons.org/licenses/by/4.0/', attribution: '© OpenStax', installed: null };
+  const entry = { id: 'open-book', title: '开放教材', author: 'OpenStax', description: '开放许可', category: '管理', format: 'MD', size: 2048, url: 'https://raw.githubusercontent.com/gwen-liu/whalewing-library/main/books/open-book.md', sha256: 'a'.repeat(64), license: 'CC BY 4.0', licenseUrl: 'https://creativecommons.org/licenses/by/4.0/', attribution: '© OpenStax', installed: null };
   const ok = value => ({ ok: true, value });
   const f = await fixture({ news: async () => ok(newsHomeResult()), library: async input => {
     if (input.action === 'list') return ok({ library: shelf });
@@ -3844,7 +3861,7 @@ test('书架：全部与分组筛选，分块导入到当前分组并自动补�
     if (input.action === 'update') { shelf = { ...shelf, books: shelf.books.map(book => book.id === input.id ? { ...book, ...(input.title ? { title: input.title } : {}), ...(Object.hasOwn(input, 'daily') ? { daily: input.daily } : {}) } : book) }; return ok({ book: shelf.books.find(book => book.id === input.id), library: shelf }); }
     if (input.action === 'remove') { shelf = { ...shelf, books: shelf.books.filter(book => book.id !== input.id) }; return ok({ removed: input.id, library: shelf }); }
     if (input.action === 'saveGroup') { const group = { id: '00000000-0000-4000-8000-0000000000a2', name: input.name }; shelf = { ...shelf, groups: [...shelf.groups, group] }; return ok({ group, library: shelf }); }
-    if (input.action === 'catalog') return ok({ catalog: { source: 'https://raw.githubusercontent.com/gwenliu1025/whalewing-library/main/catalog.json', fetchedAt: '2026-10-22T02:00:00.000Z', error: null, entries: [entry] } });
+    if (input.action === 'catalog') return ok({ catalog: { source: 'https://raw.githubusercontent.com/gwen-liu/whalewing-library/main/catalog.json', fetchedAt: '2026-10-22T02:00:00.000Z', error: null, entries: [entry] } });
     if (input.action === 'download') { const book = { ...other, id: '00000000-0000-4000-8000-000000000004', title: '开放教材', groups: input.groups ?? [], daily: false }; shelf = { ...shelf, books: [...shelf.books, book] }; return ok({ book, library: shelf }); }
     throw new Error('unexpected library action ' + input.action);
   } });
@@ -4299,7 +4316,7 @@ test('纯恢复只读查找失败保留原ID并给重新检查，不发工作区
 });
 
 
-test('AI专用会话首次命名失败后按原ID恢复，list完成后补命名再打开', { timeout: 10000 }, async () => {
+test('AI专用会话首次命名失败后按原ID恢复，list完成后补命名再打开', async () => {
   const entered = Promise.withResolvers(), release = Promise.withResolvers(); let mounted, attempts = 0; const order = [];
   const f = await fixture({ nativeCommandList: async id => { order.push(['lookup-start', id]); entered.resolve(); await release.promise; order.push(['lookup-done', id]); return { ok: true, value: [] }; }, sidebarRight: { mounted: { getSnapshot: () => mounted }, openTab() {} } });
   f.ctx.remote.session.rename = async input => { order.push(['rename', input]); return ++attempts === 1 ? { ok: false, error: { code: 'RENAME', message: '命名失败' } } : { ok: true, value: input }; };

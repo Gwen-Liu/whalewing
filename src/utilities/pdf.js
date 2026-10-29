@@ -7,8 +7,8 @@ import font from '../../content/utilities/noto-font.json' with { type: 'json' };
 import pdfAssets from '../../content/utilities/pdf-assets.json' with { type: 'json' };
 import { zipSync, zlibSync, unzlibSync } from 'fflate';
 import { Paragraph, TextRun } from 'docx';
-import { LIMITS } from './core.js';
-import { inspectImage, checkDecoded, imageExtensions } from './image.js';
+import { LIMITS, screenFiles, describeProblems, failureReason } from './core.js';
+import { inspectImage, checkDecoded } from './image.js';
 import { selectedBytes, safeBase, resultFile, textResult, wordDocument, wordChildren, descendants, paragraphText, makeWord } from './office-tasks.js';
 
 // PDF.js 的解析器已内联到独占任务中，不创建远端 Worker 或动态脚本请求。
@@ -358,21 +358,28 @@ export async function compressPdf(bytes, name, presetName, codec = canvasCodec) 
 export async function pdfTask(tool, files, options = {}) {
   if (tool === 'word-pdf') { const [f] = await selectedBytes(files, ['docx']); return wordPdf(f.bytes, f.name); }
   if (tool === 'images-pdf') {
-    const inputs = await selectedBytes(files, imageExtensions, 20), doc = await PDFDocument.create();
-    for (const input of inputs) {
-      const info = inspectImage(input.bytes, input.name); let bytes = input.bytes;
-      // PDF 只能直接嵌入 JPEG 与 PNG，其余格式先在本地转成 PNG（动图取第一帧）。
-      if (!['image/jpeg', 'image/png'].includes(info.mime)) {
-        if (typeof createImageBitmap !== 'function' || typeof OffscreenCanvas !== 'function') throw new Error('当前环境缺少本地图像转换能力');
-        const bitmap = await createImageBitmap(new Blob([bytes], { type: info.mime })); let canvas;
-        try { checkDecoded(bitmap, info); canvas = new OffscreenCanvas(bitmap.width, bitmap.height); canvas.getContext('2d').drawImage(bitmap, 0, 0); bytes = new Uint8Array(await (await canvas.convertToBlob({ type: 'image/png' })).arrayBuffer()); }
-        finally { bitmap.close(); if (canvas) canvas.width = canvas.height = 1; }
-      }
-      const image = info.mime === 'image/jpeg' ? await doc.embedJpg(bytes) : await doc.embedPng(bytes);
-      const page = doc.addPage([595.28, 841.89]), scale = Math.min(515 / image.width, 762 / image.height);
-      page.drawImage(image, { x: (595.28 - image.width * scale) / 2, y: (841.89 - image.height * scale) / 2, width: image.width * scale, height: image.height * scale });
+    // 每一张都是 PDF 的一页：有不合格的就整体停止，写明是哪些文件、为什么，不生成缺页的 PDF。
+    const problems = screenFiles(files, 'image');
+    if (problems.some(Boolean)) throw new Error(describeProblems(files.map((file, index) => [file.name, problems[index]])));
+    const doc = await PDFDocument.create();
+    for (const file of files) {
+      try {
+        let bytes = new Uint8Array(await file.arrayBuffer());
+        if (bytes.length !== file.size) throw new Error('文件读取长度不一致');
+        const info = inspectImage(bytes, file.name);
+        // PDF 只能直接嵌入 JPEG 与 PNG，其余格式先在本地转成 PNG（动图取第一帧）。
+        if (!['image/jpeg', 'image/png'].includes(info.mime)) {
+          if (typeof createImageBitmap !== 'function' || typeof OffscreenCanvas !== 'function') throw new Error('当前环境缺少本地图像转换能力');
+          const bitmap = await createImageBitmap(new Blob([bytes], { type: info.mime })); let canvas;
+          try { checkDecoded(bitmap, info); canvas = new OffscreenCanvas(bitmap.width, bitmap.height); canvas.getContext('2d').drawImage(bitmap, 0, 0); bytes = new Uint8Array(await (await canvas.convertToBlob({ type: 'image/png' })).arrayBuffer()); }
+          finally { bitmap.close(); if (canvas) canvas.width = canvas.height = 1; }
+        }
+        const image = info.mime === 'image/jpeg' ? await doc.embedJpg(bytes) : await doc.embedPng(bytes);
+        const page = doc.addPage([595.28, 841.89]), scale = Math.min(515 / image.width, 762 / image.height);
+        page.drawImage(image, { x: (595.28 - image.width * scale) / 2, y: (841.89 - image.height * scale) / 2, width: image.width * scale, height: image.height * scale });
+      } catch (error) { throw new Error(`${file.name}：${failureReason(error)}`); }
     }
-    return pdfResult(await doc.save(), '图片汇总.pdf', `已按选件顺序生成 ${inputs.length} 页 PDF`);
+    return pdfResult(await doc.save(), '图片汇总.pdf', `已按选件顺序生成 ${files.length} 页 PDF`);
   }
   const inputs = await selectedBytes(files, ['pdf'], tool === 'pdf-merge' ? 20 : 1);
   if (tool === 'pdf-compress') return compressPdf(inputs[0].bytes, inputs[0].name, options.preset);

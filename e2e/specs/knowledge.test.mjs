@@ -74,7 +74,7 @@ async function libraryTool(page, name) {
   await menu.waitFor();
   return name ? menu.getByRole('button', { name, exact: true }) : menu;
 }
-/** 再点一次“…”收起工具菜单。不用 Esc：菜单第一项不可用时焦点留在“…”上，按 Esc 收起后菜单状态没同步，下一次点“…”打不开。 */
+/** 再点一次“…”收起工具菜单。 */
 async function closeLibraryTools(page) {
   const menu = page.getByRole('dialog', { name: '知识库工具' });
   if (await menu.isVisible()) await page.getByRole('button', { name: '知识库工具' }).click();
@@ -389,6 +389,36 @@ test('反例：路径不在十区内时，失败提示说明笔记只能放在�
 });
 
 // 需求§界面通用约定·状态放在原位（“有未保存的修改”以小标记放在所在工具栏）
+test('知识库工具菜单：打开时焦点落在第一个能用的项上；按 Esc 或点别处收起后，点一下“…”就能再打开', async t => {
+  await prepare(t);
+  await withPage(browser, t, async ({ page, errors }) => {
+    await openKnowledge(page);
+    const trigger = page.getByRole('button', { name: '知识库工具' }), menu = page.getByRole('dialog', { name: '知识库工具' });
+    // 浏览器收起菜单后，界面要等收起事件到了才记成已关。
+    const recordedClosed = () => page.locator('button[aria-label="知识库工具"][aria-expanded="false"]').waitFor({ timeout: 2000 });
+    // 没打开笔记时第一项“当前笔记关系图”不可用，焦点跳过它。
+    await trigger.click(); await menu.waitFor();
+    assert.equal(await menu.getByRole('button').first().isDisabled(), true, '第一项不可用');
+    assert.equal(await menu.evaluate(element => element.contains(document.activeElement) && !document.activeElement.disabled), true, '焦点在菜单里能用的项上');
+    await page.keyboard.press('Escape'); await menu.waitFor({ state: 'hidden' });
+    assert.equal(await trigger.evaluate(element => element === document.activeElement), true, 'Esc 后焦点回到“…”');
+    await trigger.click(); await menu.waitFor({ timeout: 3000 });
+    // 焦点在“…”上按 Esc：由浏览器收起菜单（原来界面没跟上，下一次要点两下）。
+    await trigger.focus(); await page.keyboard.press('Escape'); await menu.waitFor({ state: 'hidden' });
+    await recordedClosed();
+    await trigger.click(); await menu.waitFor({ timeout: 3000 });
+    // 点页面别处收起。
+    await page.locator('.ww-knowledge-head p', { hasText: '知识库在' }).click(); await menu.waitFor({ state: 'hidden' });
+    await recordedClosed();
+    await trigger.click(); await menu.waitFor({ timeout: 3000 });
+    // 开着时再点“…”收起，不会关了又开。
+    await trigger.click(); await menu.waitFor({ state: 'hidden' });
+    await recordedClosed();
+    await trigger.click(); await menu.waitFor({ timeout: 3000 });
+    assert.deepEqual(errors, []);
+  });
+});
+
 test('有未保存的草稿时：工具条上标“有未保存的修改”，不能再新建或看图谱，目录里的笔记点不了', async t => {
   await prepare(t);
   await withPage(browser, t, async ({ page, errors }) => {
