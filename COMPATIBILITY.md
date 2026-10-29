@@ -1,6 +1,6 @@
 # 兼容与升级
 
-鲸翼支持的 DSH 版本以 [package.json](package.json) 的 `engines.dsh` 为准，当前是 `0.2.1-rc.2`。旧客户端请继续用最后兼容的固定版本，不要强行安装新版。
+鲸翼支持的 DSH 版本以 [package.json](package.json) 的 `engines.dsh` 为准，当前是 `0.2.1-rc.3`。旧客户端请继续用最后兼容的固定版本，不要强行安装新版：DSH `0.2.1-rc.2` 用 `0.2.1-rc.2.2`。DSH 只认插件声明的版本，升级 DSH 后旧版鲸翼不会加载，要换装适配新 DSH 的鲸翼。
 
 ## 定时任务
 
