@@ -10,7 +10,7 @@ import { parseMarketIndex, marketInstallTarget } from '@deepseek-ai/dsh-plugin-m
 const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 const starter = JSON.parse(await readFile(new URL('../examples/feature-starter/package.json', import.meta.url), 'utf8'));
 const target = manifest.engines.dsh;
-const otherRuntimes = ['0.2.0-rc.2', '0.2.1-rc.1', '0.2.1-rc.3', '0.2.1', '0.3.0'];
+const otherRuntimes = ['0.2.0-rc.2', '0.2.1-rc.2', '0.2.1-rc.4', '0.2.1', '0.3.0'];
 
 test('当前包、DSH peers、独立模板与实际宿主共用准确支持目标', () => {
   assert.equal(target, getDshRuntimeVersion());
