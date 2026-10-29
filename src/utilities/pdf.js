@@ -96,7 +96,7 @@ async function loadPdf(bytes) {
   if (new TextDecoder().decode(bytes.subarray(0, 5)) !== '%PDF-') throw new Error('所选文件不是 PDF');
   const doc = await PDFDocument.load(bytes, { updateMetadata: false });
   pageSelection('', doc.getPageCount());
-  if (doc.getForm().getFields().length) throw new Error('交互表单或签名 PDF 请先另存为静态副本；本工具不保留数字签名效力');
+  if (doc.getForm().getFields().length) throw new Error('交互表单或签名 PDF 请先另存为静态副本；办公工坊不保留数字签名效力');
   return doc;
 }
 async function renderDefinition(definition) {
@@ -442,6 +442,6 @@ export async function pdfTask(tool, files, options = {}) {
     const stampBytes = await renderDefinition({ content: [{ text: watermark, fontSize: 32, color: '#aaaaaa', alignment: 'center', margin: [0, 320, 0, 0] }] });
     const [stamp] = await source.embedPdf(stampBytes);
     selected.forEach(p => { const page = source.getPage(p); page.drawPage(stamp, { width: page.getWidth(), height: page.getHeight(), opacity: 0.3 }); });
-  } else throw new Error('未知 PDF 工具');
+  } else throw new Error('未知 PDF 功能项');
   return pdfResult(await source.save(), `${base}-处理.pdf`, `已处理 ${selected.length} 页；原件保持不变`);
 }

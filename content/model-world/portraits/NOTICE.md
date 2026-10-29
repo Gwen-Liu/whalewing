@@ -7,6 +7,7 @@
 本目录的立绘及插件源码 `art/model-world/` 中的原图依 [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/deed.zh-hans)（署名-非商业性使用-相同方式共享 4.0 国际）授权。立绘不适用插件代码的许可。
 
 - 署名：请写“立绘 © 鲸翼 WhaleWing，CC BY-NC-SA 4.0”，并附上鲸翼仓库链接。
+- 保存与分享：模型世界里可以点开立绘大图并保存，保存的图片右下角带鲸翼水印（鲸翼标志加“WhaleWing”），作者和本许可写在图片文件属性里。个人保存、做壁纸、非营利地分享都可以，请保留水印。
 - 非商业性使用：个人或企业在内部使用鲸翼插件时，插件里正常显示立绘不算商业性使用。出售立绘或其改编作品、放进付费产品或付费服务、用于广告宣传、制作周边等以营利为主要目的的使用，都需要先取得作者的商用授权。
 - 相同方式共享：改编立绘后公开发布的作品必须使用同一许可。
 - 商用授权：请在鲸翼的 GitHub 仓库提 Issue 联系作者，授权条件（含分成）另行约定。
@@ -17,4 +18,4 @@
 
 ## 文件
 
-原图位于插件源码的 `art/model-world/`（不随包分发），为 2160×3840 的 WebP：由生图结果经 Real-ESRGAN（`realesrgan-x4plus-anime` 模型，BSD-3-Clause）放大后等比缩入，见 `scripts/art/finalize.mjs`。随包缩略图由 `scripts/portraits.mjs` 等比缩小到 288×512 以内、抠掉白底并压缩为 WebP，不裁剪、不重绘。厂商、系列与立绘的对应关系由 `src/model-world-roster.js` 持有。
+原图位于插件源码的 `art/model-world/`（文件本身不随包分发），为 2160×3840 的 WebP：由生图结果经 Real-ESRGAN（`realesrgan-x4plus-anime` 模型，BSD-3-Clause）放大后等比缩入，见 `scripts/art/finalize.mjs`。随包缩略图由 `scripts/portraits.mjs` 等比缩小到 288×512 以内、抠掉白底并压缩为 WebP，不裁剪、不重绘。查看大图用的就是原图：原样打进按需加载的 `client.portrait-<立绘 id>.js` 分块（不重新压缩），原图文件本身不随包分发，员工点开哪张才下载哪张。厂商、系列与立绘的对应关系由 `src/model-world-roster.js` 持有。

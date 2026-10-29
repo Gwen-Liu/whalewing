@@ -18,9 +18,9 @@ const { unzipSync, zipSync, unzlibSync } = require('fflate');
 const file = (name, bytes) => ({ name, size: bytes.length, arrayBuffer: async () => Uint8Array.from(bytes).buffer });
 const word = async () => Packer.toBuffer(new Document({ sections: [{ children: [new Paragraph('实施交付说明 中文合同测试'), new Paragraph('验收范围：银行业务系统升级。'), new Table({ rows: [new TableRow({ children: [new TableCell({ children: [new Paragraph('科目编码')] }), new TableCell({ children: [new Paragraph('科目名称')] })] }), new TableRow({ children: [new TableCell({ children: [new Paragraph('001')] }), new TableCell({ children: [new Paragraph('现金')] })] })] })] }] }));
 const excel = async (name = '数据', rows = [['编码', '名称'], ['001', '现金'], ['001', '现金'], ['002', '银行']]) => { const book = new ExcelJS.Workbook(); book.addWorksheet(name).addRows(rows); return book.xlsx.writeBuffer(); };
-test('目录7个工具44项功能且唯一，仍不含截图否定的编码卡片与错误WordExcel方向', () => {
+test('目录7个分类44个功能项且唯一，仍不含截图否定的编码卡片与错误WordExcel方向', () => {
   assert.equal(utilityTools.length, 7); assert.equal(utilityCatalog.length, 44); assert.equal(new Set(utilityCatalog.map(i => i.id)).size, 44);
-  // 别名入口只能指向真实存在、且不再转指的功能。
+  // 别名入口只能指向真实存在、且不再转指的功能项。
   for (const item of utilityCatalog.filter(i => i.action)) assert.ok(utilityCatalog.some(target => target.id === item.action && !target.action));
   assert.ok(utilityTools.every(tool => tool.functions.length >= 3 && tool.functions.every(item => item.tool === tool.id)));
   for (const id of ['word-excel', 'excel-word', 'uuid', 'zip', 'base64', 'url-codec', 'timestamp', 'hash', 'line-compare']) assert.ok(!utilityCatalog.some(i => i.id === id));

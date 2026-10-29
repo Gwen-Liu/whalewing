@@ -111,10 +111,10 @@ function apply(ctx) {
     };
     return (0, import_react.createElement)(
       "section",
-      { className: "yj-section", "aria-label": "\u6587\u672C\u9884\u89C8" },
+      { className: "ww-section", "aria-label": "\u6587\u672C\u9884\u89C8" },
       (0, import_react.createElement)("h2", null, "\u6587\u672C\u9884\u89C8"),
-      (0, import_react.createElement)("p", { className: "yj-muted" }, "\u6587\u5B57\u53EA\u5728\u672C\u6B21\u6253\u5F00\u671F\u95F4\u6682\u5B58\uFF0C\u5173\u95ED\u6269\u5C55\u6216\u5DE5\u4F5C\u53F0\u540E\u6E05\u7A7A\uFF1B\u4E0D\u4F1A\u5199\u5165\u4E2A\u4EBA\u77E5\u8BC6\u3002"),
-      (0, import_react.createElement)("label", { className: "yj-field" }, "\u9884\u89C8\u6587\u5B57", (0, import_react.createElement)("textarea", {
+      (0, import_react.createElement)("p", { className: "ww-muted" }, "\u6587\u5B57\u53EA\u5728\u672C\u6B21\u6253\u5F00\u671F\u95F4\u6682\u5B58\uFF0C\u5173\u95ED\u6269\u5C55\u6216\u5DE5\u4F5C\u53F0\u540E\u6E05\u7A7A\uFF1B\u4E0D\u4F1A\u5199\u5165\u4E2A\u4EBA\u77E5\u8BC6\u3002"),
+      (0, import_react.createElement)("label", { className: "ww-field" }, "\u9884\u89C8\u6587\u5B57", (0, import_react.createElement)("textarea", {
         "aria-label": "\u9884\u89C8\u6587\u5B57",
         rows: 6,
         maxLength: 4e3,
@@ -128,8 +128,8 @@ function apply(ctx) {
       })),
       (0, import_react.createElement)(
         "div",
-        { className: "yj-row" },
-        (0, import_react.createElement)("button", { type: "button", className: "yj-primary", disabled: busy || !text.trim(), onClick: () => setPreview(true) }, "\u9884\u89C8\u6587\u672C"),
+        { className: "ww-row" },
+        (0, import_react.createElement)("button", { type: "button", className: "ww-primary", disabled: busy || !text.trim(), onClick: () => setPreview(true) }, "\u9884\u89C8\u6587\u672C"),
         (0, import_react.createElement)("button", { type: "button", disabled: busy, onClick: demonstrate }, "\u8FD0\u884C\u672C\u5730\u6F14\u793A")
       ),
       active && preview && (0, import_react.createElement)(

@@ -108,6 +108,7 @@ export const css = [
   ai_web.styles[0],
   shared.styles[33],
   knowledge.styles[16],
+  knowledge.styles[17],
   experts.styles[4],
   automation.styles[5],
   theme.shell

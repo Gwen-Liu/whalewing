@@ -7,9 +7,9 @@ export function createWorkspacePicker(React, ActionMenu) {
     const toggle = (id, include) => onChange(scope.mode === 'all'
       ? { mode: 'all', excludedWorkspaceIds: include ? scope.excludedWorkspaceIds.filter(value => value !== id) : [...scope.excludedWorkspaceIds, id] }
       : { mode: 'selected', workspaceIds: include ? [...scope.workspaceIds, id] : scope.workspaceIds.filter(value => value !== id) });
-    return h('div', { className: 'yj-field' }, t('workspaceScope'), h(ActionMenu, { label: t('workspaceSelected', { count }) },
-      h('label', { className: 'yj-choice' }, h('input', { type: 'checkbox', checked: scope.mode === 'all' && scope.excludedWorkspaceIds.length === 0, disabled, onChange: event => onChange(event.target.checked ? { mode: 'all', excludedWorkspaceIds: [] } : { mode: 'selected', workspaceIds: [] }) }), t('workspaceAll')),
-      h('div', { className: 'yj-workspace-options' }, ...items.map(item => h('label', { key: item.workspaceId, className: 'yj-choice' }, h('input', { type: 'checkbox', checked: checked(item.workspaceId), disabled, onChange: event => toggle(item.workspaceId, event.target.checked) }), h('span', null, item.name || item.path, h('small', { className: 'yj-muted' }, item.name ? item.path : '')))))));
+    return h('div', { className: 'ww-field' }, t('workspaceScope'), h(ActionMenu, { label: t('workspaceSelected', { count }) },
+      h('label', { className: 'ww-choice' }, h('input', { type: 'checkbox', checked: scope.mode === 'all' && scope.excludedWorkspaceIds.length === 0, disabled, onChange: event => onChange(event.target.checked ? { mode: 'all', excludedWorkspaceIds: [] } : { mode: 'selected', workspaceIds: [] }) }), t('workspaceAll')),
+      h('div', { className: 'ww-workspace-options' }, ...items.map(item => h('label', { key: item.workspaceId, className: 'ww-choice' }, h('input', { type: 'checkbox', checked: checked(item.workspaceId), disabled, onChange: event => toggle(item.workspaceId, event.target.checked) }), h('span', null, item.name || item.path, h('small', { className: 'ww-muted' }, item.name ? item.path : '')))))));
   }
 
   return WorkspacePicker;

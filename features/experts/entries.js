@@ -35,7 +35,7 @@ export function registerEntries(ctx, kit, api) {
     const roles = registry.experts;
     const historical = [...roles, ...registry.deleted].find(role => preset === `whalewing-${role.id}`);
     const current = roles.find(role => role.id === selected);
-    if (historical) return h('span', { className: 'yj-expert-picker' }, t('historicalExpert', { name: historical.name }));
+    if (historical) return h('span', { className: 'ww-expert-picker' }, t('historicalExpert', { name: historical.name }));
     const matches = roles.filter(role => `${role.name} ${role.description}`.toLowerCase().includes(query.trim().toLowerCase()));
     const change = async (id) => {
       if (pending.current) return;
@@ -46,9 +46,9 @@ export function registerEntries(ctx, kit, api) {
       } catch (reason) { if (mounted.current) { setError(reason.message || t('requestFailed')); api.notifySessionIssue(reason, () => change(id)); } }
       finally { pending.current = false; if (mounted.current) setBusy(false); }
     };
-    return h('div', { className: 'yj-expert-picker' }, h('style', null, css),
-      h('button', { type: 'button', ref: trigger, className: 'yj-picker-trigger', 'aria-haspopup': 'dialog', 'aria-expanded': open, onClick: () => setOpen(!open) }, current && h(Avatar, { expert: current, size: 20 }), current?.name || selected || t('expert'), h('span', { 'aria-hidden': true }, '⌄')),
-      h('div', { ref: panel, popover: 'auto', className: 'yj-picker-popover', role: 'dialog', 'aria-label': t('expert'), onToggle: event => { if (event.nativeEvent.newState === 'closed') setOpen(false); }, onKeyDown: event => {
+    return h('div', { className: 'ww-expert-picker' }, h('style', null, css),
+      h('button', { type: 'button', ref: trigger, className: 'ww-picker-trigger', 'aria-haspopup': 'dialog', 'aria-expanded': open, onClick: () => setOpen(!open) }, current && h(Avatar, { expert: current, size: 20 }), current?.name || selected || t('expert'), h('span', { 'aria-hidden': true }, '⌄')),
+      h('div', { ref: panel, popover: 'auto', className: 'ww-picker-popover', role: 'dialog', 'aria-label': t('expert'), onToggle: event => { if (event.nativeEvent.newState === 'closed') setOpen(false); }, onKeyDown: event => {
         if (event.key === 'Escape') { event.preventDefault(); close(); }
         if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
           const items = [...event.currentTarget.querySelectorAll('button:not(:disabled)')];
@@ -57,9 +57,9 @@ export function registerEntries(ctx, kit, api) {
           event.preventDefault(); items[next]?.focus();
         }
       } }, h('input', { 'aria-label': t('expertSearch'), placeholder: t('expertSearch'), value: query, onChange: event => setQuery(event.target.value) }),
-      h('div', { className: 'yj-picker-options' }, h('button', { type: 'button', disabled: busy, onClick: () => change(null) }, t('noExpert')),
+      h('div', { className: 'ww-picker-options' }, h('button', { type: 'button', disabled: busy, onClick: () => change(null) }, t('noExpert')),
         ...matches.map(role => h('button', { type: 'button', key: role.id, disabled: busy, 'aria-pressed': selected === role.id, onClick: () => change(role.id) }, h(Avatar, { expert: role, size: 36 }), h('span', null, h('strong', null, role.name), h('small', null, role.description)))), !matches.length && h('p', null, t('noExpertMatch'))),
-      busy && h('span', { role: 'status' }, t('loading')), error && h('p', { role: 'alert', className: 'yj-error' }, error)));
+      busy && h('span', { role: 'status' }, t('loading')), error && h('p', { role: 'alert', className: 'ww-error' }, error)));
   }
 
   api.bindExpertLifecycle(ctx);

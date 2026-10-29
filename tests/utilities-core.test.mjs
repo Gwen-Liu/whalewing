@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { LIMITS, validateFiles, decodeText, readOfficeZip, inspectOffice, wordToExcel, excelSheets, excelToWord, extractMedia, parseCsv, transformText, convertSpreadsheet, smallTextTool, fileTool } from '../src/utilities/core.js';
+import { unsupportedImageReason } from '../src/utilities/catalog.js';
+import { LIMITS, validateFiles, screenFiles, decodeText, readOfficeZip, inspectOffice, wordToExcel, excelSheets, excelToWord, extractMedia, parseCsv, transformText, convertSpreadsheet, smallTextTool, fileTool } from '../src/utilities/core.js';
 import { inspectImage, convertImages } from '../src/utilities/image.js';
 import { runUtility } from '../src/utilities/worker.js';
 
@@ -247,8 +248,31 @@ test('新增格式只读文件头：GIF、BMP、ICO、AVIF、JFIF 取得尺寸�
   const jpeg = Uint8Array.from([0xff, 0xd8, 0xff, 0xc0, 0, 11, 8, 0, 16, 0, 32, 1, 1, 0x11, 0, 0xff, 0xda, 0, 2]);
   assert.deepEqual(inspectImage(jpeg, '下载.jfif'), { width: 32, height: 16, mime: 'image/jpeg' });
   for (const name of ['x.jfif', 'x.avif', 'x.gif', 'x.bmp', 'x.ico']) validateFiles([{ name, size: 1 }], 'image');
-  assert.throws(() => validateFiles([{ name: 'IMG_0001.HEIC', size: 1 }], 'image'), /HEIC.*导出为 JPEG/);
-  assert.throws(() => validateFiles([{ name: '扫描.tiff', size: 1 }], 'image'), /TIFF 图片尚不支持/);
+  assert.throws(() => validateFiles([{ name: 'IMG_0001.HEIC', size: 1 }], 'image'), /HEIC.*导出为 JPEG 或 PNG/);
+  assert.throws(() => validateFiles([{ name: '扫描.tiff', size: 1 }], 'image'), /TIFF 图片尚不支持.*JPEG 或 PNG/);
+  assert.throws(() => validateFiles([{ name: '图标.svg', size: 1 }], 'image'), /SVG 图片尚不支持.*JPEG 或 PNG/);
+  // 按内容认出的 HEIC、TIFF 也给同一句建议。
+  assert.throws(() => inspectImage(Uint8Array.from([...ftyp('heic'), ...box('meta', [0, 0, 0, 0])]), 'IMG.jpg'), /HEIC.*导出为 JPEG 或 PNG/);
+  assert.throws(() => inspectImage(Uint8Array.from([...encoder.encode('II*\0'), 8, 0, 0, 0]), 'scan.png'), /TIFF.*JPEG 或 PNG/);
+});
+
+test('暂不支持的图片格式按扩展名认出（不分大小写），给出先导出为 JPEG 或 PNG 的说明；能处理的格式不提示', () => {
+  for (const name of ['IMG_0001.HEIC', 'a.heif', 'scan.TIF', '扫描.tiff', 'logo.svg']) assert.match(unsupportedImageReason(name), /尚不支持|暂不支持/, name);
+  assert.match(unsupportedImageReason('photo.heic'), /^HEIC \/ HEIF 照片暂不支持.*导出为 JPEG 或 PNG/);
+  for (const name of ['a.png', 'b.jpg', 'c.jfif', 'd.webp', 'e.avif', 'heic', 'heic.png', '', undefined]) assert.equal(unsupportedImageReason(name), '', String(name));
+});
+
+test('批量选件：个数和总输入整批检查，单个文件超过 25 MiB 或格式暂不支持只返回它的原因', () => {
+  const ok = { name: 'a.png', size: LIMITS.file }, big = { name: 'big.png', size: LIMITS.file + 1 };
+  assert.deepEqual(screenFiles([ok, big, { name: 'IMG.heic', size: 9 }, { name: 'empty.png', size: 0 }, { name: 'x.doc', size: 9 }], 'image').map(Boolean), [false, true, true, true, true]);
+  assert.match(screenFiles([big], 'image')[0], /25 MiB/);
+  // 不合格的文件不读取，也不计入总输入：4 个刚好 25 MiB 的合格文件加一个超大文件，合计没超过 100 MiB。
+  assert.deepEqual(screenFiles([ok, ok, ok, ok, big], 'image'), ['', '', '', '', screenFiles([big], 'image')[0]]);
+  assert.throws(() => screenFiles([ok, ok, ok, ok, ok], 'image'), /总输入超过 100 MiB/);
+  assert.throws(() => screenFiles(Array.from({ length: 21 }, () => ({ name: 'x.png', size: 1 })), 'image'), /1–20/);
+  assert.throws(() => screenFiles([ok, null], 'image'), /文件信息无效/);
+  // 其余功能项仍是任何一个不合格就整体停止。
+  assert.throws(() => validateFiles([ok, big], 'image'), /25 MiB/);
 });
 
 /** 画布夹具：输出大小随像素和质量变化，便于核对尺寸、格式与按目标大小压缩。 */
@@ -278,6 +302,31 @@ test('图片转换默认保持原尺寸；单张失败只记入明细，成功�
     await assert.rejects(convertImages([new File(['x'], 'a.png'), new File(['y'], 'b.png')], { action: 'image', format: 'png' }), /2 张图片全部处理失败/);
     await assert.rejects(convertImages([new File(['x'], 'a.png')], { action: 'image', format: 'png' }), /PNG|请选择有效/);
     await assert.rejects(convertImages([sized('a.png', 10, 10)], { action: 'image-rotate', format: 'ico', angle: 90, flip: 'none' }), /有效格式/, 'ICO 只用于转换格式');
+  });
+});
+
+test('一批里有超过 25 MiB 的文件或 HEIC 照片时，只有它们记为失败并写明原因，其余照常处理；拼接仍整体停止', async () => {
+  await withCanvas(async outputs => {
+    let reads = 0;
+    const unread = (name, size) => ({ name, size, async arrayBuffer() { reads++; return new ArrayBuffer(size); } });
+    const big = unread('超大.png', LIMITS.file + 1), heic = unread('IMG_0001.HEIC', 64), progress = [];
+    const result = await convertImages([sized('小图.png', 120, 80), big, heic, sized('另一张.png', 60, 40)], { action: 'image', mode: 'convert', format: 'keep', quality: 0.9 }, (done, total) => progress.push([done, total]));
+    assert.deepEqual(result.files.map(file => file.name), ['1-小图-处理.png', '4-另一张-处理.png'], '其余照常处理，沿用原序号');
+    assert.deepEqual(outputs, [[120, 80, 'image/png'], [60, 40, 'image/png']]);
+    assert.deepEqual(result.failed, [1, 2], '只重试失败的会只重试这两个');
+    assert.match(result.listing[1], /^超大\.png：失败，.*25 MiB/);
+    assert.match(result.listing[2], /^IMG_0001\.HEIC：失败，HEIC.*导出为 JPEG 或 PNG/);
+    assert.match(result.summary, /^已处理 2 张图片，2 张失败/);
+    assert.deepEqual(progress, [[0, 4], [1, 4], [2, 4], [3, 4]]);
+    assert.equal(reads, 0, '不合格的文件不读取');
+    // 只选了一个不合格的文件：直接说明原因，不生成结果。
+    await assert.rejects(convertImages([big], { action: 'image', mode: 'convert', format: 'png' }), /25 MiB/);
+    await assert.rejects(convertImages([heic], { action: 'image', mode: 'convert', format: 'png' }), /HEIC.*导出为 JPEG 或 PNG/);
+    await assert.rejects(convertImages([big, heic], { action: 'image', mode: 'convert', format: 'png' }), /2 张图片全部处理失败/);
+    // 拼接要用到每一张：有一张不合格就整体停止，并写明是哪个文件。
+    outputs.length = 0;
+    await assert.rejects(convertImages([sized('a.png', 10, 10), big], { action: 'image-stitch', format: 'png', direction: 'vertical' }), /超大\.png：.*25 MiB/);
+    assert.deepEqual(outputs, []); assert.equal(reads, 0);
   });
 });
 

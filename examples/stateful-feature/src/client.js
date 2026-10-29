@@ -85,19 +85,19 @@ export function apply(ctx) {
           void cleanup().catch(error => console.warn('保存文本远程连接清理失败', error));
         };
       }, [workbench, attempt]);
-      return h('section', { className: 'yj-section', 'aria-label': '保存文本' },
+      return h('section', { className: 'ww-section', 'aria-label': '保存文本' },
         h('h2', null, '保存文本'),
-        h('p', { className: 'yj-muted' }, '当前 profile 单独保留一条文本。关闭或卸载保留数据；清除按钮只清本扩展的保存文本。'),
+        h('p', { className: 'ww-muted' }, '当前 profile 单独保留一条文本。关闭或卸载保留数据；清除按钮只清本扩展的保存文本。'),
         !connected ? h('button', { type: 'button', disabled: connecting, onClick: () => { setConnected(false); setAttempt(value => value + 1); } }, connecting ? '正在连接…' : '重新连接') :
           h('div', null,
             h('p', { style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } }, saved ? saved.present ? saved.text : '尚未保存文本' : '请点击刷新读取保存状态'),
-            h('div', { className: 'yj-row' },
+            h('div', { className: 'ww-row' },
               h('button', { type: 'button', disabled: busy, onClick: () => execute({ action: 'read' }) }, '刷新'),
-              h('button', { type: 'button', className: 'yj-primary', disabled: busy || !saved, onClick: () => { editRevision.current = saved.revision; setDraft(saved.text); setEditing(true); } }, '编辑文本'),
-              h('button', { type: 'button', className: 'yj-danger', disabled: busy || !saved?.present, onClick: () => { purgeRevision.current = saved.revision; setConfirming(true); } }, '清除保存文本'))),
+              h('button', { type: 'button', className: 'ww-primary', disabled: busy || !saved, onClick: () => { editRevision.current = saved.revision; setDraft(saved.text); setEditing(true); } }, '编辑文本'),
+              h('button', { type: 'button', className: 'ww-danger', disabled: busy || !saved?.present, onClick: () => { purgeRevision.current = saved.revision; setConfirming(true); } }, '清除保存文本'))),
         active && editing && h(Drawer, { title: '编辑保存文本', busy, onClose: () => setEditing(false), footer: [
-          h('button', { key: 'save', type: 'button', className: 'yj-primary', disabled: busy || !draft.trim(), onClick: () => execute({ action: 'save', expectedRevision: editRevision.current, text: draft }) }, '保存文本'),
-        ] }, h('label', { className: 'yj-field' }, '文本内容', h('textarea', { value: draft, maxLength: 4000, rows: 8, disabled: busy, style: { width: '100%', boxSizing: 'border-box' }, onChange: event => setDraft(event.target.value) }))),
+          h('button', { key: 'save', type: 'button', className: 'ww-primary', disabled: busy || !draft.trim(), onClick: () => execute({ action: 'save', expectedRevision: editRevision.current, text: draft }) }, '保存文本'),
+        ] }, h('label', { className: 'ww-field' }, '文本内容', h('textarea', { value: draft, maxLength: 4000, rows: 8, disabled: busy, style: { width: '100%', boxSizing: 'border-box' }, onChange: event => setDraft(event.target.value) }))),
         active && confirming && h(ConfirmDialog, { title: '清除保存文本', message: '将清除当前 profile 中本扩展保存的 1 条文本，不删除个人知识、历史会话、定时任务或其他插件数据。保留空值版本用于防止旧窗口覆盖。', confirmLabel: '确认清除文本', cancelLabel: '保留文本', danger: true, busy,
           onConfirm: () => execute({ action: 'purge', expectedRevision: purgeRevision.current, confirmation: 'DELETE_SAVED_TEXT' }), onCancel: () => setConfirming(false) }));
     }

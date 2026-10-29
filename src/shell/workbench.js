@@ -13,6 +13,8 @@ export function createWorkbenchService(ctx, { bridge, clients, workbenchSession,
   const presentation = createPresentation(bridge);
   let alive = true, errorShown = false;
   let assistant = null, mounted = false;
+  // 离开鲸翼时停在哪个页签；离开期间它被关掉了，回来时在右上角说明（用户 2026-10-28 确认）。
+  let leftTab = null, closedWhileAway = null;
   const scopes = new Map(), entering = new Map(), readiness = new Map(), clientErrors = new Map(), clientRetries = new Map(), retrying = new Set();
   let features = null, retryFeature, manageFeatures, epoch = 0, nextMount = 0, noticeOwner;
   const builtinViews = new Map(), admissions = new Map(), retiringViews = new Set();
@@ -115,6 +117,11 @@ export function createWorkbenchService(ctx, { bridge, clients, workbenchSession,
         visited.delete(id); refreshers.delete(id); guards.delete(id); blockers.delete(id);
         // 默认页首次收到 Host 实例也会换代；仍在当前页时保留访问事实，下一次切页才有正确的保活依据。
         if (alive && state.tab === id && id === 'experts') visited.add('experts');
+        if (alive && !mounted && leftTab === id && id !== 'experts') {
+          const entry = tabs.find(value => value.options.id === id);
+          closedWhileAway = typeof entry?.options.label === 'function' ? entry.options.label() : entry?.options.label || id;
+          leftTab = null;
+        }
         if (alive && state.tab === id && id !== 'experts') {
           const entry = tabs.find(value => value.options.id === id);
           const label = typeof entry?.options.label === 'function' ? entry.options.label() : entry?.options.label || id;
@@ -154,9 +161,12 @@ export function createWorkbenchService(ctx, { bridge, clients, workbenchSession,
       setManageFeatures(fn) { manageFeatures = fn; emit({}); },
       canManageFeatures: () => Boolean(manageFeatures),
       pageMounted(id) { const entry = entering.get(id); if (entry) { entering.delete(id); entry.resolve(refresh(id, { entering: true })); if (entry.warning) notify(entry.warning, { kind: 'info' }); } },
-      mount() { mounted = true; },
+      mount() {
+        mounted = true; leftTab = null;
+        if (closedWhileAway) { notify(`「${closedWhileAway}」已关闭`, { kind: 'info' }); closedWhileAway = null; }
+      },
       reset() {
-        mounted = false;
+        mounted = false; leftTab = state.tab;
         if (operation.current) { operation.current.cancelled = true; operation.current.controller.abort(); operation.current = null; }
         for (const { resolve } of entering.values()) resolve(); entering.clear();
         visited.clear(); visited.add('experts');
@@ -255,15 +265,20 @@ export function createWorkbenchView({ React, css, Logo, Modal, ActionMenu }) {
     const button = (key, onClick, disabled = false, props = {}) => h('button', { type: 'button', onClick, disabled: state.busy || disabled, ...props }, t(key));
     // 标志、页签和“…”同在一行；“管理功能”“刷新”是低频动作，收进右端菜单。
     const tools = [core.canManageFeatures() && h('button', { type: 'button', key: 'manage', onClick: workbench.manageFeatures }, '管理功能'), core.hasRefresh(state.tab) && h(React.Fragment, { key: 'refresh' }, button('refresh', () => core.refresh()))].filter(Boolean);
-    return h('div', { className: 'yj-page' }, h('style', null, css),
-      h('header', { className: 'yj-header yj-workbench-header' }, h('h1', null, h(Logo, { size: 24, tone: 'brand' }), t('panel')),
-      h('nav', { className: 'yj-tabs', 'aria-label': t('panel') }, ...entries.map((entry, index) => {
-        const id = entry.options.id, meta = core.metadata(id);
-        return h('button', { type: 'button', key: id, 'data-tab': parts.find(part => part.id === id)?.label || id, disabled: state.busy, 'aria-pressed': state.tab === id, className: [state.tab === id ? 'yj-selected' : '', meta.placement === 'end' && (index === 0 || core.metadata(entries[index - 1].options.id).placement !== 'end') ? 'yj-world-tab' : ''].filter(Boolean).join(' '), onClick: () => workbench.openTab(id) }, typeof entry.options.label === 'function' ? entry.options.label() : entry.options.label, ...(meta.icon ? [h('span', { className: 'yj-tab-icon', 'aria-hidden': true, style: { display: 'inline-block', width: 16, height: 16, flexShrink: 0, backgroundColor: 'currentColor', mask: `url("data:image/svg+xml,${encodeURIComponent(meta.icon)}") center / contain no-repeat`, WebkitMask: `url("data:image/svg+xml,${encodeURIComponent(meta.icon)}") center / contain no-repeat` } })] : []));
-      })),
+    const tab = entry => {
+      const id = entry.options.id, meta = core.metadata(id);
+      return h('button', { type: 'button', key: id, 'data-tab': parts.find(part => part.id === id)?.label || id, disabled: state.busy, 'aria-pressed': state.tab === id, className: state.tab === id ? 'ww-selected' : '', onClick: () => workbench.openTab(id) }, typeof entry.options.label === 'function' ? entry.options.label() : entry.options.label, ...(meta.icon ? [h('span', { className: 'ww-tab-icon', 'aria-hidden': true, style: { display: 'inline-block', width: 16, height: 16, flexShrink: 0, backgroundColor: 'currentColor', mask: `url("data:image/svg+xml,${encodeURIComponent(meta.icon)}") center / contain no-repeat`, WebkitMask: `url("data:image/svg+xml,${encodeURIComponent(meta.icon)}") center / contain no-repeat` } })] : []));
+    };
+    // 放末尾的页签（模型世界）不随功能开关增减，单独成组放在这一行最右，紧挨着“…”。
+    const atEnd = entry => core.metadata(entry.options.id).placement === 'end';
+    const endTabs = entries.filter(atEnd);
+    return h('div', { className: 'ww-page' }, h('style', null, css),
+      h('header', { className: 'ww-header ww-workbench-header' }, h('h1', null, h(Logo, { size: 24, tone: 'brand' }), t('panel')),
+      h('nav', { className: 'ww-tabs', 'aria-label': t('panel') }, ...entries.filter(entry => !atEnd(entry)).map(tab)),
+      endTabs.length > 0 && h('div', { className: 'ww-tabs ww-tabs-end' }, ...endTabs.map(tab)),
       tools.length > 0 && h(ActionMenu, { label: t('more'), iconOnly: true }, ...tools)),
-      state.busy && h('div', { className: 'yj-busy', role: 'status' }, h('span', { className: 'yj-spinner', 'aria-label': t('loading') }), h('button', { type: 'button', onClick: core.stop }, t('stopWait'))),
-      state.recoverySession && h(Modal, { title: t('workbenchRecoverTitle'), busy: state.busy, onClose: core.closeRecovery, className: 'yj-confirm' }, h('div', { className: 'yj-confirm-body' }, h('p', null, t('prepareHelp')), h('p', null, h('code', null, state.recoverySession))), h('footer', { className: 'yj-dialog-actions' }, button('inspectWorkbench', () => core.bridge.open(state.recoverySession), core.guarded()), button('prepareWorkbench', core.restartWorkbench, core.guarded(), { className: 'yj-primary' }))),
-      h('div', { className: `yj-workspace yj-workspace-${state.layout}` }, h('main', { className: 'yj-view' }, ...entries.filter(entry => state.tab === entry.options.id || (core.visited.has(entry.options.id) && core.metadata(entry.options.id).keepAlive)).map(entry => h('div', { key: core.mountKey(entry.options.id), hidden: state.tab !== entry.options.id, style: { display: state.tab === entry.options.id ? 'contents' : undefined } }, h(TabContent, { core, id: entry.options.id }, renderSlot(TAB_SLOT, { active: state.tab === entry.options.id, workbench: core.scope(entry.options.id), SessionProvider, renderSlot }, { only: entry.options.id }))))), core.dockEnabled() && h(React.Fragment, { key: core.mountKey('assistant') }, renderSlot(DOCK_SLOT, { workbench: core.scope('assistant'), SessionProvider, renderSlot }))));
+      state.busy && h('div', { className: 'ww-busy', role: 'status' }, h('span', { className: 'ww-spinner', 'aria-label': t('loading') }), h('button', { type: 'button', onClick: core.stop }, t('stopWait'))),
+      state.recoverySession && h(Modal, { title: t('workbenchRecoverTitle'), busy: state.busy, onClose: core.closeRecovery, className: 'ww-confirm' }, h('div', { className: 'ww-confirm-body' }, h('p', null, t('prepareHelp')), h('p', null, h('code', null, state.recoverySession))), h('footer', { className: 'ww-dialog-actions' }, button('inspectWorkbench', () => core.bridge.open(state.recoverySession), core.guarded()), button('prepareWorkbench', core.restartWorkbench, core.guarded(), { className: 'ww-primary' }))),
+      h('div', { className: `ww-workspace ww-workspace-${state.layout}` }, h('main', { className: 'ww-view' }, ...entries.filter(entry => state.tab === entry.options.id || (core.visited.has(entry.options.id) && core.metadata(entry.options.id).keepAlive)).map(entry => h('div', { key: core.mountKey(entry.options.id), hidden: state.tab !== entry.options.id, style: { display: state.tab === entry.options.id ? 'contents' : undefined } }, h(TabContent, { core, id: entry.options.id }, renderSlot(TAB_SLOT, { active: state.tab === entry.options.id, workbench: core.scope(entry.options.id), SessionProvider, renderSlot }, { only: entry.options.id }))))), core.dockEnabled() && h(React.Fragment, { key: core.mountKey('assistant') }, renderSlot(DOCK_SLOT, { workbench: core.scope('assistant'), SessionProvider, renderSlot }))));
   };
 }

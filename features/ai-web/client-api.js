@@ -2,10 +2,18 @@ import { aiWebEntries } from './catalog.js';
 import { aiWebContract } from './contract.js';
 /** 领域状态与读回只在本模块持有，宿主机制通过显式桥接消费。 */
 export function createAiWebClient(bridge, t, z, workbenchSession) {
-    const { featureRemote, unwrap, failure } = bridge;
+    const { featureRemote, unwrap, failure, hostFailure } = bridge;
     const { prepareSession, browserAvailable: requireBrowser } = bridge;
     const NS = 'whalewing', aiWebSchema = aiWebContract(z);
-    const aiWebRequest = async (input, signal) => aiWebSchema.result.parse(unwrap(await featureRemote('whalewingAiWeb').manageAiWeb(aiWebSchema.input.parse(input), signal)));
+    // 填写的内容先在本机按契约核对：不合格时和宿主报错一样经报错指南写成一句话（如“网址只能以 http:// 或 https:// 开头”），
+    // 不把校验结果的原始 JSON 交给页面；原文只进开发者控制台。读回不合契约按“结果不完整”处理。
+    const aiWebRequest = async (input, signal) => {
+      const parsed = aiWebSchema.input.safeParse(input);
+      if (!parsed.success) throw hostFailure(parsed.error.message, 'INPUT');
+      const result = aiWebSchema.result.safeParse(unwrap(await featureRemote('whalewingAiWeb').manageAiWeb(parsed.data, signal)));
+      if (!result.success) throw failure(t('badReply'), 'bad_reply');
+      return result.data;
+    };
     // AI 入口 → 浏览器标签的对应关系，按工作台会话分开；只是个人偏好，存不下也不影响打开。
     const aiTabs = {
       key: 'whalewing.aiWebTabs.v1',
@@ -36,7 +44,26 @@ export function createAiWebClient(bridge, t, z, workbenchSession) {
       }
     }
     // 未适配的 DSH 不能把浏览器铺满工作台：改为打开专用的「AI 网页」会话，在它右侧的内置浏览器里打开。
-    const aiWebKey = `${NS}:aiweb:${typeof window === 'undefined' ? '' : window.location.origin}`;
+    const origin = typeof window === 'undefined' ? '' : window.location.origin;
+    const aiWebKey = `${NS}:aiweb:${origin}`;
+    // 切到会话后工作台页面会卸载，记下最后一次在「AI 网页」会话里打开的入口，回来时据此标“正在用”。只是本机偏好，读写失败当没有。
+    const aiWebCurrentKey = `${NS}:aiweb-current:${origin}`;
+    function rememberAiInConversation(sessionId, entryId) {
+      try { window.localStorage.setItem(aiWebCurrentKey, JSON.stringify({ sessionId, entryId })); } catch { /* 记不住时回来不标“正在用”。 */ }
+    }
+    /** 记下的入口 id；记下时的会话已不是现在的「AI 网页」会话、会话已不在 DSH 会话列表里或已归档时返回空。入口还在不在由页面按目录核对。 */
+    function currentAiInConversation() {
+      try {
+        const saved = JSON.parse(window.localStorage.getItem(aiWebCurrentKey)), sessionId = window.localStorage.getItem(aiWebKey);
+        if (!sessionId || saved?.sessionId !== sessionId || typeof saved.entryId !== 'string') return '';
+        // 会话列表还没读完时不据此判断，免得刚回来时误把“正在用”去掉。
+        const sessions = bridge.sessionSnapshot();
+        if (sessions?.phase === 'ready' && !sessions.byId?.[sessionId]) return '';
+        const archived = bridge.workspaces()?.archivedSessionIds;
+        if (Array.isArray(archived) && archived.includes(sessionId)) return '';
+        return saved.entryId;
+      } catch { return ''; }
+    }
     async function ensureAiWebSession(signal) {
       let id;
       try { id = window.localStorage.getItem(aiWebKey) || undefined; } catch { /* 记不住时本次新建。 */ }
@@ -69,12 +96,13 @@ export function createAiWebClient(bridge, t, z, workbenchSession) {
             await new Promise(resolve => setTimeout(resolve, 100));
           }
         }
+        if (url !== undefined && key) rememberAiInConversation(id, key);
         if (typeof sidebar.isExpanded === 'function' && !sidebar.isExpanded()) sidebar.toggleExpanded?.();
       } catch (error) { bridge.notify(error.message, { kind: 'error' }); throw error; }
     }
 
   return {
-    aiWebRequest, openBrowser, openAiInConversation, retain: bridge.retain,
+    aiWebRequest, openBrowser, openAiInConversation, currentAiInConversation, retain: bridge.retain,
     supportsInlinePresentation: bridge.canFocusPresentation, browserAvailable: bridge.browserAvailable, browserMounted: bridge.browserMounted,
     ensureWorkbench: workbenchSession.ensureWorkbench,
   };

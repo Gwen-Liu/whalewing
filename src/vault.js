@@ -94,6 +94,14 @@ export function relativeName(value, internal = false) {
   return name;
 }
 
+// 员工填的笔记路径不合规时，改报个人知识的填写类错误 NOTE_PATH（原句直接给员工看），说清只能放在十个分区里，
+// 不归成“本机文件问题”。relativeName、readableName 本身仍报 PATH：技能目录校验和链接解析也用它们。
+const noteRule = '笔记只能放在知识库的十个分区里（00-系统 到 90-归档），以 .md 结尾，不能用绝对路径或“..”，例如 40-知识/笔记名.md';
+const readRule = '只能打开知识库十个分区里或根目录下的 Markdown 笔记，例如 40-知识/笔记名.md';
+function notePath(check, message) {
+  try { return check(); } catch (error) { if (error?.code === 'PATH') fail('NOTE_PATH', message); throw error; }
+}
+
 /** 读取额外接受非隐藏根级 Markdown；写入仍只使用 relativeName 的十区规则。 */
 export function readableName(value) {
   const name = relativeName(value, true);
@@ -103,14 +111,58 @@ export function readableName(value) {
 
 const readOnlyNote = name => !name.includes('/') || name.startsWith('00-系统/规则/') || name.startsWith('00-系统/模板/') || !name.endsWith('.md');
 
+/**
+ * \u5C5E\u6027\u91CC\u7684 [[\u94FE\u63A5]] \u548C\u6B63\u6587\u94FE\u63A5\u4E00\u6837\u7B97\u51FA\u94FE\u3001\u53CD\u94FE\u548C\u56FE\u8C31\uFF08Obsidian \u4E5F\u8FD9\u6837\u7B97\uFF09\uFF0C\u6392\u5728\u6B63\u6587\u94FE\u63A5\u4E4B\u540E\uFF0C\u4E0D\u6539\u6B63\u6587\u94FE\u63A5\u7684\u5E8F\u53F7\u3002
+ * \u540C\u65F6\u6309\u539F\u987A\u5E8F\u6574\u7406\u5C5E\u6027\u7ED9\u9605\u8BFB\u533A\u5C55\u793A\uFF1B\u94FE\u63A5\u503C\u5E26\u4E0A\u5B83\u5728 links \u91CC\u7684\u5E8F\u53F7\uFF0C\u884C\u53F7\u53D6\u5B83\u5728\u5C5E\u6027\u533A\u91CC\u51FA\u73B0\u7684\u90A3\u4E00\u884C\u3002
+ */
+function propertyLinks(fm, start) {
+  const lines = fm.normalized.split('\n'), end = Math.max(1, lines.indexOf('---', 1));
+  let cursor = 1;
+  const lineOf = token => { for (let i = cursor; i < end; i += 1) if (lines[i].includes(token)) { cursor = i; return i + 1; } return 1; };
+  const show = value => value === null || value === undefined ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value);
+  const links = [], properties = [];
+  for (const [key, raw] of Object.entries(fm.data)) {
+    const values = [];
+    for (const item of Array.isArray(raw) ? raw : [raw]) {
+      const text = show(item);
+      let last = 0;
+      for (const match of text.matchAll(/!?\[\[([^\]\n]+)\]\]/g)) {
+        const [target, ...alias] = match[1].split('|');
+        if (!target.trim()) continue;
+        const label = alias.join('|').trim() || target.trim();
+        if (match.index > last) values.push({ text: text.slice(last, match.index) });
+        values.push({ text: label, link: start + links.length });
+        links.push({ target: target.trim(), label, kind: 'wiki', line: lineOf(match[0]), property: key });
+        last = match.index + match[0].length;
+      }
+      if (last < text.length) values.push({ text: text.slice(last) });
+    }
+    properties.push({ key, values });
+  }
+  return { links, properties };
+}
+
 function parseRecord(record) {
-  let body = record.content.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n'), metadata = {}, lineOffset = 0;
+  let body = record.content.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n'), metadata = {}, lineOffset = 0, fm = null;
   try {
-    const fm = frontmatter(record.content);
+    fm = frontmatter(record.content);
     metadata = fm.data; body = fm.body;
     lineOffset = fm.normalized.slice(0, fm.normalized.length - body.length).split('\n').length - 1;
   } catch (error) { if (error.code !== 'METADATA') throw error; }
-  return { ...record, title: path.posix.basename(record.path, '.md'), aliases: Array.isArray(metadata.aliases) ? metadata.aliases.filter(item => typeof item === 'string') : [], parsed: parseLinks(body, lineOffset) };
+  const parsed = parseLinks(body, lineOffset);
+  parsed.properties = [];
+  if (fm) { const extra = propertyLinks(fm, parsed.links.length); parsed.links.push(...extra.links); parsed.properties = extra.properties; }
+  return { ...record, title: path.posix.basename(record.path, '.md'), aliases: Array.isArray(metadata.aliases) ? metadata.aliases.filter(item => typeof item === 'string') : [], parsed };
+}
+
+// \u53CD\u94FE\u65C1\u8FB9\u663E\u793A\u94FE\u63A5\u6240\u5728\u90A3\u4E00\u884C\u7684\u5927\u610F\uFF1A\u53BB\u6389\u5217\u8868\u3001\u6807\u9898\u7B49\u8BB0\u53F7\uFF0C\u94FE\u63A5\u53EA\u7559\u663E\u793A\u6587\u5B57\uFF08\u6CA1\u5199\u522B\u540D\u7684\u53EA\u7559\u7B14\u8BB0\u540D\uFF0C\u6807\u9898\u5B9A\u4F4D\u5199\u6210\u201C\u7B14\u8BB0 \u203A \u6807\u9898\u201D\uFF09\u3002
+const linkText = target => { const [file, ...rest] = target.split('#'); return [file.split('/').at(-1), ...rest].filter(Boolean).join(' \u203A '); };
+function backlinkContext(content, line) {
+  const text = (content.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').split('\n')[line - 1] || '').trim()
+    .replace(/^(?:#{1,6}\s+|>\s*|[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+)/, '')
+    .replace(/!?\[\[([^\]|\n]+)\|([^\]\n]+)\]\]/g, '$2').replace(/!?\[\[([^\]\n]+)\]\]/g, (_, target) => linkText(target)).replace(/!?\[([^\]\n]*)\]\([^)\n]*\)/g, '$1')
+    .replace(/\*\*|__|`/g, '').trim();
+  return [...text].length > 160 ? `${[...text].slice(0, 159).join('')}\u2026` : text;
 }
 
 // 全库关系不可用时保留正文，不把尚未解析的目标伪装成缺失链接。
@@ -305,14 +357,14 @@ export class Vault {
 
   async read(name) {
     await this.requireReady();
-    const clean = readableName(name);
+    const clean = notePath(() => readableName(name), readRule);
     const result = await this.readInternal(clean);
     if (!result) fail('NOT_FOUND', '笔记已不存在');
     return { path: clean, content: result.content, hash: result.hash, readOnly: readOnlyNote(clean) };
   }
 
   editable(name) {
-    const clean = relativeName(name);
+    const clean = notePath(() => relativeName(name), noteRule);
     if (clean.startsWith('00-系统/规则/') || clean.startsWith('00-系统/模板/')) fail('FIXED_RULE', '固定知识规则及模板由插件维护，不由日常生成修改');
     return clean;
   }
@@ -407,9 +459,10 @@ export class Vault {
   async browse(directory = '', offset = 0, signal) {
     abort(signal);
     await this.requireReady();
-    if (typeof directory !== 'string') fail('PATH', '目录必须是知识库内相对路径');
-    const clean = directory === '' ? '' : relativeName(directory, true);
-    if (clean && (!zones.includes(clean.split('/')[0]) || clean.split('/').some(part => part.startsWith('.')))) fail('PATH', '只接受知识库十区内的目录');
+    const directoryRule = '只能浏览知识库十个分区里的目录，例如 40-知识';
+    if (typeof directory !== 'string') fail('NOTE_PATH', directoryRule);
+    const clean = directory === '' ? '' : notePath(() => relativeName(directory, true), directoryRule);
+    if (clean && (!zones.includes(clean.split('/')[0]) || clean.split('/').some(part => part.startsWith('.')))) fail('NOTE_PATH', directoryRule);
     if (!Number.isSafeInteger(offset) || offset < 0) fail('OFFSET', '目录分页位置无效');
     const entries = [];
     if (!clean) {
@@ -526,19 +579,21 @@ export class Vault {
   }
 
   async document(name, signal) {
-    const clean = readableName(name);
+    const clean = notePath(() => readableName(name), readRule);
     await this.read(clean);
     let records;
     try { records = await this.index(signal); }
     catch (error) {
       abort(signal);
       const current = parseRecord(await this.read(clean));
-      return { path: current.path, content: current.content, hash: current.hash, readOnly: current.readOnly, view: unlinkedView(current.parsed.view), links: [], anchors: current.parsed.anchors, backlinks: [], totalBacklinks: 0, relationsIssue: error.message };
+      const properties = current.parsed.properties.map(({ key, values }) => ({ key, values: values.map(({ text }) => ({ text })) }));
+      return { path: current.path, content: current.content, hash: current.hash, readOnly: current.readOnly, view: unlinkedView(current.parsed.view), links: [], anchors: current.parsed.anchors, properties, backlinks: [], totalBacklinks: 0, relationsIssue: error.message };
     }
     const note = records.find(record => record.path === clean);
     if (!note) fail('NOT_FOUND', '笔记已不存在');
-    const backlinks = records.flatMap(record => record.links.filter(link => link.path === clean).map(link => ({ path: record.path, title: record.title, line: link.line })));
-    return { path: note.path, content: note.content, hash: note.hash, readOnly: note.readOnly, view: note.parsed.view, links: note.links, anchors: note.parsed.anchors, backlinks: backlinks.slice(0, this.limits.maxResults), totalBacklinks: backlinks.length };
+    const backlinks = records.flatMap(record => record.links.filter(link => link.path === clean).map(link => ({ record, link })));
+    const shown = backlinks.slice(0, this.limits.maxResults).map(({ record, link }) => ({ path: record.path, title: record.title, line: link.line, ...(link.property ? { property: link.property } : { context: backlinkContext(record.content, link.line) }) }));
+    return { path: note.path, content: note.content, hash: note.hash, readOnly: note.readOnly, view: note.parsed.view, links: note.links, anchors: note.parsed.anchors, properties: note.parsed.properties, backlinks: shown, totalBacklinks: backlinks.length };
   }
 
   async graph(args, signal) {
@@ -568,7 +623,7 @@ export class Vault {
     }
     let selected = new Set(allNodes.map(record => record.path));
     if (args.path) {
-      const center = readableName(args.path);
+      const center = notePath(() => readableName(args.path), readRule);
       if (!selected.has(center)) fail('NOT_FOUND', '当前笔记已不存在，请回读后继续');
       selected = new Set([center]);
       for (const edge of pairs.values()) if (edge.source === center || edge.target === center) { selected.add(edge.source); selected.add(edge.target); }

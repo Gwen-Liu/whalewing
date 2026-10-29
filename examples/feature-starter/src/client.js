@@ -41,16 +41,16 @@ export function apply(ctx) {
         });
       } finally { if (!local.signal.aborted) setBusy(false); }
     };
-    return h('section', { className: 'yj-section', 'aria-label': '文本预览' },
+    return h('section', { className: 'ww-section', 'aria-label': '文本预览' },
       h('h2', null, '文本预览'),
-      h('p', { className: 'yj-muted' }, '文字只在本次打开期间暂存，关闭扩展或工作台后清空；不会写入个人知识。'),
-      h('label', { className: 'yj-field' }, '预览文字', h('textarea', {
+      h('p', { className: 'ww-muted' }, '文字只在本次打开期间暂存，关闭扩展或工作台后清空；不会写入个人知识。'),
+      h('label', { className: 'ww-field' }, '预览文字', h('textarea', {
         'aria-label': '预览文字', rows: 6, maxLength: 4000, value: text, disabled: busy,
         style: { width: '100%', boxSizing: 'border-box' },
         onChange: event => { draft.current = event.target.value; setText(event.target.value); },
       })),
-      h('div', { className: 'yj-row' },
-        h('button', { type: 'button', className: 'yj-primary', disabled: busy || !text.trim(), onClick: () => setPreview(true) }, '预览文本'),
+      h('div', { className: 'ww-row' },
+        h('button', { type: 'button', className: 'ww-primary', disabled: busy || !text.trim(), onClick: () => setPreview(true) }, '预览文本'),
         h('button', { type: 'button', disabled: busy, onClick: demonstrate }, '运行本地演示')),
       active && preview && h(Modal, { title: '文本预览', onClose: () => setPreview(false) },
         h('div', { style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', overflowY: 'auto', maxHeight: '60vh' } }, text)));

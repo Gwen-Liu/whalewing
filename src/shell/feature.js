@@ -23,7 +23,7 @@ export function createDeferredView(React, load, create, label) {
     }, [active, View, attempt, cancelled]);
     if (View) return React.createElement(View, { ...props, active, workbench });
     if (!active) return null;
-    return React.createElement('section', { className: 'yj-task-empty', role: failed ? 'alert' : 'status' },
+    return React.createElement('section', { className: 'ww-task-empty', role: failed ? 'alert' : 'status' },
       failed || cancelled ? React.createElement('button', { type: 'button', onClick: restart }, '重新加载') : React.createElement(React.Fragment, null,
         React.createElement('span', null, '正在加载…'), React.createElement('button', { type: 'button', onClick: () => setCancelled(true) }, '停止等待')));
   };
@@ -44,7 +44,7 @@ export function registerFeature(ctx, id, createView, { contract, namespace, depe
       if (!problem && wasBlocked.current && props.active !== false) core.refresh(id, { entering: true });
       wasBlocked.current = Boolean(problem);
     }, [Boolean(problem)]);
-    if (problem) return props.active === false ? null : React.createElement('section', { className: id === 'assistant' ? 'yj-assistant-bubble' : 'yj-task-empty', role: problem.error ? 'alert' : 'status' },
+    if (problem) return props.active === false ? null : React.createElement('section', { className: id === 'assistant' ? 'ww-assistant-bubble' : 'ww-task-empty', role: problem.error ? 'alert' : 'status' },
       React.createElement('span', null, problem.error || '正在连接功能…'),
       problem.error && React.createElement('button', { type: 'button', disabled: problem.retrying, onClick: () => core.retryFeature(blocked) }, '重试'));
     return React.createElement(View, props);
@@ -78,9 +78,9 @@ export function useFeature(React, workbench, id) {
   }, [workbench, id]);
   const run = (task, success) => workbench.run(task, success, error => current.current.onError?.(error));
   const button = (key, onClick, disabled = false, props = {}) => h('button', { type: 'button', onClick: (...args) => { workbench.notify(null); return onClick(...args); }, disabled: snapshot.busy || disabled, ...props }, t(key));
-  const field = (key, value, onChange, props = {}) => h('label', { className: 'yj-field' }, t(key), h('input', { value, onChange: event => onChange(event.target.value), disabled: snapshot.busy, ...props }));
+  const field = (key, value, onChange, props = {}) => h('label', { className: 'ww-field' }, t(key), h('input', { value, onChange: event => onChange(event.target.value), disabled: snapshot.busy, ...props }));
   return { api, t, notify: workbench.notify, busy: snapshot.busy, operation, run, setError: workbench.setError, button, field,
-    row: (...children) => h('div', { className: 'yj-row' }, ...children), help: key => h('p', { className: 'yj-muted' }, t(key)),
+    row: (...children) => h('div', { className: 'ww-row' }, ...children), help: key => h('p', { className: 'ww-muted' }, t(key)),
     bind: handlers => { current.current = handlers; }, dirty: core.guarded(), openAssistant: prompt => workbench.assistant.open(prompt),
   };
 }

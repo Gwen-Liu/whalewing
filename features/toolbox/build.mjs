@@ -2,7 +2,7 @@ import { buildSync } from 'esbuild';
 import { fileURLToPath } from 'node:url';
 import { utilityLicenseComment } from '../../scripts/utility-licenses.mjs';
 
-/** Worker、浏览器转换实现和审核许可一起构建，只由工具台承担重资源闭包。 */
+/** Worker、浏览器转换实现和审核许可一起构建，只由办公工坊承担重资源闭包。 */
 export function buildToolbox() {
   const root = fileURLToPath(new URL('../../', import.meta.url));
   const options = { absWorkingDir: root, bundle: true, platform: 'browser', format: 'iife', target: 'es2022', minify: true, write: false, metafile: true };

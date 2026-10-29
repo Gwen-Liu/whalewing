@@ -22,7 +22,7 @@ import Storage from '@deepseek-ai/dsh-storage';
 import * as StorageJson from '@deepseek-ai/dsh-storage-json';
 import * as StorageDomain from '@deepseek-ai/dsh-storage-domain';
 import { TypertRegistry } from '@deepseek-ai/dsh-typert-registry';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import * as Experts from '../features/experts/host.js';
@@ -96,6 +96,10 @@ async function harness(t, persistence = true, expertConfig = {}) {
   const mounted = await mountFeatures(ctx, directory, { experts: expertConfig }, false);
   const expertPlugin = mounted.service.registry.bases.get('experts').fiber;
   await expertPlugin.await();
+  // 保存专家时会列出可选技能；真去列会先把自带的几十个技能全部复制进临时目录，全量并行时要十几秒、超过保存的 15 秒时限。
+  // 专家测试只用到技能名：按自带技能的目录名给出候选（技能候选本身在 skill-library 测试里测），个别测试再自己替换。
+  const bundled = (await readdir(new URL('../content/skills/', import.meta.url), { withFileTypes: true })).filter(item => item.isDirectory()).map(item => ({ name: item.name, description: '' }));
+  ctx.whalewing.skillCandidates = async () => ({ skills: bundled, issues: [] });
   // 普通身份由真实Controller安装模型投影与选择器；子任务和种子使用原生Agent入口。
   const create = async (id, extra = {}) => {
     if (!persistence || extra.parentAgent || extra.seed) return (await ctx.agents.create({ sessionId: id, meta: { agentPreset: 'standard' }, agentOptions: { provider: 'fixture', model: 'fixture' }, ...extra })).agent;
@@ -220,7 +224,6 @@ test('投影忽略失败、错配回执和其它命令', () => {
     assert.equal(fold(events).selected, false);
   }
   Experts.expertProjection.stateSchema.parse(fold([run, done]));
-  assert.equal(fold([{ ...run, data: { ...run.data, name: 'youjin-expert' } }, done]).view.expertId, 'development', '改名前的旧专家会话仍按原专家识别');
 });
 
 test('运行中拒绝切换，不污染已有身份', { timeout: 15000 }, async t => {

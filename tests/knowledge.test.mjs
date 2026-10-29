@@ -38,6 +38,33 @@ test('Wiki文件名、路径、别名、标题与块引用共享阅读/反链/�
   assert.equal((await vault.validate()).valid, true);
 });
 
+test('属性里的Wiki链接和正文链接一样算出链、反链和图谱，属性按原顺序交给阅读区', async t => {
+  const { vault, write } = await fixture(t);
+  await write('40-知识/目标.md', '## 小节\n\n正文');
+  await write('60-时间线/日记.md', '- 今天整理了 [[40-知识/目标#小节]] 和 **[[目标|别名]]**');
+  const source = '---\ntype: atomic\nstatus: seedling\ncreated: 2026-10-09\nupdated: 2026-10-09\naliases: []\nsource:\n  - "[[60-时间线/日记]]"\nproject:\n  - "[[40-知识/目标]]"\n  - "[[不存在]]"\n---\n# 源\n\n正文 [[目标]]\n';
+  await vault.write('40-知识/源.md', source, '');
+  const doc = await vault.document('40-知识/源.md');
+  contract.result.parse(doc);
+  // 正文链接的序号不变（阅读区按序号点开），属性链接排在后面，行号是它在属性区里的那一行。
+  assert.deepEqual(doc.links.map(link => [link.target, link.status, link.property ?? '', link.line]), [['目标', 'resolved', '', 15], ['60-时间线/日记', 'resolved', 'source', 8], ['40-知识/目标', 'resolved', 'project', 10], ['不存在', 'missing', 'project', 11]]);
+  assert.deepEqual(doc.properties.map(item => item.key), ['type', 'status', 'created', 'updated', 'aliases', 'source', 'project']);
+  assert.deepEqual(doc.properties.find(item => item.key === 'project').values, [{ text: '40-知识/目标', link: 2 }, { text: '不存在', link: 3 }]);
+  assert.deepEqual(doc.properties.find(item => item.key === 'aliases').values, []);
+  assert.deepEqual(doc.properties.find(item => item.key === 'type').values, [{ text: 'atomic' }]);
+  // 反链：正文里的给出那一行的大意（链接只留笔记名或别名），属性里的标出是哪个属性。
+  const target = await vault.document('40-知识/目标.md');
+  contract.result.parse(target);
+  assert.equal(target.totalBacklinks, 4);
+  assert.deepEqual(target.backlinks.map(item => [item.path, item.line, item.context ?? `属性 ${item.property}`]).sort(), [
+    ['40-知识/源.md', 10, '属性 project'], ['40-知识/源.md', 15, '正文 目标'],
+    ['60-时间线/日记.md', 10, '今天整理了 目标 › 小节 和 别名'], ['60-时间线/日记.md', 10, '今天整理了 目标 › 小节 和 别名'],
+  ]);
+  const graph = await vault.graph({ path: '40-知识/源.md' });
+  assert.ok(graph.edges.some(edge => edge.source === '40-知识/源.md' && edge.target === '60-时间线/日记.md'), '属性链接进图谱');
+  assert.ok((await vault.validate()).issues.some(issue => issue.includes('不存在')), '属性里的坏链接也能查出来');
+});
+
 test('歧义不猜测，坏锚点保留文件级边，缺失笔记使用独立投影节点', async t => {
   const { vault, write } = await fixture(t);
   await write('20-项目/同名.md', '## 重复\n\n## 重复', ['共有']);
@@ -103,7 +130,7 @@ test('扫描超限、取消、路径越界保持失败而非截断为完整图�
   assert.ok(!JSON.stringify(doc.view).includes('knowledgeLink'));
   await assert.rejects(vault.graph({}), { code: 'INDEX_LIMIT' });
   await assert.rejects(vault.graph({}, AbortSignal.abort()), { name: 'AbortError' });
-  await assert.rejects(vault.document('../外部.md'), { code: 'PATH' });
+  await assert.rejects(vault.document('../外部.md'), { code: 'NOTE_PATH' });
 });
 
 test('无关坏编码或超大笔记不阻断正常笔记阅读保存，恢复关系后重新派生', async t => {

@@ -3,8 +3,8 @@ import { aiWebContract } from './contract.js';
 import { registerFeature, useFeature } from '../../src/shell/feature.js';
 
 /** AI 网页只持有自己的浏览器租约，助手和它通过中立呈现服务协调。 */
-export function createView({ React, ActionMenu }) {
-  const AiWebView = createAiWebView(React);
+export function createView({ React, ActionMenu, useDiscard }) {
+  const AiWebView = createAiWebView(React, { useDiscard });
   const { createElement: h, useState, useRef, useEffect, useSyncExternalStore } = React;
   return function AiWebFeature({ active, workbench }) {
     const { api, t, notify, bind } = useFeature(React, workbench, 'ai-web');
@@ -72,8 +72,11 @@ export function createView({ React, ActionMenu }) {
       }
     };
     const openAiBrowser = (url, signal, key) => prepareAiBrowser(url, signal, key);
-    const focusBrowser = signal => prepareAiBrowser(undefined, signal);
-    return h(AiWebView, { key: 'aiWeb', active, sessionId: presentedReference?.sessionId, manageAiWeb: api.aiWebRequest, openBrowser: openAiBrowser, restoreBrowser, focusBrowser, notify, ActionMenu });
+    // 原版的“继续使用”走打开入口的同一条路：这个 AI 的标签还开着就切回去、不重新导航，被关掉了才新开。
+    const focusBrowser = (signal, entry) => api.supportsInlinePresentation() || !entry ? prepareAiBrowser(undefined, signal) : api.openAiInConversation(entry.url, entry.id, signal);
+    // 原版打开后工作台会卸载，回来时按本机记下的入口恢复“正在用”；宿主适配版不传，由页面自己记着。
+    const remembered = api.supportsInlinePresentation() ? undefined : api.currentAiInConversation();
+    return h(AiWebView, { key: 'aiWeb', active, sessionId: presentedReference?.sessionId, manageAiWeb: api.aiWebRequest, openBrowser: openAiBrowser, restoreBrowser, focusBrowser, remembered, notify, ActionMenu });
   };
 }
 

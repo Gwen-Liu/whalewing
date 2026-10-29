@@ -133,7 +133,7 @@ test('空库初始化建齐目录骨架、规则、模板与视图，重复初�
   assert.deepEqual((await fs.readdir(path.join(vault.root, '00-系统', 'Bases'))).sort(), ['任务记录.base', '幼苗知识.base', '收件箱.base', '活动项目.base', '草稿作品.base']);
   assert.equal((await vault.read('AGENTS.md')).readOnly, true);
   assert.equal((await vault.read('00-系统/模板/项目模板.md')).readOnly, true);
-  await assert.rejects(vault.write('00-系统/Bases/收件箱.base', note('收件箱'), ''), { code: 'PATH' });
+  await assert.rejects(vault.write('00-系统/Bases/收件箱.base', note('收件箱'), ''), { code: 'NOTE_PATH' });
   assert.equal((await vault.initialize()).initialized, true);
   assert.deepEqual(await vault.upgrade(), { upgraded: false, added: [], updated: [], kept: [] });
   assert.deepEqual((await vault.settings()).sources, []);

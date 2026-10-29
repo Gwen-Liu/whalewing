@@ -107,7 +107,7 @@ export function createView(kit) {
       // 只给计划时间和结果；补发的标出来，消息编号和原始时间串不显示。
       const runText = item => [short(item.scheduledAt), t('runStatus_' + item.status), item.late && t('runLate', { time: short(item.deliveredAt) })].filter(Boolean).join(' · ');
       const dotKind = run => !run ? 'idle' : run.status === 'completed' ? 'ok' : ['error', 'interrupted', 'incomplete'].includes(run.status) ? 'err' : ['waiting', 'running', 'skipped'].includes(run.status) ? 'warn' : 'idle';
-      const statusDot = run => { const kind = dotKind(run); return h('span', { className: `yj-dot yj-dot-${kind}`, 'aria-hidden': true }, kind === 'ok' ? '✓' : kind === 'err' ? '×' : kind === 'warn' ? '!' : ''); };
+      const statusDot = run => { const kind = dotKind(run); return h('span', { className: `ww-dot ww-dot-${kind}`, 'aria-hidden': true }, kind === 'ok' ? '✓' : kind === 'err' ? '×' : kind === 'warn' ? '!' : ''); };
       const preview = draft => { try { const rule = taskTiming(draft), next = nextRuns(rule, Date.now(), 3); return [describeSchedule(rule), next.length > 0 && `之后三次：${next.map(short).join('、')}`].filter(Boolean).join(' · '); } catch { return ''; } };
       const upcoming = allTasks.filter(task => task.status === 'active' && task.scheduledAt).sort((a, b) => Date.parse(a.scheduledAt) - Date.parse(b.scheduledAt))[0];
       const failed = allTasks.filter(task => dotKind(api.lastRun(task)) === 'err').length;
@@ -121,58 +121,58 @@ export function createView(kit) {
         button('cancelPlan', () => { setSelectedTask(taskKey(task)); setConfirm({ kind: 'automation', task }); }, Boolean(taskDraft)));
       const patchTask = (key, value, timing = false) => setTaskDraft(draft => ({ ...draft, [key]: value, ...(timing ? { changeTime: true, timeZone: 'Asia/Shanghai' } : {}) }));
       // 新版调度内建于宿主；刷新是共同恢复入口，插件页只用于旧版。
-      body = h('section', { className: 'yj-schedules' },
-        h('header', { className: 'yj-pagehead' }, h('div', null, h('h2', null, t('schedule')), h('p', null, summary)), h('div', { className: 'yj-pagehead-actions' }, button('newTask', () => beginTask('custom'), locked || Boolean(pending) || Boolean(taskDraft), { className: 'yj-primary' }))),
-        automations.available === false && h('div', { className: 'yj-schedule-off', role: 'status' }, h('div', null, h('strong', null, t('taskUnavailableShort')), help('scheduleUnavailable')), row(button('retry', refreshTab, false, { className: 'yj-primary' }), button('legacyScheduleSettings', () => run(async () => api.openPlugins())))),
-        api.automationCacheIssue() && h('p', { className: 'yj-notice yj-error', role: 'alert' }, api.automationCacheIssue()),
-        automations.issues.length > 0 && h('details', { className: 'yj-notice' }, h('summary', null, t('newsDiagnostics')), ...automations.issues.map((issue, i) => h('p', { key: i, className: 'yj-error' }, issue.message))),
-        h('div', { className: 'yj-task-split' },
-          h('aside', { className: 'yj-task-list', 'aria-label': t('schedule') },
+      body = h('section', { className: 'ww-schedules' },
+        h('header', { className: 'ww-pagehead' }, h('div', null, h('h2', null, t('schedule')), h('p', null, summary)), h('div', { className: 'ww-pagehead-actions' }, button('newTask', () => beginTask('custom'), locked || Boolean(pending) || Boolean(taskDraft), { className: 'ww-primary' }))),
+        automations.available === false && h('div', { className: 'ww-schedule-off', role: 'status' }, h('div', null, h('strong', null, t('taskUnavailableShort')), help('scheduleUnavailable')), row(button('retry', refreshTab, false, { className: 'ww-primary' }), button('legacyScheduleSettings', () => run(async () => api.openPlugins())))),
+        api.automationCacheIssue() && h('p', { className: 'ww-notice ww-error', role: 'alert' }, api.automationCacheIssue()),
+        automations.issues.length > 0 && h('details', { className: 'ww-notice' }, h('summary', null, t('newsDiagnostics')), ...automations.issues.map((issue, i) => h('p', { key: i, className: 'ww-error' }, issue.message))),
+        h('div', { className: 'ww-task-split' },
+          h('aside', { className: 'ww-task-list', 'aria-label': t('schedule') },
             taskDraft && taskDraftHidden && button('taskDraftResume', () => setTaskDraftHidden(false)),
 
-            !knowledgeTasks.length && h('article', { className: 'yj-task-template' }, h('h3', null, t('knowledgeTask')), h('small', null, t('taskDisabled')), button('enableTask', () => beginTask('knowledge'), locked || Boolean(pending) || automations.legacyTasks.length > 0 || Boolean(taskDraft))),
-            ...allTasks.map(task => h('article', { key: taskKey(task), className: `yj-task-row${selected && taskKey(task) === taskKey(selected) ? ' yj-selected' : ''}` },
-              h('button', { type: 'button', className: 'yj-task-select', 'aria-pressed': selected && taskKey(task) === taskKey(selected), onClick: () => { setSelectedTask(taskKey(task)); setTaskHistory(null); } },
+            !knowledgeTasks.length && h('article', { className: 'ww-task-template' }, h('h3', null, t('knowledgeTask')), h('small', null, t('taskDisabled')), button('enableTask', () => beginTask('knowledge'), locked || Boolean(pending) || automations.legacyTasks.length > 0 || Boolean(taskDraft))),
+            ...allTasks.map(task => h('article', { key: taskKey(task), className: `ww-task-row${selected && taskKey(task) === taskKey(selected) ? ' ww-selected' : ''}` },
+              h('button', { type: 'button', className: 'ww-task-select', 'aria-pressed': selected && taskKey(task) === taskKey(selected), onClick: () => { setSelectedTask(taskKey(task)); setTaskHistory(null); } },
                 h('span', null, statusDot(api.lastRun(task)), task.title || t(task.legacy ? 'taskLegacy' : 'schedule')), h('small', null, taskStatus(task), ' · ', task.status === 'active' ? beijing(task.scheduledAt) : t('rule_' + (task.kind === 'every' ? 'every_seconds' : task.kind === 'after' ? 'at' : task.kind)))), taskActions(task)))),
-          h('div', { className: 'yj-task-main' },
-            pending && h('section', { className: 'yj-notice', role: 'status' }, h('h3', null, t('taskPending')), help('taskPendingHelp'),
+          h('div', { className: 'ww-task-main' },
+            pending && h('section', { className: 'ww-notice', role: 'status' }, h('h3', null, t('taskPending')), help('taskPendingHelp'),
               row(button('taskRecover', recoverTask), button('openTaskSession', () => run(async () => api.openAutomation(pending.sessionId)))),
               taskRecovery?.pending?.sessionId === pending.sessionId && h(React.Fragment, null, help('taskPendingMissing'), !taskDraft && button('taskDraftResume', () => beginTask(pending.purpose), locked))),
-        taskDraft && !taskDraftHidden && h('section', { className: 'yj-task-editor', 'aria-label': t(taskDraft.id ? 'editTask' : 'newTask') },
+        taskDraft && !taskDraftHidden && h('section', { className: 'ww-task-editor', 'aria-label': t(taskDraft.id ? 'editTask' : 'newTask') },
           h('h2', null, t(taskDraft.id ? 'editTask' : taskDraft.purpose === 'knowledge' ? 'knowledgeTask' : 'newTask')),
           taskDraft.purpose === 'knowledge' && help('taskScopeHelp'), help('taskModelHelp'),
           field('taskTitle', taskDraft.title, value => patchTask('title', value), { disabled: busy || taskDraft.purpose === 'knowledge' && !taskDraft.id }),
-          taskDraft.purpose === 'custom' && h('label', { className: 'yj-field' }, t('taskPrompt'), h('textarea', { value: taskDraft.prompt, disabled: busy, onChange: event => patchTask('prompt', event.target.value) })),
+          taskDraft.purpose === 'custom' && h('label', { className: 'ww-field' }, t('taskPrompt'), h('textarea', { value: taskDraft.prompt, disabled: busy, onChange: event => patchTask('prompt', event.target.value) })),
           taskDraft.purpose === 'knowledge' && h(WorkspacePicker, { items: workspaces.items || [], scope: taskDraft.workspaceScope, disabled: busy, t, onChange: value => patchTask('workspaceScope', value) }),
           taskDraft.purpose === 'knowledge' && help('workspaceScopeHelp'),
           taskDraft.scopeDropped && help('customScopeDropped'),
-          taskDraft.purpose !== 'news' && h('label', { className: 'yj-field' }, t('taskRule'), h('select', { value: taskDraft.rule, disabled: busy, onChange: event => patchTask('rule', event.target.value, true) },
+          taskDraft.purpose !== 'news' && h('label', { className: 'ww-field' }, t('taskRule'), h('select', { value: taskDraft.rule, disabled: busy, onChange: event => patchTask('rule', event.target.value, true) },
             ...['after_seconds', 'at', 'every_seconds', 'daily', 'weekly', 'cron'].filter(rule => !taskDraft.id || rule !== 'after_seconds').map(rule => h('option', { key: rule, value: rule }, t('rule_' + rule))))),
           ['after_seconds', 'every_seconds'].includes(taskDraft.rule) && field('taskSeconds', taskDraft.seconds, value => patchTask('seconds', value, true), { type: 'number' }),
           taskDraft.rule === 'at' && field('taskAt', taskDraft.at, value => patchTask('at', value, true)),
-          taskDraft.purpose !== 'news' && ['daily', 'weekly'].includes(taskDraft.rule) && h('div', { className: 'yj-task-time' }, field('time', taskDraft.time, value => patchTask('time', value, true), { type: 'time', step: '60' }), h('span', { className: 'yj-muted' }, taskDraft.timeZone === 'Asia/Shanghai' ? t('beijingTime') : t('legacyTimeZone', { zone: taskDraft.timeZone })), taskDraft.timeZone !== 'Asia/Shanghai' && button('convertBeijingTime', () => patchTask('timeZone', 'Asia/Shanghai', true))),
+          taskDraft.purpose !== 'news' && ['daily', 'weekly'].includes(taskDraft.rule) && h('div', { className: 'ww-task-time' }, field('time', taskDraft.time, value => patchTask('time', value, true), { type: 'time', step: '60' }), h('span', { className: 'ww-muted' }, taskDraft.timeZone === 'Asia/Shanghai' ? t('beijingTime') : t('legacyTimeZone', { zone: taskDraft.timeZone })), taskDraft.timeZone !== 'Asia/Shanghai' && button('convertBeijingTime', () => patchTask('timeZone', 'Asia/Shanghai', true))),
           taskDraft.rule === 'weekly' && field('taskWeekdays', taskDraft.weekdays, value => patchTask('weekdays', value, true)),
-          taskDraft.rule === 'cron' && h('div', { className: 'yj-task-time' }, field('taskExpression', taskDraft.expression, value => patchTask('expression', value, true)), h('span', { className: 'yj-muted' }, taskDraft.timeZone === 'Asia/Shanghai' ? t('beijingTime') : t('legacyTimeZone', { zone: taskDraft.timeZone })), taskDraft.timeZone !== 'Asia/Shanghai' && button('convertBeijingTime', () => patchTask('timeZone', 'Asia/Shanghai', true))),
-          taskDraft.purpose !== 'news' && preview(taskDraft) && h('p', { className: 'yj-task-preview', role: 'status' }, preview(taskDraft)),
+          taskDraft.rule === 'cron' && h('div', { className: 'ww-task-time' }, field('taskExpression', taskDraft.expression, value => patchTask('expression', value, true)), h('span', { className: 'ww-muted' }, taskDraft.timeZone === 'Asia/Shanghai' ? t('beijingTime') : t('legacyTimeZone', { zone: taskDraft.timeZone })), taskDraft.timeZone !== 'Asia/Shanghai' && button('convertBeijingTime', () => patchTask('timeZone', 'Asia/Shanghai', true))),
+          taskDraft.purpose !== 'news' && preview(taskDraft) && h('p', { className: 'ww-task-preview', role: 'status' }, preview(taskDraft)),
           row(button(taskDraft.id ? 'saveTask' : pending ? 'taskContinue' : 'submitTask', () => saveTask(Boolean(pending)), !taskDraft.title.trim() || taskDraft.purpose === 'custom' && !taskDraft.prompt.trim() || Boolean(pending) && taskRecovery?.pending?.sessionId !== pending.sessionId),
             taskDraft.id && button('taskReload', reloadTask), button('taskDraftClose', () => setTaskDraftHidden(true)), button('taskDiscard', () => setConfirm({ kind: 'taskDraft' }))),
           confirm?.kind === 'taskDraft' && h(ConfirmDialog, { title: t('taskDiscard'), message: t('taskDiscardConfirm'), confirmLabel: t('taskDiscard'), cancelLabel: t('cancel'), danger: true, busy, onCancel: () => setConfirm(null), onConfirm: () => { setTaskDraft(null); setConfirm(null); notify(t('draftDiscarded')); } })),
-            (!taskDraft || taskDraftHidden) && (selected ? h('section', { className: 'yj-task-detail' },
-              h('div', { className: 'yj-team-heading' }, h('div', null, h('h2', null, selected.title || t('schedule')), h('p', { className: 'yj-muted' }, [taskStatus(selected), describeSchedule(selected)].join(' · '))), h('div', { className: 'yj-row' }, button('taskHistory', () => showTaskHistory(selected)), button('openTaskSession', () => run(async () => api.openAutomation(selected.sessionId))))),
-              h('div', { className: 'yj-task-facts' },
-                h('div', { className: 'yj-task-fact' }, h('small', null, t('taskTime')), h('strong', { title: selected.status === 'active' ? beijing(selected.scheduledAt) : undefined }, selected.status === 'active' ? short(selected.scheduledAt) : t(selected.status === 'paused' ? 'taskPaused' : 'taskInactive'))),
-                h('div', { className: `yj-task-fact yj-task-fact-${dotKind(lastRun)}` }, h('small', null, t('taskLastRun')), h('strong', null, statusDot(lastRun), lastRun ? t('runStatus_' + lastRun.status) : t('taskNeverRun')), lastRun && h('span', null, runText(lastRun)))),
+            (!taskDraft || taskDraftHidden) && (selected ? h('section', { className: 'ww-task-detail' },
+              h('div', { className: 'ww-team-heading' }, h('div', null, h('h2', null, selected.title || t('schedule')), h('p', { className: 'ww-muted' }, [taskStatus(selected), describeSchedule(selected)].join(' · '))), h('div', { className: 'ww-row' }, button('taskHistory', () => showTaskHistory(selected)), button('openTaskSession', () => run(async () => api.openAutomation(selected.sessionId))))),
+              h('div', { className: 'ww-task-facts' },
+                h('div', { className: 'ww-task-fact' }, h('small', null, t('taskTime')), h('strong', { title: selected.status === 'active' ? beijing(selected.scheduledAt) : undefined }, selected.status === 'active' ? short(selected.scheduledAt) : t(selected.status === 'paused' ? 'taskPaused' : 'taskInactive'))),
+                h('div', { className: `ww-task-fact ww-task-fact-${dotKind(lastRun)}` }, h('small', null, t('taskLastRun')), h('strong', null, statusDot(lastRun), lastRun ? t('runStatus_' + lastRun.status) : t('taskNeverRun')), lastRun && h('span', null, runText(lastRun)))),
               // 内置任务的指令是给模型看的，员工只需要知道它做什么。
-              selected.purpose === 'knowledge' ? help('taskScopeHelp') : selected.purpose === 'news' ? help('newsTaskFixed') : h('p', { className: 'yj-task-prompt' }, selected.displayPrompt ?? selected.prompt),
+              selected.purpose === 'knowledge' ? help('taskScopeHelp') : selected.purpose === 'news' ? help('newsTaskFixed') : h('p', { className: 'ww-task-prompt' }, selected.displayPrompt ?? selected.prompt),
               selected.legacy && help('taskLegacyHelp'),
               h('details', null, h('summary', null, t('taskDetails')), help('scheduleHelp'), help('taskModelHelp'), help('taskStatusHelp')))
-              : h('div', { className: 'yj-task-empty' }, h(Glyph, { name: 'spark', size: 28 }), h('h2', null, t('taskSelect')))),
+              : h('div', { className: 'ww-task-empty' }, h(Glyph, { name: 'spark', size: 28 }), h('h2', null, t('taskSelect')))),
             confirm?.kind === 'automation' && h(ConfirmDialog, { title: t('cancelPlan'), message: t('cancelPlanHelp'), confirmLabel: t('cancelPlan'), cancelLabel: t('cancel'), danger: true, busy, onCancel: () => setConfirm(null), onConfirm: () => cancelTask(confirm.task) }),
-            taskHistory && h(Modal, { title: `${t('taskHistory')} · ${taskHistory.task.title || t('schedule')}`, busy, onClose: () => setTaskHistory(null), className: 'yj-confirm yj-task-history' },
-              h('section', { className: 'yj-confirm-body', 'aria-label': t('taskHistory') }, help('historyHelp'),
-                taskHistory.runs.length ? h('ol', { className: 'yj-task-runs' }, taskHistory.runs.map(item => h('li', { key: item.id }, statusDot(item), h('p', { className: 'yj-task-run' }, runText(item))))) : help('noHistory'),
+            taskHistory && h(Modal, { title: `${t('taskHistory')} · ${taskHistory.task.title || t('schedule')}`, busy, onClose: () => setTaskHistory(null), className: 'ww-confirm ww-task-history' },
+              h('section', { className: 'ww-confirm-body', 'aria-label': t('taskHistory') }, help('historyHelp'),
+                taskHistory.runs.length ? h('ol', { className: 'ww-task-runs' }, taskHistory.runs.map(item => h('li', { key: item.id }, statusDot(item), h('p', { className: 'ww-task-run' }, runText(item))))) : help('noHistory'),
                 taskHistory.earlierRemoved && help('historyEarlier')),
-              h('footer', { className: 'yj-dialog-actions' }, taskHistory.nextBefore && button('historyMore', () => showTaskHistory(taskHistory.task, taskHistory.nextBefore)), button('closePanel', () => setTaskHistory(null), false, { className: 'yj-primary' }))))));
+              h('footer', { className: 'ww-dialog-actions' }, taskHistory.nextBefore && button('historyMore', () => showTaskHistory(taskHistory.task, taskHistory.nextBefore)), button('closePanel', () => setTaskHistory(null), false, { className: 'ww-primary' }))))));
 
 
     return active ? body : null;

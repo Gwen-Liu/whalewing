@@ -25,12 +25,14 @@ export const zh = {
   "skillHelp": "已入库不代表当前对话已使用",
   "newSkill": "新增技能",
   "editSkill": "编辑技能",
-  "saveSkill": "保存技能",
+  "skillCreate": "创建技能",
+  "skillSaveChanges": "保存修改",
   "removeSkill": "删除用户技能",
   "resetSkill": "恢复系统原件",
   "skillContent": "技能内容（Markdown）",
   "skillIdentifier": "技能标识",
-  "skillIdentifierHelp": "使用简短英文、数字或连字符，保存后保持不变",
+  "skillIdentifierHelp": "使用简短的英文小写字母、数字或连字符，保存后保持不变",
+  "skillIdentifierRule": "技能标识只能用英文小写字母、数字和连字符（如 my-skill），连字符不能在开头、结尾或连用，最长 80 个字符",
   "builtin": "系统内置",
   "override": "系统技能的个人修改",
   "evolution": "知识提炼",
@@ -53,13 +55,13 @@ export const en = {
   "catalogued": "In library"
 };
 export const styles = [
-`.yj-skill-library>.yj-split{min-height:0}.yj-skill-library .yj-list{max-height:65vh;overflow:auto}.yj-skill-library pre{max-height:58vh;overflow:auto;border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:16px;background:var(--dsw-alias-bg-layer-2)}`,
+`.ww-skill-library>.ww-split{min-height:0}.ww-skill-library .ww-list{max-height:65vh;overflow:auto}.ww-skill-library pre{max-height:58vh;overflow:auto;border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:16px;background:var(--dsw-alias-bg-layer-2)}`,
 `
-    .yj-skill-library{display:flex;flex-direction:column;gap:0}.yj-skill-library .yj-split>.yj-list{gap:10px;padding:2px}
-    .yj-skill-filters{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:0 0 16px}.yj-page .yj-skill-filters .yj-search{flex:0 1 280px}.yj-page .yj-chip small{font-size:12px;opacity:.7}
-    .yj-page .yj-skill-split{grid-template-columns:minmax(300px,1fr) minmax(0,1.7fr);align-items:start;gap:20px}.yj-page .yj-skill-library .yj-skill-list{gap:2px;padding:8px;border:1px solid var(--yj-line);border-radius:16px;background:var(--yj-surface);max-height:calc(100dvh - 250px)}.yj-skill-group{flex:none;margin:10px 10px 4px;font-size:12px;letter-spacing:.08em;color:var(--yj-ink-3)}
-    .yj-page .yj-skill-library .yj-skill-row{flex:none;display:flex;flex-direction:column;align-items:stretch;gap:2px;width:100%;min-height:0;padding:9px 12px;border:0;border-radius:10px;background:transparent;text-align:left;font-weight:500;color:var(--yj-ink)}.yj-skill-row>small{font-size:12.5px;font-weight:400;color:var(--yj-ink-2)}.yj-skill-row>.yj-clamp{display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}.yj-skill-tags{display:flex;gap:4px;margin-top:2px}.yj-page .yj-skill-library .yj-skill-row:hover:not(:disabled),.yj-page .yj-skill-library .yj-skill-row.yj-current{background:var(--yj-tint)}
-    .yj-page .yj-skill-detail{gap:14px;padding:26px 30px}.yj-page .yj-skill-detail h3{margin:0;font:600 22px/1.35 var(--yj-serif)}.yj-page .yj-skill-library .yj-skill-detail pre{max-width:80ch;margin:0;white-space:pre-wrap;overflow-wrap:anywhere;border:0;background:var(--yj-surface-2);font:13px/1.75 var(--dsw-font-family-mono,ui-monospace,monospace);color:var(--yj-ink)}`
+    .ww-skill-library{display:flex;flex-direction:column;gap:0}.ww-skill-library .ww-split>.ww-list{gap:10px;padding:2px}
+    .ww-skill-filters{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:0 0 16px}.ww-page .ww-skill-filters .ww-search{flex:0 1 280px}.ww-page .ww-chip small{font-size:12px;opacity:.7}
+    .ww-page .ww-skill-split{grid-template-columns:minmax(300px,1fr) minmax(0,1.7fr);align-items:start;gap:20px}.ww-page .ww-skill-library .ww-skill-list{gap:2px;padding:8px;border:1px solid var(--ww-line);border-radius:16px;background:var(--ww-surface);max-height:calc(100dvh - 250px)}.ww-skill-group{flex:none;margin:10px 10px 4px;font-size:12px;letter-spacing:.08em;color:var(--ww-ink-3)}
+    .ww-page .ww-skill-library .ww-skill-row{flex:none;display:flex;flex-direction:column;align-items:stretch;gap:2px;width:100%;min-height:0;padding:9px 12px;border:0;border-radius:10px;background:transparent;text-align:left;font-weight:500;color:var(--ww-ink)}.ww-skill-row>small{font-size:12.5px;font-weight:400;color:var(--ww-ink-2)}.ww-skill-row>.ww-clamp{display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}.ww-skill-tags{display:flex;gap:4px;margin-top:2px}.ww-page .ww-skill-library .ww-skill-row:hover:not(:disabled),.ww-page .ww-skill-library .ww-skill-row.ww-current{background:var(--ww-tint)}
+    .ww-page .ww-skill-detail{gap:14px;padding:26px 30px}.ww-page .ww-skill-detail h3{margin:0;font:600 22px/1.35 var(--ww-serif)}.ww-page .ww-skill-library .ww-skill-detail pre{max-width:none;margin:0;white-space:pre-wrap;overflow-wrap:anywhere;border:0;background:var(--ww-surface-2);font:13px/1.75 var(--dsw-font-family-mono,ui-monospace,monospace);color:var(--ww-ink)}`
 ];
 
 // 专属错误只解释本领域；输入原文与公共运输错误由共用呈现机制处理。

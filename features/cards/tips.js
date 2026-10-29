@@ -29,7 +29,7 @@ export function createTipsView(kit) {
   const leadText = item => item.brief ?? item.summary ?? '';
   const linkOf = item => item.link || item.sources?.[0]?.url || '';
   const pressable = open => ({ role: 'button', tabIndex: 0, onClick: open, onKeyDown: event => { if (event.target !== event.currentTarget) return; if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); } } });
-  const spinner = () => h('span', { className: 'yj-tips-spin', 'aria-hidden': true });
+  const spinner = () => h('span', { className: 'ww-tips-spin', 'aria-hidden': true });
   const scrollParent = node => {
     for (let element = node.parentElement; element; element = element.parentElement) {
       const overflow = globalThis.getComputedStyle?.(element).overflowY;
@@ -58,7 +58,7 @@ export function createTipsView(kit) {
       const dialog = sheet.current?.closest?.('dialog');
       if (!dialog) return;
       // 打开时焦点落在标题上；←/→ 切换上一条、下一条。
-      const title = dialog.querySelector?.('.yj-header h2');
+      const title = dialog.querySelector?.('.ww-header h2');
       if (title) { title.tabIndex = -1; title.focus?.({ preventScroll: true }); }
       const onKey = event => {
         const current = handlers.current;
@@ -70,23 +70,23 @@ export function createTipsView(kit) {
       return () => dialog.removeEventListener('keydown', onKey);
     }, []);
     // 外壳弹窗用标题给“×”命名；这里按规格叫“关闭”。每次提交后重设，标题随切换变化时也不会被盖回去。
-    useLayoutEffect(() => { sheet.current?.closest?.('dialog')?.querySelector?.('.yj-header > button')?.setAttribute('aria-label', t('tipsClose')); });
+    useLayoutEffect(() => { sheet.current?.closest?.('dialog')?.querySelector?.('.ww-header > button')?.setAttribute('aria-label', t('tipsClose')); });
     const item = report.items[index], count = report.items.length, source = item.sources?.[0], name = sourceName(item), link = linkOf(item), lead = leadText(item);
-    return h(Modal, { title: item.title, onClose, className: 'yj-tips-detail' },
-      h('div', { className: 'yj-tips-kicker' },
+    return h(Modal, { title: item.title, onClose, className: 'ww-tips-detail' },
+      h('div', { className: 'ww-tips-kicker' },
         h('i', { 'aria-hidden': true }, h(Glyph, { name: 'spark', size: 15 })),
         h('strong', null, t('tipsTitle')),
         h('span', null, ` · ${f.date(day.date)} · ${t('tipsPosition', { index: index + 1, count })}`)),
-      h('div', { ref: sheet, className: 'yj-tips-sheet', key: `${day.date}#${index}` },
-        h('div', { className: 'yj-tips-tags' },
-          featuredIndex(day.date, count) === index && h('span', { className: 'yj-tips-tag' }, t('tipsFeatured')),
+      h('div', { ref: sheet, className: 'ww-tips-sheet', key: `${day.date}#${index}` },
+        h('div', { className: 'ww-tips-tags' },
+          featuredIndex(day.date, count) === index && h('span', { className: 'ww-tips-tag' }, t('tipsFeatured')),
           name && h('span', null, source?.publishedAt ? t('tipsPublished', { source: name, time: f.published(source.publishedAt) }) : name)),
-        lead && h('div', { className: 'yj-tips-guide' }, lead),
-        link && h('section', { className: 'yj-tips-origin' }, h('h3', null, t('tipsOrigin')), h('p', { title: link }, externalLink(link, `${link.replace(/^https?:\/\/(www\.)?/, '')} ↗`)))),
-      h('footer', { className: 'yj-tips-detail-foot' },
+        lead && h('div', { className: 'ww-tips-guide' }, lead),
+        link && h('section', { className: 'ww-tips-origin' }, h('h3', null, t('tipsOrigin')), h('p', { title: link }, externalLink(link, `${link.replace(/^https?:\/\/(www\.)?/, '')} ↗`)))),
+      h('footer', { className: 'ww-tips-detail-foot' },
         h('button', { type: 'button', disabled: !canPrev || Boolean(stepping), 'aria-busy': stepping === -1 || undefined, onClick: () => onStep(-1) }, stepping === -1 && spinner(), t('tipsPrev')),
         h('button', { type: 'button', disabled: !canNext || Boolean(stepping), 'aria-busy': stepping === 1 || undefined, onClick: () => onStep(1) }, stepping === 1 && spinner(), t('tipsNext')),
-        link && h('span', { className: 'yj-tips-open' }, externalLink(link, t('tipsOpenSource')))));
+        link && h('span', { className: 'ww-tips-open' }, externalLink(link, t('tipsOpenSource')))));
   }
 
   function TipsPage({ api, t, busy, setError, field, focus, externalLink, onBack, onEditSources, onFocusApplied, reloadKey, today: fixedToday }) {
@@ -252,7 +252,7 @@ export function createTipsView(kit) {
     const arrive = () => {
       const node = list.current;
       if (!node?.classList) return;
-      node.classList.remove('yj-tips-arrive'); void node.offsetWidth; node.classList.add('yj-tips-arrive');
+      node.classList.remove('ww-tips-arrive'); void node.offsetWidth; node.classList.add('ww-tips-arrive');
     };
     /** 跳到某天：400ms 内平滑滚到；跨度超过 90 天直接到位再淡入。 */
     const jump = (date, { instant = false, retry = false } = {}) => {
@@ -314,7 +314,7 @@ export function createTipsView(kit) {
         const parent = scrollParent(node), box = scroller.current;
         if (parent) {
           const outer = parent.getBoundingClientRect(), own = node.getBoundingClientRect(), padding = parseFloat(globalThis.getComputedStyle?.(parent).paddingBottom) || 0;
-          node.style.setProperty('--yj-tips-height', `${Math.max(420, Math.floor(parent.clientHeight - (own.top - outer.top + parent.scrollTop) - padding))}px`);
+          node.style.setProperty('--ww-tips-height', `${Math.max(420, Math.floor(parent.clientHeight - (own.top - outer.top + parent.scrollTop) - padding))}px`);
         }
         const next = { width: node.clientWidth, height: box?.clientHeight || 640, scrollbar: box ? box.offsetWidth - box.clientWidth : 0 };
         setSize(value => value.width === next.width && value.height === next.height && value.scrollbar === next.scrollbar ? value : next);
@@ -444,35 +444,35 @@ export function createTipsView(kit) {
 
     // —— 画面 ——
     const fieldName = field?.name || t('tipsTitle'), deleted = field === null || Boolean(field?.deleted), paused = Boolean(field) && !field.deleted && !field.enabled;
-    const head = h('header', { className: 'yj-tips-head' },
-      h('nav', { className: 'yj-tips-crumbs', 'aria-label': t('tipsCrumbs') },
+    const head = h('header', { className: 'ww-tips-head' },
+      h('nav', { className: 'ww-tips-crumbs', 'aria-label': t('tipsCrumbs') },
         h('button', { type: 'button', onClick: onBack }, t('tipsHome')),
-        h('span', { className: 'yj-tips-sep', 'aria-hidden': true }, '›'),
+        h('span', { className: 'ww-tips-sep', 'aria-hidden': true }, '›'),
         h('h2', null, fieldName),
-        paused && h('span', { className: 'yj-tips-flag' }, t('tipsPaused')),
-        deleted && h('span', { className: 'yj-tips-flag yj-tips-flag-muted' }, t('tipsDeleted'))),
-      h('div', { className: 'yj-tips-side' },
-        h('p', { className: 'yj-tips-meta' }, indexReady && index.days.length ? t('tipsMeta', { count: index.days.length }) : t('tipsSchedule')),
+        paused && h('span', { className: 'ww-tips-flag' }, t('tipsPaused')),
+        deleted && h('span', { className: 'ww-tips-flag ww-tips-flag-muted' }, t('tipsDeleted'))),
+      h('div', { className: 'ww-tips-side' },
+        h('p', { className: 'ww-tips-meta' }, indexReady && index.days.length ? t('tipsMeta', { count: index.days.length }) : t('tipsSchedule')),
         !deleted && h('button', { type: 'button', disabled: busy, onClick: onEditSources }, t(paused ? 'tipsEnable' : 'tipsEditSources'))));
 
     const axis = () => {
       if (!ruled) return null;
-      if (narrow) return h('label', { className: 'yj-ruler-pill' }, h('select', { value: String(armYear), 'aria-label': t('tipsYearPick'), onChange: event => jumpYear(Number(event.target.value)) }, ...years.map(entry => h('option', { key: entry.year, value: String(entry.year) }, `${entry.year} · ${t('tipsIssues', { count: entry.count })}`))));
+      if (narrow) return h('label', { className: 'ww-ruler-pill' }, h('select', { value: String(armYear), 'aria-label': t('tipsYearPick'), onChange: event => jumpYear(Number(event.target.value)) }, ...years.map(entry => h('option', { key: entry.year, value: String(entry.year) }, `${entry.year} · ${t('tipsIssues', { count: entry.count })}`))));
       const width = size.width - size.scrollbar, segments = axisLayout(years, width, today), selected = segments.find(entry => entry.year === armYear);
       const month = Number(currentMonth.slice(5, 7)), caret = selected && Number(currentMonth.slice(0, 4)) === armYear ? selected.left + (month - 0.5) * selected.cell : null;
-      return h('div', { className: 'yj-ruler-year', role: 'toolbar', 'aria-label': t('tipsYears'), style: { marginRight: size.scrollbar }, onKeyDown: axisKeys },
-        h('span', { className: 'yj-ruler-base', 'aria-hidden': true }), h('span', { className: 'yj-ruler-drop', 'aria-hidden': true }), h('span', { className: 'yj-ruler-corner', 'aria-hidden': true }),
-        ...segments.map(segment => h('div', { key: segment.year, className: 'yj-ruler-seg', style: { left: segment.left, width: segment.width } },
-          h('span', { className: 'yj-ruler-major', 'aria-hidden': true }),
-          ...segment.months.slice(0, segment.last).map((cell, i) => i > 0 && h('span', { key: `tick${i}`, className: cell.tips ? 'yj-ruler-mtick yj-ruler-mtick-on' : 'yj-ruler-mtick', style: { left: i * segment.cell }, 'aria-hidden': true })),
+      return h('div', { className: 'ww-ruler-year', role: 'toolbar', 'aria-label': t('tipsYears'), style: { marginRight: size.scrollbar }, onKeyDown: axisKeys },
+        h('span', { className: 'ww-ruler-base', 'aria-hidden': true }), h('span', { className: 'ww-ruler-drop', 'aria-hidden': true }), h('span', { className: 'ww-ruler-corner', 'aria-hidden': true }),
+        ...segments.map(segment => h('div', { key: segment.year, className: 'ww-ruler-seg', style: { left: segment.left, width: segment.width } },
+          h('span', { className: 'ww-ruler-major', 'aria-hidden': true }),
+          ...segment.months.slice(0, segment.last).map((cell, i) => i > 0 && h('span', { key: `tick${i}`, className: cell.tips ? 'ww-ruler-mtick ww-ruler-mtick-on' : 'ww-ruler-mtick', style: { left: i * segment.cell }, 'aria-hidden': true })),
           ...segment.months.slice(0, segment.last).map((cell, i) => {
             const key = `${segment.year}-${pad(i + 1)}`, label = cell.tips ? `${f.monthYear(key)} · ${t('tipsIssues', { count: cell.count })}` : `${f.monthYear(key)} · ${t('tipsNoTips')}`;
-            return h('button', { type: 'button', key, className: 'yj-ruler-cell', tabIndex: -1, style: { left: i * segment.cell, width: segment.cell }, title: label, 'aria-label': label, 'aria-disabled': cell.tips ? undefined : true, onClick: () => { if (cell.tips) jumpMonth(key); } });
+            return h('button', { type: 'button', key, className: 'ww-ruler-cell', tabIndex: -1, style: { left: i * segment.cell, width: segment.cell }, title: label, 'aria-label': label, 'aria-disabled': cell.tips ? undefined : true, onClick: () => { if (cell.tips) jumpMonth(key); } });
           }),
-          h('button', { type: 'button', className: 'yj-ruler-label', 'data-year': segment.year, 'aria-pressed': segment.year === armYear, onClick: () => jumpYear(segment.year) },
+          h('button', { type: 'button', className: 'ww-ruler-label', 'data-year': segment.year, 'aria-pressed': segment.year === armYear, onClick: () => jumpYear(segment.year) },
             h('strong', null, String(segment.year)), h('small', null, t('tipsIssues', { count: segment.count }))))),
-        selected && h('span', { className: 'yj-ruler-sel', style: { left: selected.left, width: selected.cell * selected.last }, 'aria-hidden': true }),
-        caret !== null && h('span', { className: 'yj-ruler-caret', style: { left: caret - 3 }, 'aria-hidden': true }));
+        selected && h('span', { className: 'ww-ruler-sel', style: { left: selected.left, width: selected.cell * selected.last }, 'aria-hidden': true }),
+        caret !== null && h('span', { className: 'ww-ruler-caret', style: { left: caret - 3 }, 'aria-hidden': true }));
     };
 
     const armArt = () => {
@@ -502,55 +502,55 @@ export function createTipsView(kit) {
         labels.push({ ...month, labelTop: top }); floor = top + 32;
       }
       const current = position.current ?? firstSpan?.newest ?? today;
-      return h('div', { className: 'yj-ruler yj-ruler-arm', style: { width: armWidth } },
-        h('div', { ref: rail, className: 'yj-ruler-rail', role: 'slider', tabIndex: 0, 'aria-label': t('tipsRuler'), 'aria-orientation': 'vertical', 'aria-valuemin': dayNumber(days.at(-1).date), 'aria-valuemax': dayNumber(days[0].date > today ? days[0].date : today), 'aria-valuenow': dayNumber(current), 'aria-valuetext': valueText(current), ...armEvents },
-          h('svg', { className: 'yj-ruler-ticks', width: armWidth, height: Math.ceil(layout.height) + 2, shapeRendering: 'crispEdges', 'aria-hidden': true, focusable: 'false' },
-            ...['none', 'tips', 'partial', 'major', 'today'].map(kind => paths[kind] && h('path', { key: kind, className: `yj-ruler-tick-${kind}`, d: paths[kind] }))),
-          h('div', { ref: thumb, className: 'yj-ruler-thumb', 'data-label': f.short(current), 'aria-hidden': true }),
-          h('div', { ref: guide, className: 'yj-ruler-guide', hidden: true, 'aria-hidden': true }),
-          h('div', { ref: bubble, className: 'yj-ruler-bubble', hidden: true, 'aria-hidden': true })),
+      return h('div', { className: 'ww-ruler ww-ruler-arm', style: { width: armWidth } },
+        h('div', { ref: rail, className: 'ww-ruler-rail', role: 'slider', tabIndex: 0, 'aria-label': t('tipsRuler'), 'aria-orientation': 'vertical', 'aria-valuemin': dayNumber(days.at(-1).date), 'aria-valuemax': dayNumber(days[0].date > today ? days[0].date : today), 'aria-valuenow': dayNumber(current), 'aria-valuetext': valueText(current), ...armEvents },
+          h('svg', { className: 'ww-ruler-ticks', width: armWidth, height: Math.ceil(layout.height) + 2, shapeRendering: 'crispEdges', 'aria-hidden': true, focusable: 'false' },
+            ...['none', 'tips', 'partial', 'major', 'today'].map(kind => paths[kind] && h('path', { key: kind, className: `ww-ruler-tick-${kind}`, d: paths[kind] }))),
+          h('div', { ref: thumb, className: 'ww-ruler-thumb', 'data-label': f.short(current), 'aria-hidden': true }),
+          h('div', { ref: guide, className: 'ww-ruler-guide', hidden: true, 'aria-hidden': true }),
+          h('div', { ref: bubble, className: 'ww-ruler-bubble', hidden: true, 'aria-hidden': true })),
         // 没有技巧的月份和年份轴的月格一样不可点，悬停写“没有技巧”。
         ...labels.map(month => {
           const cell = counts[Number(month.key.slice(5, 7)) - 1], empty = !cell?.tips;
-          return h('button', { type: 'button', key: month.key, tabIndex: -1, className: `yj-ruler-month${month.key === currentMonth ? ' yj-ruler-month-on' : ''}`, style: { top: month.labelTop }, title: empty ? `${f.monthYear(month.key)} · ${t('tipsNoTips')}` : f.monthYear(month.key), 'aria-disabled': empty || undefined, onClick: () => { if (!empty) jumpMonth(month.key); } },
+          return h('button', { type: 'button', key: month.key, tabIndex: -1, className: `ww-ruler-month${month.key === currentMonth ? ' ww-ruler-month-on' : ''}`, style: { top: month.labelTop }, title: empty ? `${f.monthYear(month.key)} · ${t('tipsNoTips')}` : f.monthYear(month.key), 'aria-disabled': empty || undefined, onClick: () => { if (!empty) jumpMonth(month.key); } },
             h('strong', null, f.month(Number(month.key.slice(5, 7)))), h('small', null, t('tipsIssues', { count: cell?.count ?? 0 })));
         }));
     };
 
     const reload = () => setFailure(null);
-    const failLine = () => h('div', { className: 'yj-tips-fail', role: 'status' }, h('span', null, t('tipsSegmentFailed')), h('button', { type: 'button', onClick: reload }, t('tipsReload')));
+    const failLine = () => h('div', { className: 'ww-tips-fail', role: 'status' }, h('span', null, t('tipsSegmentFailed')), h('button', { type: 'button', onClick: reload }, t('tipsReload')));
     // 骨架与正文同高；失败行占住主卡的位置和高度，原位提示，不挪动下面的内容。
-    const skeleton = (count, dated) => h('div', { className: `yj-tips-items${failure ? ' yj-tips-still' : ''}`, 'aria-hidden': !dated || undefined },
-      h('div', { className: 'yj-tips-feature yj-tips-ghost' }, ...failure && dated ? [failLine()] : [32, 70, 92, 64].map((width, i) => h('span', { key: i, className: 'yj-tips-skel', style: { width: `${width}%` } }))),
-      count > 1 && h('div', { className: 'yj-tips-rows' }, ...Array.from({ length: count - 1 }, (_, i) => h('div', { key: i, className: 'yj-tips-row yj-tips-ghost' }, h('span', { className: 'yj-tips-skel' }), h('span', { className: 'yj-tips-skel' })))));
-    const sourceBadge = item => { const name = sourceName(item); return name && h('span', { className: 'yj-tips-source' }, h('i', { style: { '--yj-tips-mono': monoColor(name) }, 'aria-hidden': true }, name.trim().charAt(0).toUpperCase()), h('span', null, name)); };
+    const skeleton = (count, dated) => h('div', { className: `ww-tips-items${failure ? ' ww-tips-still' : ''}`, 'aria-hidden': !dated || undefined },
+      h('div', { className: 'ww-tips-feature ww-tips-ghost' }, ...failure && dated ? [failLine()] : [32, 70, 92, 64].map((width, i) => h('span', { key: i, className: 'ww-tips-skel', style: { width: `${width}%` } }))),
+      count > 1 && h('div', { className: 'ww-tips-rows' }, ...Array.from({ length: count - 1 }, (_, i) => h('div', { key: i, className: 'ww-tips-row ww-tips-ghost' }, h('span', { className: 'ww-tips-skel' }), h('span', { className: 'ww-tips-skel' })))));
+    const sourceBadge = item => { const name = sourceName(item); return name && h('span', { className: 'ww-tips-source' }, h('i', { style: { '--ww-tips-mono': monoColor(name) }, 'aria-hidden': true }, name.trim().charAt(0).toUpperCase()), h('span', null, name)); };
     const tipBlock = (entry, report) => {
       const items = report.items, featured = featuredIndex(entry.date, items.length), main = items[featured];
-      if (!main) return h('p', { className: 'yj-tips-slim-text' }, t('tipsEmptyDay'));
+      if (!main) return h('p', { className: 'ww-tips-slim-text' }, t('tipsEmptyDay'));
       const id = i => `${entry.date}#${i}`, rest = items.map((item, i) => ({ item, i })).filter(row => row.i !== featured);
-      return h('div', { className: 'yj-tips-items' },
-        h('article', { className: `yj-tips-feature${flash === id(featured) ? ' yj-tips-flash' : ''}`, 'data-tip': id(featured), 'aria-label': `${t('tipsFeatured')} · ${main.title}`, ...pressable(() => openTip(entry, featured)) },
-          h('div', { className: 'yj-tips-feature-top' }, h('span', { className: 'yj-tips-tag' }, t('tipsFeatured')), h('span', { className: 'yj-tips-num' }, pad(featured + 1)), sourceBadge(main), h('span', { className: 'yj-tips-go', 'aria-hidden': true }, t('tipsMore'))),
+      return h('div', { className: 'ww-tips-items' },
+        h('article', { className: `ww-tips-feature${flash === id(featured) ? ' ww-tips-flash' : ''}`, 'data-tip': id(featured), 'aria-label': `${t('tipsFeatured')} · ${main.title}`, ...pressable(() => openTip(entry, featured)) },
+          h('div', { className: 'ww-tips-feature-top' }, h('span', { className: 'ww-tips-tag' }, t('tipsFeatured')), h('span', { className: 'ww-tips-num' }, pad(featured + 1)), sourceBadge(main), h('span', { className: 'ww-tips-go', 'aria-hidden': true }, t('tipsMore'))),
           h('h3', null, main.title),
           leadText(main) && h('p', null, leadText(main))),
-        rest.length > 0 && h('div', { className: 'yj-tips-rows' }, ...rest.map(({ item, i }) => h('div', { key: i, className: `yj-tips-row${flash === id(i) ? ' yj-tips-flash' : ''}`, 'data-tip': id(i), 'aria-label': item.title, ...pressable(() => openTip(entry, i)) },
-          h('span', { className: 'yj-tips-num' }, pad(i + 1)), h('strong', null, item.title), h('small', null, sourceName(item)), h('span', { className: 'yj-tips-chevron', 'aria-hidden': true }, '›')))));
+        rest.length > 0 && h('div', { className: 'ww-tips-rows' }, ...rest.map(({ item, i }) => h('div', { key: i, className: `ww-tips-row${flash === id(i) ? ' ww-tips-flash' : ''}`, 'data-tip': id(i), 'aria-label': item.title, ...pressable(() => openTip(entry, i)) },
+          h('span', { className: 'ww-tips-num' }, pad(i + 1)), h('strong', null, item.title), h('small', null, sourceName(item)), h('span', { className: 'ww-tips-chevron', 'aria-hidden': true }, '›')))));
     };
-    const slim = (slot, kind, label, ...text) => h('div', { ...slot, className: `yj-tips-entry yj-tips-slim yj-tips-${kind}` },
-      h('div', { className: 'yj-tips-margin' }, h('span', { className: 'yj-tips-slimday' }, label)),
-      h('div', { className: 'yj-tips-rail' }, h('span', { className: 'yj-tips-node', 'aria-hidden': true })),
+    const slim = (slot, kind, label, ...text) => h('div', { ...slot, className: `ww-tips-entry ww-tips-slim ww-tips-${kind}` },
+      h('div', { className: 'ww-tips-margin' }, h('span', { className: 'ww-tips-slimday' }, label)),
+      h('div', { className: 'ww-tips-rail' }, h('span', { className: 'ww-tips-node', 'aria-hidden': true })),
       h('p', null, ...text));
     const renderEntry = (entry, i) => {
       const slot = { key: entry.key, 'data-index': i };
       if (entry.kind === 'day') {
         const report = store.loaded.get(entry.cutoff), { day, month } = dateParts(entry.date);
-        return h('div', { ...slot, className: 'yj-tips-entry yj-tips-day', role: 'group', 'aria-label': f.full(entry.date) },
-          h('div', { className: 'yj-tips-margin' },
-            h('strong', { className: 'yj-tips-daynum' }, String(day)),
-            h('span', { className: 'yj-tips-week' }, `${f.month(month)} · ${f.week(entry.date)}`),
-            entry.today && h('span', { className: 'yj-tips-tag' }, t('tipsToday')),
-            entry.status === 'partial' && h('span', { className: 'yj-tips-partial' }, t('tipsPartial'))),
-          h('div', { className: 'yj-tips-rail' }, h('span', { className: `yj-tips-node${entry.today ? ' yj-tips-node-today' : ''}`, 'aria-hidden': true })),
+        return h('div', { ...slot, className: 'ww-tips-entry ww-tips-day', role: 'group', 'aria-label': f.full(entry.date) },
+          h('div', { className: 'ww-tips-margin' },
+            h('strong', { className: 'ww-tips-daynum' }, String(day)),
+            h('span', { className: 'ww-tips-week' }, `${f.month(month)} · ${f.week(entry.date)}`),
+            entry.today && h('span', { className: 'ww-tips-tag' }, t('tipsToday')),
+            entry.status === 'partial' && h('span', { className: 'ww-tips-partial' }, t('tipsPartial'))),
+          h('div', { className: 'ww-tips-rail' }, h('span', { className: `ww-tips-node${entry.today ? ' ww-tips-node-today' : ''}`, 'aria-hidden': true })),
           report ? tipBlock(entry, report) : skeleton(entry.count, true));
       }
       if (entry.kind === 'empty') return slim(slot, 'empty', String(dateParts(entry.date).day), t('tipsEmptyDay'));
@@ -559,31 +559,31 @@ export function createTipsView(kit) {
         const range = entry.length > 1 ? `${dateParts(entry.to).day}–${dateParts(entry.from).day}` : String(dateParts(entry.from).day);
         return slim(slot, 'gap', range, h('strong', null, t('tipsGap')), ' · ', entry.length === 1 ? t('tipsGapOne') : entry.length === 2 ? t('tipsGapTwo') : t('tipsGapMany', { count: entry.length }));
       }
-      if (entry.kind === 'month') return h('div', { ...slot, className: 'yj-tips-entry yj-tips-month' }, h('span'), h('div', { className: 'yj-tips-rail' }), h('div', { className: 'yj-tips-monthline' }, f.monthYear(entry.month)));
-      if (entry.kind === 'end') return h('div', { ...slot, className: 'yj-tips-entry yj-tips-end' }, h('span'), h('div', { className: 'yj-tips-rail' }, h('span', { className: 'yj-tips-node', 'aria-hidden': true })), h('p', null, `${f.full(entry.date)} · ${t('tipsFirst')}`));
-      return h('div', { ...slot, className: 'yj-tips-entry yj-tips-end yj-tips-more' }, h('span'), h('div', { className: 'yj-tips-rail' }),
-        failure && !pending ? failLine() : h('p', { className: 'yj-tips-note', role: 'status' }, spinner(), t('tipsLoadingMore')));
+      if (entry.kind === 'month') return h('div', { ...slot, className: 'ww-tips-entry ww-tips-month' }, h('span'), h('div', { className: 'ww-tips-rail' }), h('div', { className: 'ww-tips-monthline' }, f.monthYear(entry.month)));
+      if (entry.kind === 'end') return h('div', { ...slot, className: 'ww-tips-entry ww-tips-end' }, h('span'), h('div', { className: 'ww-tips-rail' }, h('span', { className: 'ww-tips-node', 'aria-hidden': true })), h('p', null, `${f.full(entry.date)} · ${t('tipsFirst')}`));
+      return h('div', { ...slot, className: 'ww-tips-entry ww-tips-end ww-tips-more' }, h('span'), h('div', { className: 'ww-tips-rail' }),
+        failure && !pending ? failLine() : h('p', { className: 'ww-tips-note', role: 'status' }, spinner(), t('tipsLoadingMore')));
     };
 
     let timeline;
     if (index.status === 'failed' && !store.started && failure?.key === 'latest') {
-      timeline = h('div', { className: 'yj-tips-error', role: 'alert' }, h('p', null, t('tipsFailed', { reason: failure.message })), h('button', { type: 'button', onClick: () => setAttempt(value => value + 1) }, t('tipsReload')));
+      timeline = h('div', { className: 'ww-tips-error', role: 'alert' }, h('p', null, t('tipsFailed', { reason: failure.message })), h('button', { type: 'button', onClick: () => setAttempt(value => value + 1) }, t('tipsReload')));
     } else if (!ready) {
       // 首次读取：页边灰条、主卡和行的骨架。
-      timeline = h('div', { className: 'yj-tips-line', 'aria-busy': true },
-        ...[6, 4, 5].map((count, i) => h('div', { key: i, className: 'yj-tips-entry yj-tips-day', 'aria-hidden': true },
-          h('div', { className: 'yj-tips-margin' }, h('span', { className: 'yj-tips-skel yj-tips-skel-day' }), h('span', { className: 'yj-tips-skel yj-tips-skel-week' })),
-          h('div', { className: 'yj-tips-rail' }, h('span', { className: 'yj-tips-node', 'aria-hidden': true })),
+      timeline = h('div', { className: 'ww-tips-line', 'aria-busy': true },
+        ...[6, 4, 5].map((count, i) => h('div', { key: i, className: 'ww-tips-entry ww-tips-day', 'aria-hidden': true },
+          h('div', { className: 'ww-tips-margin' }, h('span', { className: 'ww-tips-skel ww-tips-skel-day' }), h('span', { className: 'ww-tips-skel ww-tips-skel-week' })),
+          h('div', { className: 'ww-tips-rail' }, h('span', { className: 'ww-tips-node', 'aria-hidden': true })),
           skeleton(count, false))));
     } else if (!entries.length) {
-      timeline = h('div', { className: 'yj-tips-blank' }, h('span'), h('div', { className: 'yj-tips-rail' }, h('span', { className: 'yj-tips-node', 'aria-hidden': true })), h('p', null, t('tipsEmpty')));
+      timeline = h('div', { className: 'ww-tips-blank' }, h('span'), h('div', { className: 'ww-tips-rail' }, h('span', { className: 'ww-tips-node', 'aria-hidden': true })), h('p', null, t('tipsEmpty')));
     } else {
       const start = Math.min(view.start, entries.length - 1), end = Math.min(Math.max(view.end, start), entries.length - 1);
-      timeline = h('div', { ref: list, className: 'yj-tips-line' },
-        h('span', { className: 'yj-tips-fade', 'aria-hidden': true }),
-        h('div', { className: 'yj-tips-spacer', style: { height: tops[start] }, 'aria-hidden': true }),
+      timeline = h('div', { ref: list, className: 'ww-tips-line' },
+        h('span', { className: 'ww-tips-fade', 'aria-hidden': true }),
+        h('div', { className: 'ww-tips-spacer', style: { height: tops[start] }, 'aria-hidden': true }),
         ...entries.slice(start, end + 1).map((entry, k) => renderEntry(entry, start + k)),
-        h('div', { className: 'yj-tips-spacer', style: { height: tops[entries.length] - tops[end + 1] }, 'aria-hidden': true }));
+        h('div', { className: 'ww-tips-spacer', style: { height: tops[entries.length] - tops[end + 1] }, 'aria-hidden': true }));
     }
 
     const current = detail && store.loaded.get(detail.cutoff);
@@ -593,12 +593,12 @@ export function createTipsView(kit) {
         canPrev: Boolean(stepTip(days, at, -1)), canNext: Boolean(stepTip(days, at, 1)) || !complete });
     })();
 
-    return h('section', { ref: root, className: `yj-tips${ruled ? ' yj-tips-ruled' : ''}${narrow ? ' yj-tips-narrow' : ''}`, style: { '--yj-tips-arm': `${armHeight}px`, '--yj-tips-columns': columns } },
+    return h('section', { ref: root, className: `ww-tips${ruled ? ' ww-tips-ruled' : ''}${narrow ? ' ww-tips-narrow' : ''}`, style: { '--ww-tips-arm': `${armHeight}px`, '--ww-tips-columns': columns } },
       head,
       axis(),
-      h('div', { className: 'yj-tips-body' },
-        h('div', { ref: scroller, className: 'yj-tips-scroll', onScroll, onWheel: stopMotion, onTouchStart: stopMotion },
-          h('div', { className: 'yj-tips-grid' }, timeline, ruled && ready && entries.length > 0 && arm()))),
+      h('div', { className: 'ww-tips-body' },
+        h('div', { ref: scroller, className: 'ww-tips-scroll', onScroll, onWheel: stopMotion, onTouchStart: stopMotion },
+          h('div', { className: 'ww-tips-grid' }, timeline, ruled && ready && entries.length > 0 && arm()))),
       detailView);
   }
 

@@ -2,8 +2,7 @@ import { requireExactProjection } from './session-projection.js';
 import { z } from 'zod';
 import { abort, fail } from './vault.js';
 
-// 改名鲸翼前（0.1.x）的会话用 youjin 命令认领；旧会话照旧识别，知识整理才能继续排除它们。
-export const claimCommands = new Set(['whalewing', 'youjin']);
+export const claimCommands = new Set(['whalewing']);
 
 /** 自动任务用途只从本命令成功回执恢复，取消计划不会抹掉排除知识来源所需身份。 */
 export const automationProjection = {

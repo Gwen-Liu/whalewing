@@ -438,7 +438,7 @@ export function createGraphCanvas(React) {
       };
     }, [graph, subscribeTheme]);
     useEffect(() => { controller.current?.repaint(); }, [selectedPath, disabled]);
-    return h('div', { className: 'yj-graph-canvas', style: { position: 'relative', height: '100%', flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', borderRadius: 10, background: 'var(--dsw-alias-bg-layer-1)' } },
+    return h('div', { className: 'ww-graph-canvas', style: { position: 'relative', height: '100%', flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', borderRadius: 10, background: 'var(--dsw-alias-bg-layer-1)' } },
       h('canvas', { ref: canvas, tabIndex: 0, role: 'group', 'aria-label': label, 'aria-busy': settling, style: { display: 'block', width: '100%', height: '100%', touchAction: 'none', cursor: 'grab', outlineOffset: -3 } }),
       h('button', { type: 'button', onClick: () => controller.current?.reset(), style: { position: 'absolute', right: 8, top: 8 } }, resetLabel),
       settling && h('span', { role: 'status', style: { position: 'absolute', left: 10, top: 10, pointerEvents: 'none', fontSize: 12 } }, loadingLabel(painted, edgeCount)),

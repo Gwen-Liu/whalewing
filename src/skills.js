@@ -4,9 +4,24 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SkillFiles, skillArea, stat } from './skill-files.js';
 import { abort, digest, fail, frontmatter } from './vault.js';
+import { isSkillIdentifier } from '../features/skills/contract.js';
 
 const folders = { candidate: 'candidates', active: 'active', disabled: 'disabled' };
 const bundledRoot = fileURLToPath(new URL('../content/skills', import.meta.url));
+// 写给员工看的规则说明：标识和技能内容里的名称是同一条规则。
+const identifierRule = '只能用英文小写字母、数字和连字符（如 my-skill），连字符不能在开头、结尾或连用，最长 80 个字符';
+
+/** 新增技能只接受合规标识：目录形式“标识/SKILL.md”或平铺形式“标识.md”。已有目录（如企业技能包）不受此限，照常读写。 */
+function newSkillIdentifier(id) {
+  const match = typeof id === 'string' ? /^([^/\\]*)(?:\/SKILL\.md|\.md)$/.exec(id) : null;
+  if (!match || !isSkillIdentifier(match[1])) fail('SKILL_NAME', `技能标识${identifierRule}`);
+}
+
+/** 写进 issue 的诊断给员工看：去掉 fail 加在原句前面的“错误码: ”，只留原句（错误码只在 error.code 里）。 */
+function issueText(error) {
+  const message = String(error?.message ?? error ?? '');
+  return error?.code && message.startsWith(`${error.code}: `) ? message.slice(String(error.code).length + 2) : message;
+}
 
 function skillName(value) {
   if (typeof value !== 'string' || !/^whalewing-user-[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value) || value.length > 80) fail('SKILL_NAME', '个人技能使用 whalewing-user- 开头的小写连字符名称');
@@ -56,8 +71,19 @@ export class SkillLibrary {
 
   parseText(content) {
     if (typeof content !== 'string' || content.includes('\ufffd') || Buffer.from(content).toString('utf8') !== content || Buffer.byteLength(content) > this.vault.limits.maxNoteBytes) fail('SKILL_FORMAT', '技能正文须为有界有效 UTF-8 文本');
-    const parsed = frontmatter(content), { data, body } = parsed;
-    if (typeof data.name !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(data.name) || data.name.length > 80 || typeof data.description !== 'string' || !data.description.trim() || !body.trim()) fail('SKILL_FORMAT', '技能需要名称、说明和正文');
+    let parsed;
+    try { parsed = frontmatter(content); }
+    catch (error) {
+      // 属性区缺失或写错是填写问题，按技能格式说明怎么写，不当成插件出错。
+      if (error.code === 'METADATA') fail('SKILL_FORMAT', '技能内容开头要有属性区：用两行 --- 包住，里面写 name 和 description');
+      throw error;
+    }
+    const { data, body } = parsed;
+    // 逐项说清缺的或写错的是哪一项。
+    if (data.name === undefined || data.name === null || String(data.name).trim() === '') fail('SKILL_FORMAT', '技能内容的属性区缺少名称（name）');
+    if (!isSkillIdentifier(data.name)) fail('SKILL_FORMAT', `技能内容里的名称（name）${identifierRule}`);
+    if (typeof data.description !== 'string' || !data.description.trim()) fail('SKILL_FORMAT', '技能内容的属性区缺少说明（description）');
+    if (!body.trim()) fail('SKILL_FORMAT', '技能内容缺少正文：在属性区下面写具体做法');
     for (const key of ['disable-model-invocation', 'user-invocable']) if (data[key] !== undefined && typeof data[key] !== 'boolean') fail('SKILL_FORMAT', '技能调用设置须为布尔值');
     return parsed;
   }
@@ -90,7 +116,7 @@ export class SkillLibrary {
     try { ({ data } = this.parseText(raw.content)); }
     catch (error) {
       if (identity.origin !== 'user') throw error;
-      return { id, name: path.posix.basename(id === identity.bundle ? id : identity.bundle, '.md'), description: '需要修复的技能', origin: 'user', hash: bundle.hash, actions: ['read', 'update', 'remove'], discovery: 'unavailable', issue: error.message, content: raw.content };
+      return { id, name: path.posix.basename(id === identity.bundle ? id : identity.bundle, '.md'), description: '需要修复的技能', origin: 'user', hash: bundle.hash, actions: ['read', 'update', 'remove'], discovery: 'unavailable', issue: issueText(error), content: raw.content };
     }
     let origin = identity.origin, baseId, baseHash, baseUpdated = false;
     if (data.metadata?.whalewingBuiltin && origin === 'user') {
@@ -155,7 +181,7 @@ export class SkillLibrary {
         checkedBytes += Buffer.byteLength(entry?.content ?? '');
         if (checkedBytes > this.vault.limits.maxIndexBytes) fail('SKILL_SIZE', '用户技能目录正文总量超出投影限制');
         if (entry && !entry.issue) eligible.add(await fs.realpath(await this.files.resolve(id)));
-      } catch (error) { abort(signal); projectionIssue ??= error.message; }
+      } catch (error) { abort(signal); projectionIssue ??= issueText(error); }
       if (checkedBytes > this.vault.limits.maxIndexBytes) break;
     }
     let local;
@@ -165,7 +191,7 @@ export class SkillLibrary {
         const projected = await this.dependencies.projectSkills(signal);
         abort(signal);
         local = { ...projected, candidates: projected.candidates.filter(skill => typeof skill.path === 'string' && eligible.has(path.resolve(skill.path))) };
-      } catch (error) { abort(signal); local = { candidates: [], complete: false, issue: `用户技能候选读取失败：${error.message}` }; }
+      } catch (error) { abort(signal); local = { candidates: [], complete: false, issue: `用户技能候选读取失败：${issueText(error)}` }; }
     }
     let observed;
     try { observed = await this.dependencies.snapshot?.(signal); } catch { /* 发现失败不隐藏员工原件。 */ }
@@ -176,7 +202,7 @@ export class SkillLibrary {
         if (entry) { const { content, sourcePaths, ...summary } = entry; entries.push(summary); }
       } catch (error) {
         abort(signal);
-        entries.push({ id, name: path.posix.basename(path.posix.dirname(id)) || id, description: '需要修复的技能', origin: this.identified(id).origin, hash: '', actions: [], discovery: 'unavailable', issue: error.message });
+        entries.push({ id, name: path.posix.basename(path.posix.dirname(id)) || id, description: '需要修复的技能', origin: this.identified(id).origin, hash: '', actions: [], discovery: 'unavailable', issue: issueText(error) });
       }
     }
     return { entries, offset, total: ids.length, truncated: offset + this.vault.limits.maxResults < ids.length };
@@ -216,6 +242,8 @@ export class SkillLibrary {
     if (input.action === 'list') return this.catalog(input.offset, signal);
     if (input.action === 'read') return { entry: await this.entry(input.id, signal) };
     if (!['create', 'update', 'remove', 'reset'].includes(input.action)) fail('ACTION', '未知员工技能管理动作');
+    // 标识不合规时什么都不读不写，直接说明标识规则。
+    if (input.action === 'create') newSkillIdentifier(input.id);
     return this.files.locked(async () => {
       const identity = this.identified(input.id), previous = await this.entry(input.id, signal);
       if (input.action === 'create') {
@@ -429,7 +457,7 @@ export class SkillLibrary {
           skills.push({ name: record.name, description: record.description, state, hash: record.hash, ...(review ? { review } : {}) });
         } catch (error) {
           // 发布、停用或恢复后可留下空目录；没有正文就不再是该位置的一项技能。
-          if (error.code !== 'SKILL_NOT_FOUND') skills.push({ name: entry.name, description: '需要修复的技能', state, hash: '', issue: error.message });
+          if (error.code !== 'SKILL_NOT_FOUND') skills.push({ name: entry.name, description: '需要修复的技能', state, hash: '', issue: issueText(error) });
         }
       }
     }

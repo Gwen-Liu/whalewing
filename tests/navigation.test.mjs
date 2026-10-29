@@ -71,7 +71,7 @@ test('按当前目录分页，目录与文件共享同一游标且没有丢失�
 test('拒绝越界、内部目录、非法游标与链接，取消保持文件不变', async t => {
   const { root, vault } = await fixture(t);
   for (const directory of ['../', '.whalewing', '40-知识/../00-系统', '/40-知识', '40-知识/.hidden', '40-知识:stream', 1]) {
-    await assert.rejects(vault.browse(directory), { code: 'PATH' });
+    await assert.rejects(vault.browse(directory), { code: 'NOTE_PATH' });
   }
   for (const offset of [-1, 0.5, NaN, Infinity]) await assert.rejects(vault.browse('40-知识', offset), { code: 'OFFSET' });
   const before = await fs.readFile(path.join(root, '.whalewing', 'settings.json'));

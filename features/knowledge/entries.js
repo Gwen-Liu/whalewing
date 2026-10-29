@@ -7,10 +7,10 @@ export function registerEntries(ctx, kit, api) {
     const context = useSyncExternalStore(api.subscribeContext, api.assistantContext, api.assistantContext);
     const [error, setError] = useState('');
     if (context.sessionId !== sessionId || !context.paths.length) return null;
-    return h('div', { className: 'yj-cite-control' }, h('button', { type: 'button', className: 'yj-picker-trigger', title: t('citeHelp'), onMouseDown: event => event.preventDefault(), onClick: () => {
+    return h('div', { className: 'ww-cite-control' }, h('button', { type: 'button', className: 'ww-picker-trigger', title: t('citeHelp'), onMouseDown: event => event.preventDefault(), onClick: () => {
       try { api.insertReference(sessionId, inputActions.captureInsertion(), context.paths); setError(''); }
       catch (reason) { setError(reason.message); }
-    } }, t('citeNotes')), error && h('span', { role: 'alert', className: 'yj-error' }, error));
+    } }, t('citeNotes')), error && h('span', { role: 'alert', className: 'ww-error' }, error));
   }
 
       ctx.effect(() => ctx.inputTriggers.registerSource({

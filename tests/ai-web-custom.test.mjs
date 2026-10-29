@@ -49,6 +49,23 @@ test('自定义仅名字网址必填，HTTP/HTTPS规范化，拒收脚本文件�
   assert.equal(input.safeParse(save(0, { ...entry, name: ' ' })).success, false);
 });
 
+// 决策 2026-10-13：报错说清原因，不写工程用语。校验说明就是员工最后在右上角看到的那句话。
+test('网址或名字不合规时，校验说明是中文的具体原因：只能 http:// 或 https:// 开头、不能带账号密码、要写完整', () => {
+  const { input } = aiWebContract(z);
+  const reasons = fields => input.safeParse(save(0, { ...entry, ...fields })).error?.issues.map(issue => issue.message);
+  const scheme = '网址只能以 http:// 或 https:// 开头', credentials = '网址里不能带账号密码，请去掉其中的“账号:密码@”', incomplete = '网址不完整，请填写以 http:// 或 https:// 开头的完整网址';
+  for (const url of ['ftp://example.com', 'javascript:alert(1)', 'data:text/html,test', 'file:///C:/a.html']) assert.deepEqual(reasons({ url }), [scheme], url);
+  for (const url of ['https://user:pass@example.com', 'https://user@example.com/', 'http://:pass@example.com/']) assert.deepEqual(reasons({ url }), [credentials], url);
+  for (const url of ['example.com', 'https://', '//example.com']) assert.deepEqual(reasons({ url }), [incomplete], url);
+  assert.deepEqual(reasons({ url: 'https://example.com/ a' }), ['网址里不能有空格或换行']);
+  assert.deepEqual(reasons({ url: '   ' }), ['请填写网址'], '空网址只说一句，不再叠一句“不完整”');
+  assert.deepEqual(reasons({ url: `https://example.com/${'a'.repeat(2048)}` }), ['网址太长，不能超过 2048 个字符']);
+  assert.deepEqual(reasons({ name: ' ' }), ['请填写名字']);
+  assert.deepEqual(reasons({ name: '名'.repeat(81) }), ['名字不能超过 80 个字']);
+  assert.deepEqual(reasons({ description: '述'.repeat(401) }), ['描述不能超过 400 个字']);
+  assert.equal(reasons({ url: 'http://127.0.0.1:8000/' }), undefined, '合规的网址照常通过');
+});
+
 test('添加编辑删除经过真实JSON存储，服务重启持久读回且默认入口不可删除', async t => {
   const h = await harness(t);
   const created = await h.store.manage(save()); assert.equal(created.entries.length, 11);

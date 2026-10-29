@@ -1,4 +1,4 @@
-鲸翼工具台第三方代码与许可证
+鲸翼办公工坊第三方代码与许可证
 
 覆盖范围：固定发布输入 ExcelJS 4.4.0 browser bundle、Docx 9.10.0 ESM bundle、fflate 0.8.3 browser ESM、@xmldom/xmldom 0.9.12，以及预构建内嵌来源。这里保守保留输入载体的完整归属，不声称每个模块都在 tree-shaking 后的输出中执行。
 
@@ -8635,7 +8635,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 
 ===== Noto Sans SC / SIL Open Font License =====
-修改说明：工具台内联的 noto-font.json 是 Noto Sans SC 2.004（NotoSansSC-Regular.otf，官方 SubsetOTF/SC）的常用字子集，只保留常用符号、GB2312 全部字符和 Big5 常用字，由源码仓库的 scripts/noto-subset.mjs 调用 fontTools 4.65.0 生成；字形、字体名称、版权与许可记录未改动，仍按 SIL OFL 1.1 分发。完整原字体随包保留在 content/utilities。
+修改说明：办公工坊内联的 noto-font.json 是 Noto Sans SC 2.004（NotoSansSC-Regular.otf，官方 SubsetOTF/SC）的常用字子集，只保留常用符号、GB2312 全部字符和 Big5 常用字，由源码仓库的 scripts/noto-subset.mjs 调用 fontTools 4.65.0 生成；字形、字体名称、版权与许可记录未改动，仍按 SIL OFL 1.1 分发。完整原字体随包保留在 content/utilities。
 
 This Font Software is licensed under the SIL Open Font License,
 Version 1.1.

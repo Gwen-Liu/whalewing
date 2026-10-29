@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { aiWebEntries } from '../features/ai-web/catalog.js';
 import { createAiWebView } from '../features/ai-web/view.js';
 import { findAiWebEntries, openAiWebsite } from '../features/ai-web/client-api.js';
+import { fixture as shellFixture } from './client-fixture.mjs';
 
 test('官方目录名称唯一，仅包含不带凭据的 HTTPS 入口', () => {
   assert.equal(new Set(aiWebEntries.map(entry => entry.id)).size, aiWebEntries.length);
@@ -57,7 +58,7 @@ function fixture(openBrowser, options = {}) {
 }
 
 // 2026-10-25 改版：打开过的 AI 仍在入口列表里，标为“正在用”；页面里不再有切换下拉，切换在浏览器工具栏里。
-const currentTile = tree => nodes(tree).find(node => node.type === 'article' && node.props.className.includes('yj-ai-current'));
+const currentTile = tree => nodes(tree).find(node => node.type === 'article' && node.props.className.includes('ww-ai-current'));
 const tileName = tile => nodes(tile).find(node => node.type === 'strong').props.children[0];
 
 function nodes(tree) {
@@ -308,4 +309,209 @@ test('正常切回接纳新目录，旧取消 list 不覆盖新读回，原选�
   const current = f.render();
   assert.equal(tileName(currentTile(current)), '更新名称');
   await button(current, '继续使用').props.onClick(); assert.equal(focuses, 1); assert.equal(opens, 1);
+});
+
+// 需求§AI 网页第 4 条（回到页签时正在用的标“正在用”，页头有“继续使用”）；原版 DSH 上打开后工作台会卸载，页面靠外面记下的入口恢复。
+const pageHead = tree => nodes(nodes(tree).find(node => node.type === 'header' && node.props.className === 'ww-pagehead')).find(node => node.type === 'p').props.children[0];
+
+test('原版回到页签时按记下的入口标“正在用”，页头写“正在用 名字”，继续使用把这个入口交出去切回它的标签', async () => {
+  const opens = [], resumed = [];
+  const f = fixture(url => opens.push(url), { remembered: 'kimi', focusBrowser: async (signal, entry) => { assert.ok(signal instanceof AbortSignal); resumed.push(entry); } });
+  const back = f.render();
+  assert.equal(nodes(back).filter(node => node.type === 'article').length, 10, '入口照常列着');
+  assert.equal(tileName(currentTile(back)), 'Kimi');
+  assert.ok(nodes(currentTile(back)).some(node => node.type === 'small' && node.props.children.includes('正在用')));
+  assert.match(pageHead(back), /^正在用 Kimi · /);
+  await button(back, '继续使用').props.onClick();
+  assert.deepEqual(resumed.map(entry => [entry.id, entry.url]), [['kimi', 'https://www.kimi.com/']]);
+  assert.deepEqual(opens, [], '继续使用不走打开入口那条路');
+  f.unmount();
+});
+
+test('原版没有记下入口或记下的会话已不在时，不标“正在用”也没有继续使用', () => {
+  const options = { remembered: '' };
+  const f = fixture(() => {}, options);
+  const none = f.render();
+  assert.equal(currentTile(none), undefined);
+  assert.equal(button(none, '继续使用'), undefined);
+  assert.match(pageHead(none), /^10 个入口 · /);
+  // 回来时会话列表还没读完先标上，读完发现会话不在了就去掉（这个夹具里 effect 改的状态下一次渲染才看得到）。
+  options.remembered = 'kimi'; f.render(); assert.equal(tileName(currentTile(f.render())), 'Kimi');
+  options.remembered = ''; f.render(); const gone = f.render();
+  assert.equal(currentTile(gone), undefined);
+  assert.equal(button(gone, '继续使用'), undefined);
+  f.unmount();
+});
+
+for (const kept of [true, false]) test(`原版记下的是自建入口：${kept ? '入口还在，目录读回后标“正在用”' : '入口已删除，读回后不标“正在用”'}`, async () => {
+  const f = fixture(() => {}, { remembered: customEntry.id, manageAiWeb: async () => ({ entries: kept ? [...aiWebEntries, customEntry] : aiWebEntries }) });
+  // 目录读回前只有内置入口，自建入口还对不上，先不标。
+  const loading = f.render();
+  assert.equal(currentTile(loading), undefined); assert.equal(button(loading, '继续使用'), undefined);
+  await Promise.resolve();
+  const loaded = f.render();
+  if (kept) { assert.equal(tileName(currentTile(loaded)), '旧名字'); assert.match(pageHead(loaded), /^正在用 旧名字 · /); assert.ok(button(loaded, '继续使用')); }
+  else {
+    assert.equal(currentTile(loaded), undefined); assert.equal(button(loaded, '继续使用'), undefined);
+    assert.equal(JSON.stringify(loaded).includes('正在用'), false);
+  }
+  f.unmount();
+});
+
+// 下面用工作台的真实接线（tests/client-fixture.mjs）核对原版路径：记下入口、交给页面、继续使用回到原标签。
+const allNodes = tree => tree === null || tree === undefined || tree === false || typeof tree !== 'object' ? [] : Array.isArray(tree) ? tree.flatMap(allNodes) : [tree, ...allNodes(tree.props?.children)];
+const tabButton = (tree, label) => allNodes(tree).find(node => node.type === 'button' && node.props['data-tab'] && node.props.children.includes(label));
+async function settle(f) { for (let i = 0; i < 4; i++) { f.render(); f.flushEffects(); await new Promise(setImmediate); } }
+const aiWebProps = f => allNodes(f.render()).find(node => node.type?.name === 'AiWebView').props;
+const aiWebKey = 'whalewing:aiweb:http://fixture.local', aiWebCurrentKey = 'whalewing:aiweb-current:http://fixture.local';
+/** 原版 DSH 的右栏：没有把浏览器铺满工作台的接口，只有标签的打开、切换和列出。 */
+function nativeSidebar() {
+  const state = { mounted: undefined, tabs: [], opened: [], focused: [] };
+  state.service = {
+    mounted: { getSnapshot: () => state.mounted },
+    openTab: (...args) => { state.opened.push(args); state.tabs.push(`tab-${state.opened.length}`); },
+    tabsIn: () => state.tabs.map(id => ({ id, kind: 'browser' })), focus: id => state.focused.push(id), isExpanded: () => true,
+  };
+  return state;
+}
+async function nativeShell(overrides = {}) {
+  const sidebar = nativeSidebar(), f = await shellFixture({ sidebarRight: sidebar.service, ...overrides });
+  f.ctx.uiWorkspace.openSession = id => { sidebar.mounted = id; f.calls.push(['open', id]); };
+  return { f, sidebar, api: f.clients['ai-web'] };
+}
+
+test('原版在「AI 网页」会话里打开成功后记下入口，回到页签时页面拿到它；继续使用切回原标签，标签关掉了才新开', async () => {
+  const { f, sidebar, api } = await nativeShell();
+  assert.equal(api.supportsInlinePresentation(), false);
+  assert.equal(api.currentAiInConversation(), '');
+  await api.openAiInConversation('https://www.kimi.com/', 'kimi');
+  const session = f.storage.get(aiWebKey);
+  assert.deepEqual(JSON.parse(f.storage.get(aiWebCurrentKey)), { sessionId: session, entryId: 'kimi' });
+  assert.equal(api.currentAiInConversation(), 'kimi');
+  // 只切到会话、不打开网页时不改记下的入口。
+  await api.openAiInConversation(undefined); assert.equal(api.currentAiInConversation(), 'kimi');
+  await tabButton(f.render(), 'AI 网页').props.onClick(); await settle(f);
+  assert.equal(aiWebProps(f).remembered, 'kimi');
+  const kimi = aiWebEntries.find(entry => entry.id === 'kimi');
+  await aiWebProps(f).focusBrowser(new AbortController().signal, kimi);
+  assert.equal(sidebar.opened.length, 1, '没有新开标签'); assert.deepEqual(sidebar.focused, ['tab-1'], '切回原来的标签');
+  assert.equal(f.calls.filter(([kind]) => kind === 'create').length, 1, '还是原来的「AI 网页」会话');
+  assert.equal(f.calls.filter(([kind]) => kind === 'open').every(([, id]) => id === session), true);
+  // 员工把标签关掉了：按打开入口的逻辑新开一个。
+  sidebar.tabs.length = 0;
+  await aiWebProps(f).focusBrowser(new AbortController().signal, kimi);
+  assert.deepEqual(sidebar.opened.at(-1), ['browser', { params: { url: 'https://www.kimi.com/' } }]);
+  assert.equal(sidebar.opened.length, 2); assert.deepEqual(sidebar.focused, ['tab-1']);
+  f.unmount();
+});
+
+test('原版记下的会话已换掉、不在会话列表里或已归档时不算“正在用”，本机存储坏了或读不了也不报错', async () => {
+  const storage = new Map([[aiWebKey, 'ai-now'], [aiWebCurrentKey, JSON.stringify({ sessionId: 'ai-now', entryId: 'kimi' })]]);
+  const { f, api } = await nativeShell({ storage });
+  const sessions = f.ctx.sessions.list, workspaces = f.ctx.workspaces.list, listed = { ids: ['ai-now'], byId: { 'ai-now': { id: 'ai-now', blank: true } }, phase: 'ready' };
+  assert.equal(api.currentAiInConversation(), 'kimi', '会话列表还没读完时先按记下的算');
+  sessions.set(listed); assert.equal(api.currentAiInConversation(), 'kimi');
+  sessions.set({ ids: [], byId: {}, phase: 'ready' }); assert.equal(api.currentAiInConversation(), '', '会话已不在列表里');
+  sessions.set(listed);
+  workspaces.set({ ...workspaces.getSnapshot(), archivedSessionIds: ['ai-now'] }); assert.equal(api.currentAiInConversation(), '', '会话已归档');
+  workspaces.set({ ...workspaces.getSnapshot(), archivedSessionIds: [] }); assert.equal(api.currentAiInConversation(), 'kimi');
+  storage.set(aiWebKey, 'ai-other'); assert.equal(api.currentAiInConversation(), '', '「AI 网页」会话已换成别的');
+  storage.delete(aiWebKey); assert.equal(api.currentAiInConversation(), '');
+  storage.set(aiWebKey, 'ai-now');
+  for (const broken of ['不是 JSON', 'null', '{"sessionId":"ai-now"}', '{"sessionId":"ai-now","entryId":7}']) { storage.set(aiWebCurrentKey, broken); assert.equal(api.currentAiInConversation(), '', broken); }
+  storage.set(aiWebCurrentKey, JSON.stringify({ sessionId: 'ai-now', entryId: 'kimi' }));
+  f.browser.localStorage.getItem = () => { throw new Error('浏览器禁用了本机存储'); };
+  assert.equal(api.currentAiInConversation(), '');
+  await tabButton(f.render(), 'AI 网页').props.onClick(); await settle(f);
+  assert.equal(aiWebProps(f).remembered, '');
+  f.unmount();
+});
+
+test('原版打开没成功不改记下的入口；记不住时照常打开', async () => {
+  const { f, sidebar, api } = await nativeShell();
+  await api.openAiInConversation('https://www.kimi.com/', 'kimi');
+  const openTab = sidebar.service.openTab;
+  sidebar.service.openTab = () => { throw new Error('浏览器标签打不开'); };
+  await assert.rejects(api.openAiInConversation('https://chat.deepseek.com/', 'deepseek'), /浏览器标签打不开/);
+  assert.equal(api.currentAiInConversation(), 'kimi');
+  sidebar.service.openTab = openTab;
+  const setItem = f.browser.localStorage.setItem;
+  f.browser.localStorage.setItem = (key, value) => { if (key === aiWebCurrentKey) throw new Error('本机存储已满'); return setItem(key, value); };
+  await api.openAiInConversation('https://chat.deepseek.com/', 'deepseek');
+  assert.deepEqual(sidebar.opened.at(-1), ['browser', { params: { url: 'https://chat.deepseek.com/' } }]);
+  assert.equal(api.currentAiInConversation(), 'kimi');
+  f.unmount();
+});
+
+test('宿主适配版不读原版记下的入口，“正在用”仍由页面自己记着', async () => {
+  const storage = new Map([[aiWebKey, 'ai-now'], [aiWebCurrentKey, JSON.stringify({ sessionId: 'ai-now', entryId: 'kimi' })]]);
+  const f = await shellFixture({ storage, sidebarRight: { mounted: { getSnapshot: () => undefined }, focusPresentation() {}, presentSession() { return () => {}; }, openTab() {} } });
+  assert.equal(f.clients['ai-web'].supportsInlinePresentation(), true);
+  await tabButton(f.render(), 'AI 网页').props.onClick(); await settle(f);
+  assert.equal(aiWebProps(f).remembered, undefined);
+  f.unmount();
+});
+
+// 需求§界面通用约定（编辑用右侧抽屉：添加或编辑 AI 入口都从右侧滑出同一种抽屉，底部固定操作按钮）。
+// 结构和外壳 Drawer、专家抽屉一样：标题、可滚动的正文、正文外面贴底的按钮行；按钮靠 form 属性仍算这张表单的，回车照常提交。
+for (const editing of [false, true]) test(`${editing ? '编辑' : '添加'} AI 入口的抽屉和其它抽屉同一种结构，底部按钮在正文外面、仍提交这张表单`, async t => {
+  const saved = [];
+  const f = fixture(() => {}, { manageAiWeb: async input => {
+    if (input.action === 'list') return { entries: [...aiWebEntries, customEntry] };
+    saved.push(input); return { entries: [...aiWebEntries, { ...customEntry, ...input.entry, id: input.id, revision: input.expectedRevision + 1 }] };
+  } });
+  t.after(() => f.unmount()); f.render(); await Promise.resolve();
+  if (editing) nodes(f.render()).find(node => node.props['aria-label'] === '编辑 旧名字').props.onClick();
+  else nodes(f.render()).find(node => node.props.className === 'ww-card ww-add-card').props.onClick();
+  const modal = dialogElement(f.render()), dialog = nodes(f.editor(modal)).find(node => node.type === 'dialog');
+  assert.equal(dialog.props.className, 'ww-editor ww-page');
+  assert.deepEqual(dialog.props.children.map(node => node.type), ['header', 'form', 'footer'], '标题、正文、按钮行');
+  const [, form, footer] = dialog.props.children;
+  assert.equal(form.props.className, 'ww-editor-body', '正文用抽屉共用的可滚动正文');
+  assert.equal(footer.props.className, 'ww-row', '按钮行和外壳 Drawer 一样');
+  assert.equal(nodes(form).some(node => node.type === 'footer' || node.type === 'button' && node.props.type === 'submit'), false, '按钮不在正文里，不跟着表单停在中间');
+  assert.deepEqual(footer.props.children.map(node => node.props.children[0]), ['取消', editing ? '保存修改' : '添加']);
+  const submit = footer.props.children.find(node => node.props.type === 'submit');
+  assert.ok(form.props.id?.startsWith('ww-ai-web-form-'));
+  assert.equal(submit.props.form, form.props.id, '提交按钮属于这张表单：点它或在输入框里按回车都提交');
+  if (!editing) {
+    const fill = (label, value) => nodes(form).find(node => node.type === 'label' && node.props.children[0] === label).props.children[1].props.onChange({ target: { value } });
+    fill('名字', '办公助手'); fill('网址', 'https://example.com/');
+  }
+  // 浏览器提交时触发的是表单的 submit 事件，保存仍走原来那条路。
+  await nodes(f.editor(modal)).find(node => node.type === 'form').props.onSubmit({ preventDefault() {} });
+  assert.equal(saved.length, 1); assert.equal(saved[0].action, 'save');
+  assert.equal(dialogElement(f.render()), undefined, '保存后抽屉关上');
+});
+
+test('删除 AI 入口仍是居中确认框，说明和“取消、确认删除”在一起', async t => {
+  const f = fixture(() => {}, { manageAiWeb: async () => ({ entries: [...aiWebEntries, customEntry] }) });
+  t.after(() => f.unmount()); f.render(); await Promise.resolve();
+  nodes(f.render()).find(node => node.props['aria-label'] === '删除 旧名字').props.onClick();
+  const dialog = nodes(f.editor(dialogElement(f.render()))).find(node => node.type === 'dialog');
+  assert.equal(dialog.props.className, 'ww-modal ww-confirm ww-page');
+  const form = dialog.props.children.find(node => node.type === 'form'), footer = nodes(form).find(node => node.type === 'footer');
+  assert.equal(footer.props.className, 'ww-dialog-actions');
+  assert.deepEqual(footer.props.children.map(node => node.props.children[0]), ['取消', '确认删除']);
+});
+
+// 需求§AI 网页（网址为 HTTP 或 HTTPS）；决策 2026-10-13（报错说清原因，不写工程用语）。
+// 走真实的工作台接线：本机核对不过时经报错指南写成一句话，不把校验结果的 JSON 交给页面，也不发给宿主。
+test('网址不合规时，AI 入口的报错是一句看得懂的话，说清原因，不出现 JSON 和错误码，也不发给宿主', async () => {
+  const f = await shellFixture(), api = f.clients['ai-web'];
+  const host = f.ctx.remote.whalewingAiWeb, sent = [], manage = host.manageAiWeb;
+  host.manageAiWeb = (input, ...rest) => { sent.push(input); return manage(input, ...rest); };
+  const warn = console.warn; console.warn = () => {};
+  try {
+    for (const [url, reason] of [['ftp://example.com', '网址只能以 http:// 或 https:// 开头'], ['javascript:alert(1)', '网址只能以 http:// 或 https:// 开头'], ['https://user:pass@example.com', '网址里不能带账号密码']]) {
+      const error = await api.aiWebRequest({ action: 'save', id: 'custom-85e1008c-acfe-4fea-956c-d402ccf2be67', expectedRevision: 0, entry: { name: '办公助手', url, description: '', avatar: null } }).then(() => null, value => value);
+      assert.ok(error, `“${url}”被拒`);
+      assert.ok(error.message.includes(reason), `“${url}”说清原因：${error.message}`);
+      assert.doesNotMatch(error.message, /"code"|"path"|[[\]{}]|INPUT|ZodError|custom/i, `“${url}”不显示内部数据格式：${error.message}`);
+    }
+    assert.deepEqual(sent, [], '没过本机核对的内容不发给宿主');
+    // 合规的照常发出去。
+    await api.aiWebRequest({ action: 'list' });
+    assert.deepEqual(sent, [{ action: 'list' }]);
+  } finally { console.warn = warn; f.unmount(); }
 });

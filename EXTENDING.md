@@ -1,6 +1,6 @@
-# 编写鲸翼二级插件
+# 编写鲸翼扩展
 
-二级插件是独立的 DSH 插件包。安装、启用、关闭和卸载都在 DSH「插件」页完成；鲸翼只提供工作台页签和下面的 v1 接口。无需修改鲸翼源码，也不要导入鲸翼内部文件。
+扩展是依赖鲸翼的独立 DSH 组合包。安装、启用、关闭和卸载都在 DSH「插件」页完成；鲸翼只提供工作台页签和下面的 v1 接口。无需修改鲸翼源码，也不要导入鲸翼内部文件。
 
 当前接口仍在开发中；首次发布版本及 `peerDependencies.dsh-whalewing` 范围，**以首个带 v1 扩展接口的封版版本为准**。当前起步模板不填写该范围，不以任意版本范围代替兼容验证。`apiVersion` 与插件包版本不是同一件事。
 
@@ -119,24 +119,24 @@ useEffect(() => {
 
 | 组件 | props |
 | --- | --- |
-| `Modal` | `title`、`onClose`、`children`；可选 `busy`、`className`。详情用居中弹窗；需要小号时 `className: 'yj-confirm'` |
+| `Modal` | `title`、`onClose`、`children`；可选 `busy`、`className`。详情用居中弹窗；需要小号时 `className: 'ww-confirm'` |
 | `Drawer` | `title`、`onClose`、`children`；可选 `busy`、`footer`（按钮元素数组）。编辑表单用右侧抽屉 |
 | `ConfirmDialog` | `title`、`message`、`confirmLabel`、`cancelLabel`、`onConfirm`、`onCancel`；可选 `danger`、`busy`。删除确认设 `danger: true` |
 | `ActionMenu` | `label`、`children`（操作按钮）；可选 `iconOnly`、`icon`。单项编辑/删除收进菜单 |
 | `Logo` | 可选 `size`（默认 16）、`tone`（默认 `mono`，可用 `brand`）。仅作鲸翼能力的标识，不替代扩展自己的图标 |
 
-公共样式在工作台 `.yj-page` 范围生效：
+公共样式在工作台 `.ww-page` 范围生效：
 
 | 类 | 用途 |
 | --- | --- |
-| `yj-card`、`yj-grid` | 内容卡片与卡片网格 |
-| `yj-add-card`、`yj-add-mark` | 与 `yj-card` 合用的加号卡片及加号图形 |
-| `yj-row` | 横向控件行，窄屏换行 |
-| `yj-primary`、`yj-danger` | 主按钮、危险操作按钮 |
-| `yj-field` | 表单字段；行内输入控件需自行设合理宽度 |
-| `yj-muted` | 辅助说明 |
-| `yj-section` | 有边框的固定内容区，不用于临时结果或展开确认 |
-| `yj-dialog-actions` | 居中弹窗底部的操作行 |
+| `ww-card`、`ww-grid` | 内容卡片与卡片网格 |
+| `ww-add-card`、`ww-add-mark` | 与 `ww-card` 合用的加号卡片及加号图形 |
+| `ww-row` | 横向控件行，窄屏换行 |
+| `ww-primary`、`ww-danger` | 主按钮、危险操作按钮 |
+| `ww-field` | 表单字段；行内输入控件需自行设合理宽度 |
+| `ww-muted` | 辅助说明 |
+| `ww-section` | 有边框的固定内容区，不用于临时结果或展开确认 |
+| `ww-dialog-actions` | 居中弹窗底部的操作行 |
 
 成功/失败都用提示；确认和详情不在正文插入新块挤动布局；编辑用抽屉；列表新增用加号卡片。按钮写具体动作。失败文案说清发生了什么、问题在扩展还是设置/网络/文件、下一步怎么处理，不把错误码或内部术语当正文。
 

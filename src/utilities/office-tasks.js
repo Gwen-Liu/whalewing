@@ -1,4 +1,4 @@
-/** 表格只消费已保存值；原有 OOXML 校验是所有 Office 工具的唯一读取边界。 */
+/** 表格只消费已保存值；原有 OOXML 校验是所有 Office 功能项的唯一读取边界。 */
 import ExcelJS from 'exceljs';
 import { Document, Packer, Paragraph, TextRun } from 'docx';
 import { zipSync } from 'fflate';
@@ -207,6 +207,6 @@ export async function officeTask(tool, files, options = {}, text = '') {
     if (columns.length !== 1 || index < 0 || !['text', 'number'].includes(options.sortType) || !['asc', 'desc'].includes(options.order)) throw new Error('请选择有效列名与排序方式');
     if (options.sortType === 'number' && data.some(row => !row[index].trim() || !Number.isFinite(Number(row[index])))) throw new Error('数值排序列含空值或非数字，请先清理或改用文本排序');
     rows = [...data].sort((a, b) => (options.sortType === 'number' ? Number(a[index]) - Number(b[index]) : a[index].localeCompare(b[index], 'zh-CN')) * (options.order === 'desc' ? -1 : 1));
-  } else throw new Error('未知 Office 工具');
+  } else throw new Error('未知 Office 功能项');
   return workbookOutput([{ name: sheet.name, rows: [header, ...rows] }], `${safeBase(inputs[0].name)}-整理.xlsx`, `${data.length} 行输入，${rows.length} 行输出`);
 }

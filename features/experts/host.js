@@ -13,7 +13,6 @@ export const inject = ['whalewing', 'commands', 'sessionProjections', 'sessions'
 export const Config = configSchema.object({ operationMs: configSchema.number().min(1000).max(120000).default(15000), maxExperts: configSchema.number().step(1).min(7).max(1000).default(200) });
 const commandName = 'whalewing-expert';
 // 改名鲸翼前（0.1.x）的专家会话用这个命令名；只在重建身份时认它，不再接受新的切换。
-const legacyCommandName = 'youjin-expert';
 const contract = expertContract(z);
 const expertIdSchema = z.string().regex(/^[a-z][a-z0-9-]{0,79}$/).nullable();
 const viewSchema = z.object({ expertId: expertIdSchema });
@@ -52,7 +51,7 @@ export const expertProjection = {
   stateSchema: z.object({ view: viewSchema, selected: z.boolean(), pending: z.record(z.string(), expertIdSchema) }),
   init: () => ({ view: { expertId: null }, selected: false, pending: {} }),
   apply(state, event) {
-    if (event.type === 'command/run' && (event.data.name === commandName || event.data.name === legacyCommandName)) {
+    if (event.type === 'command/run' && event.data.name === commandName) {
       try {
         const input = parseInput(event.data.args ?? '');
         if (!Object.hasOwn(input, 'expertId')) return state;

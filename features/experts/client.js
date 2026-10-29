@@ -6,7 +6,7 @@ import { registerFeature, useFeature } from '../../src/shell/feature.js';
 
 /** 本页持有自己的草稿、动作和恢复状态；切走时不把状态交给外壳。 */
 export function createView(kit) {
-  const { React, Avatar, ActionMenu, ConfirmDialog, z, avatarArt, presetAvatars } = kit;
+  const { React, Avatar, ActionMenu, ConfirmDialog, useDiscard, z, avatarArt, presetAvatars } = kit;
   const { createElement: h, useState, useRef, useEffect, useLayoutEffect, useSyncExternalStore } = React;
   function ExpertEditor({ api, expert, onClose, t, notify }) {
     const avatarRead = useRef(null);
@@ -25,6 +25,9 @@ export function createView(kit) {
     const [initialIdentity] = useState(() => expert || { id: `custom-${globalThis.crypto.randomUUID()}`, revision: 0 });
     const committed = useRef(initialIdentity);
     const update = (key, value) => setDraft(current => ({ ...current, [key]: value }));
+    // 打开时的样子；之后有改动，关闭前先确认放弃。
+    const [baseline] = useState(() => JSON.stringify(draft));
+    const [requestClose, discard] = useDiscard({ dirty: JSON.stringify(draft) !== baseline, onClose, busy });
     useEffect(() => {
       const previous = typeof document === 'undefined' ? null : document.activeElement;
       modal.current?.showModal();
@@ -100,32 +103,32 @@ export function createView(kit) {
     const modelValue = draft.model ? JSON.stringify({ provider: draft.model.provider, model: draft.model.model }) : '';
     const choices = (kind, title) => {
       const available = catalog?.[kind] || [];
-      return h('details', { className: 'yj-section' }, h('summary', null, t(title), ` (${draft[kind].length})`), h('p', { className: 'yj-muted' }, t('catalogHelp')),
-        ...[...available, ...draft[kind].filter(name => !available.some(item => item.name === name)).map(name => ({ name, missing: true }))].map(item => h('label', { className: 'yj-check yj-choice', key: item.name },
+      return h('details', { className: 'ww-section' }, h('summary', null, t(title), ` (${draft[kind].length})`), h('p', { className: 'ww-muted' }, t('catalogHelp')),
+        ...[...available, ...draft[kind].filter(name => !available.some(item => item.name === name)).map(name => ({ name, missing: true }))].map(item => h('label', { className: 'ww-check ww-choice', key: item.name },
           h('input', { type: 'checkbox', checked: draft[kind].includes(item.name), disabled: busy, onChange: event => update(kind, event.target.checked ? [...draft[kind], item.name] : draft[kind].filter(name => name !== item.name)) }),
-          h('span', null, item.name, h('small', null, item.missing ? t('missingBinding') : item.description || item.tools?.join(' · '))))), !available.length && h('p', { className: 'yj-muted' }, t('emptyCatalog')));
+          h('span', null, item.name, h('small', null, item.missing ? t('missingBinding') : item.description || item.tools?.join(' · '))))), !available.length && h('p', { className: 'ww-muted' }, t('emptyCatalog')));
     };
-    return h('dialog', { ref: modal, className: 'yj-editor yj-page', 'aria-label': t(expert ? 'editExpert' : 'addExpert'), onCancel: event => { event.preventDefault(); if (!busy) onClose(); }, onClick: event => { if (event.target === event.currentTarget && !busy) onClose(); } },
-      h('header', { className: 'yj-header' }, h('h2', null, t(expert ? 'editExpert' : 'addExpert')), h('button', { type: 'button', disabled: busy, onClick: onClose, 'aria-label': t('editorClose') }, '×')),
-      h('div', { className: 'yj-editor-body' },
-        expert?.baseUpdated?.length > 0 && h('p', { className: 'yj-notice', role: 'status' }, t('expertBaseUpdated', { fields: expert.baseUpdated.map(field => t(`expertField_${field}`)).join('、') })),
-        !expert && h('div', { className: 'yj-section' },
-          h('div', { className: 'yj-row' },
-            h('label', { className: 'yj-field' }, t('expertTemplate'), h('select', { value: templateId, disabled: busy || !catalog || !templates, onChange: event => chooseTemplate(event.target.value) },
+    return h(React.Fragment, null, h('dialog', { ref: modal, className: 'ww-editor ww-page', 'aria-label': t(expert ? 'editExpert' : 'addExpert'), onCancel: event => { event.preventDefault(); requestClose(); }, onClick: event => { if (event.target === event.currentTarget) requestClose(); } },
+      h('header', { className: 'ww-header' }, h('h2', null, t(expert ? 'editExpert' : 'addExpert')), h('button', { type: 'button', disabled: busy, onClick: requestClose, 'aria-label': t('editorClose') }, '×')),
+      h('div', { className: 'ww-editor-body' },
+        expert?.baseUpdated?.length > 0 && h('p', { className: 'ww-notice', role: 'status' }, t('expertBaseUpdated', { fields: expert.baseUpdated.map(field => t(`expertField_${field}`)).join('、') })),
+        !expert && h('div', { className: 'ww-section' },
+          h('div', { className: 'ww-row' },
+            h('label', { className: 'ww-field' }, t('expertTemplate'), h('select', { value: templateId, disabled: busy || !catalog || !templates, onChange: event => chooseTemplate(event.target.value) },
               h('option', { value: '' }, t('expertTemplateBlank')), ...(templates || []).map(item => h('option', { key: item.id, value: item.id }, `${item.name} · ${item.description}`)))),
-            h('label', { className: 'yj-avatar-upload' }, t('expertTemplateImport'), h('input', { type: 'file', accept: '.md,text/markdown,text/plain', disabled: busy || !catalog, onChange: importTemplate }))),
-          h('p', { className: 'yj-muted' }, t('expertTemplateHelp'))),
-        h('div', { className: 'yj-avatar-picker' }, h(Avatar, { expert: draft, size: 64 }),
-        h('div', { className: 'yj-avatar-side' },
-          h('div', { className: 'yj-avatar-actions' }, h('label', { className: 'yj-avatar-upload' }, t('avatar'), h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', disabled: busy, onChange: upload })), h('button', { type: 'button', disabled: busy, onClick: () => update('avatar', null) }, t('clearAvatar'))),
-          presetAvatars.length > 0 && h('div', { className: 'yj-avatar-presets', role: 'group', 'aria-label': t('avatarPresets') }, ...presetAvatars.map((id, index) => h('button', { type: 'button', key: id, className: 'yj-avatar-preset', 'aria-pressed': draft.avatar === avatarArt[id], 'aria-label': `${t('avatarPresets')} ${index + 1}`, disabled: busy, onClick: () => update('avatar', avatarArt[id]) }, h('img', { src: avatarArt[id], alt: '' })))))),
+            h('label', { className: 'ww-avatar-upload' }, t('expertTemplateImport'), h('input', { type: 'file', accept: '.md,text/markdown,text/plain', disabled: busy || !catalog, onChange: importTemplate }))),
+          h('p', { className: 'ww-muted' }, t('expertTemplateHelp'))),
+        h('div', { className: 'ww-avatar-picker' }, h(Avatar, { expert: draft, size: 64 }),
+        h('div', { className: 'ww-avatar-side' },
+          h('div', { className: 'ww-avatar-actions' }, h('label', { className: 'ww-avatar-upload' }, t('avatar'), h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', disabled: busy, onChange: upload })), h('button', { type: 'button', disabled: busy, onClick: () => update('avatar', null) }, t('clearAvatar'))),
+          presetAvatars.length > 0 && h('div', { className: 'ww-avatar-presets', role: 'group', 'aria-label': t('avatarPresets') }, ...presetAvatars.map((id, index) => h('button', { type: 'button', key: id, className: 'ww-avatar-preset', 'aria-pressed': draft.avatar === avatarArt[id], 'aria-label': `${t('avatarPresets')} ${index + 1}`, disabled: busy, onClick: () => update('avatar', avatarArt[id]) }, h('img', { src: avatarArt[id], alt: '' })))))),
       ...[['name', 'expertName'], ['description', 'expertDescription']].map(([key, label]) => h('label', { key }, t(label), h('input', { value: draft[key], required: true, disabled: busy, maxLength: key === 'name' ? 40 : 240, onChange: event => update(key, event.target.value) }))),
       h('label', null, t('expertPrompt'), h('textarea', { required: true, value: draft.prompt, disabled: busy, onChange: event => update('prompt', event.target.value), spellCheck: false })),
-      h('label', null, t('expertModel'), catalog?.modelSupported === false && h('small', { className: 'yj-muted' }, t('modelUnsupported')), h('select', { value: modelValue, disabled: busy || !catalog || catalog.modelSupported === false, onChange: event => update('model', event.target.value ? JSON.parse(event.target.value) : null) }, h('option', { value: '' }, t('inheritModel')), draft.model && !modelOptions.some(item => item.value === modelValue) && h('option', { value: modelValue }, `${draft.model.provider} / ${draft.model.model} · ${t('modelMissing')}`), ...modelOptions.map(item => h('option', { value: item.value, key: item.value }, item.name || item.model || item.id)))),
+      h('label', null, t('expertModel'), catalog?.modelSupported === false && h('small', { className: 'ww-muted' }, t('modelUnsupported')), h('select', { value: modelValue, disabled: busy || !catalog || catalog.modelSupported === false, onChange: event => update('model', event.target.value ? JSON.parse(event.target.value) : null) }, h('option', { value: '' }, t('inheritModel')), draft.model && !modelOptions.some(item => item.value === modelValue) && h('option', { value: modelValue }, `${draft.model.provider} / ${draft.model.model} · ${t('modelMissing')}`), ...modelOptions.map(item => h('option', { value: item.value, key: item.value }, item.name || item.model || item.id)))),
       selectedModel?.reasoning && h('label', null, t('reasoning'), h('select', { value: draft.model?.reasoningEffort || '', disabled: busy, onChange: event => { const { reasoningEffort, ...model } = draft.model; update('model', event.target.value ? { ...model, reasoningEffort: event.target.value } : model); } }, h('option', { value: '' }, t('reasoningDefault')), ...selectedModel.reasoning.efforts.map(item => h('option', { value: item.id, key: item.id }, item.name)))),
-      choices('skills', 'optionalSkills'), catalog?.mcpSupported === false ? h('p', { className: 'yj-muted' }, t('mcpUnsupported')) : choices('mcpServers', 'optionalMcp'), ...(catalog?.issues || []).map(issue => h('p', { key: issue, className: 'yj-notice' }, issue))),
-      recovery && h('div', { className: 'yj-notice' }, t('expertRecovery'), h('button', { type: 'button', disabled: busy, onClick: () => { committed.current = recovery; setDraft({ ...recovery, skills: [...recovery.skills], mcpServers: [...recovery.mcpServers] }); setRecovery(null); setError(''); } }, t('loadSavedExpert'))),
-      h('footer', { className: 'yj-row' }, h('button', { type: 'button', disabled: busy, onClick: onClose }, t('cancelEdit')), h('button', { type: 'button', className: 'yj-primary', disabled: busy || avatarReading || !catalog || Boolean(recovery), onClick: save }, t(busy ? 'loading' : expert ? 'expertSaveChanges' : 'expertCreate'))));
+      choices('skills', 'optionalSkills'), catalog?.mcpSupported === false ? h('p', { className: 'ww-muted' }, t('mcpUnsupported')) : choices('mcpServers', 'optionalMcp'), ...(catalog?.issues || []).map(issue => h('p', { key: issue, className: 'ww-notice' }, issue))),
+      recovery && h('div', { className: 'ww-notice' }, t('expertRecovery'), h('button', { type: 'button', disabled: busy, onClick: () => { committed.current = recovery; setDraft({ ...recovery, skills: [...recovery.skills], mcpServers: [...recovery.mcpServers] }); setRecovery(null); setError(''); } }, t('loadSavedExpert'))),
+      h('footer', { className: 'ww-row' }, h('button', { type: 'button', disabled: busy, onClick: requestClose }, t('cancelEdit')), h('button', { type: 'button', className: 'ww-primary', disabled: busy || avatarReading || !catalog || Boolean(recovery), onClick: save }, t(busy ? 'loading' : expert ? 'expertSaveChanges' : 'expertCreate')))), discard);
   }
 
   return function ExpertsView({ active, workbench }) {
@@ -156,8 +159,8 @@ export function createView(kit) {
         if (navigate) api.open(id);
       };
     });
-    const scope = h('details', { className: 'yj-section' }, h('summary', null, t('advanced')),
-      row(field('project', cwd, setCwd), h('label', { className: 'yj-field' }, t('workspace'), h('select', { value: workspaceId, disabled: busy || Boolean(cwd.trim()), onChange: (event) => setWorkspaceId(event.target.value) }, h('option', { value: '' }, t('defaultWorkspace')), ...(workspaces.items || []).map((item) => h('option', { value: item.workspaceId, key: item.workspaceId }, item.name || item.path || item.workspaceId))))));
+    const scope = h('details', { className: 'ww-section' }, h('summary', null, t('advanced')),
+      row(field('project', cwd, setCwd), h('label', { className: 'ww-field' }, t('workspace'), h('select', { value: workspaceId, disabled: busy || Boolean(cwd.trim()), onChange: (event) => setWorkspaceId(event.target.value) }, h('option', { value: '' }, t('defaultWorkspace')), ...(workspaces.items || []).map((item) => h('option', { value: item.workspaceId, key: item.workspaceId }, item.name || item.path || item.workspaceId))))));
 
 
     const refreshTab = () => run(async () => { await api.loadExperts(); const value = await api.modes(); return () => setModes(value); });
@@ -177,21 +180,21 @@ export function createView(kit) {
       role.customized?.length > 0 && button('resetExpert', () => setConfirm({ kind: 'reset', id: role.id, selected: [...role.customized] })),
       !role.builtin && button('deleteExpert', () => setConfirm({ kind: 'delete', id: role.id })));
     // 小鲸领头占一整行，其余专家一张名帖；卡片底边一道北冥水纹，原版有更新时挂一个小标记。
-    const card = role => h('article', { className: 'yj-card', key: role.id, 'data-lead': role.id === 'manager' || undefined },
-      h('div', { className: 'yj-card-top' }, h(Avatar, { expert: role, size: role.id === 'manager' ? 64 : 52 }), h('div', { className: 'yj-card-identity' }, h('h2', null, role.name), !role.builtin && h('small', { className: 'yj-muted' }, t('expertCustom'))), roleMenu(role)), h('p', null, role.description),
-      h('div', { className: 'yj-expert-foot' }, h('span', { className: 'yj-expert-meta' }, role.skills?.length ? `${role.skills.length} 项技能` : ''), role.baseUpdated?.length > 0 && h('span', { className: 'yj-tag yj-tag-warn' }, '原版有更新'),
-        button('start', () => newSession(role.id, true), dirty, { className: role.id === 'manager' ? 'yj-card-start yj-primary' : 'yj-card-start' })),
-      h('i', { className: 'yj-orn-wave', 'aria-hidden': true }), role.id === 'manager' && h('i', { className: 'yj-whale', 'aria-hidden': true }));
-    body = h('section', { className: 'yj-experts' },
-      h('header', { className: 'yj-pagehead' }, h('div', null, h('h2', null, '专家团队'), h('p', null, summary)),
-        h('div', { className: 'yj-pagehead-actions yj-team-settings' },
+    const card = role => h('article', { className: 'ww-card', key: role.id, 'data-lead': role.id === 'manager' || undefined },
+      h('div', { className: 'ww-card-top' }, h(Avatar, { expert: role, size: role.id === 'manager' ? 64 : 52 }), h('div', { className: 'ww-card-identity' }, h('h2', null, role.name), !role.builtin && h('small', { className: 'ww-muted' }, t('expertCustom'))), roleMenu(role)), h('p', null, role.description),
+      h('div', { className: 'ww-expert-foot' }, h('span', { className: 'ww-expert-meta' }, role.skills?.length ? `${role.skills.length} 项技能` : ''), role.baseUpdated?.length > 0 && h('span', { className: 'ww-tag ww-tag-warn' }, '原版有更新'),
+        button('start', () => newSession(role.id, true), dirty, { className: role.id === 'manager' ? 'ww-card-start ww-primary' : 'ww-card-start' })),
+      h('i', { className: 'ww-orn-wave', 'aria-hidden': true }), role.id === 'manager' && h('i', { className: 'ww-whale', 'aria-hidden': true }));
+    body = h('section', { className: 'ww-experts' },
+      h('header', { className: 'ww-pagehead' }, h('div', null, h('h2', null, '专家团队'), h('p', null, summary)),
+        h('div', { className: 'ww-pagehead-actions ww-team-settings' },
           h(ActionMenu, { label: t('advanced'), icon: 'gear' },
-            h('label', { className: 'yj-field' }, t('mode'), h('select', { 'aria-label': t('mode'), value: mode, disabled: busy, onChange: event => setMode(event.target.value) }, h('option', { value: '' }, t('defaultMode')), ...modes.map(item => h('option', { key: item.id, value: item.id, disabled: Boolean(item.broken) }, item.name ?? item.id)))), scope,
-            h('label', { className: 'yj-check' }, h('input', { type: 'checkbox', checked: includeSource, disabled: busy, onChange: event => setIncludeSource(event.target.checked) }), t('includeSource'))),
-          registry.deleted.length > 0 && h(ActionMenu, { label: `${t('deletedExperts')} (${registry.deleted.length})`, icon: 'list' }, ...registry.deleted.map(expert => h('div', { key: expert.id, className: 'yj-row' }, expert.name, button('restoreExpert', () => run(async () => { await api.expertRequest({ action: 'restore', id: expert.id, expectedRevision: expert.revision }); await api.loadExperts(); return () => notify(t('expertRestoreDone', { name: expert.name })); }))))),
+            h('label', { className: 'ww-field' }, t('mode'), h('select', { 'aria-label': t('mode'), value: mode, disabled: busy, onChange: event => setMode(event.target.value) }, h('option', { value: '' }, t('defaultMode')), ...modes.map(item => h('option', { key: item.id, value: item.id, disabled: Boolean(item.broken) }, item.name ?? item.id)))), scope,
+            h('label', { className: 'ww-check' }, h('input', { type: 'checkbox', checked: includeSource, disabled: busy, onChange: event => setIncludeSource(event.target.checked) }), t('includeSource'))),
+          registry.deleted.length > 0 && h(ActionMenu, { label: `${t('deletedExperts')} (${registry.deleted.length})`, icon: 'list' }, ...registry.deleted.map(expert => h('div', { key: expert.id, className: 'ww-row' }, expert.name, button('restoreExpert', () => run(async () => { await api.expertRequest({ action: 'restore', id: expert.id, expectedRevision: expert.revision }); await api.loadExperts(); return () => notify(t('expertRestoreDone', { name: expert.name })); }))))),
           )),
-      h('div', { className: 'yj-grid yj-expert-grid' }, ...roleCards.map(card),
-        h('button', { type: 'button', className: 'yj-card yj-add-card', onClick: () => setExpertEditor(null) }, h('span', { className: 'yj-add-mark', 'aria-hidden': true }, '+'), h('h2', null, t('addExpert')))),
+      h('div', { className: 'ww-grid ww-expert-grid' }, ...roleCards.map(card),
+        h('button', { type: 'button', className: 'ww-card ww-add-card', onClick: () => setExpertEditor(null) }, h('span', { className: 'ww-add-mark', 'aria-hidden': true }, '+'), h('h2', null, t('addExpert')))),
       (() => {
         const role = confirm && roleCards.find(item => item.id === confirm.id);
         if (!role) return null;
@@ -208,7 +211,7 @@ export function createView(kit) {
           return run(async () => { await api.restoreExpertOriginal(role, fields.length === customized.length ? undefined : fields); return () => { setConfirm(null); notify(t('expertResetDone', { name: role.name, fields: fields.map(label).join('、') })); }; });
         };
         return h(ConfirmDialog, { title: t('expertResetTitle'), message: [h('p', { key: 'q' }, t('expertConfirmReset')),
-          ...customized.map(field => h('label', { key: field, className: 'yj-check' }, h('input', { type: 'checkbox', checked: confirm.selected.includes(field), disabled: busy, onChange: event => setConfirm({ ...confirm, selected: event.target.checked ? [...confirm.selected, field] : confirm.selected.filter(item => item !== field) }) }), label(field), role.baseUpdated?.includes(field) && t('expertFieldUpdated'))),
+          ...customized.map(field => h('label', { key: field, className: 'ww-check' }, h('input', { type: 'checkbox', checked: confirm.selected.includes(field), disabled: busy, onChange: event => setConfirm({ ...confirm, selected: event.target.checked ? [...confirm.selected, field] : confirm.selected.filter(item => item !== field) }) }), label(field), role.baseUpdated?.includes(field) && t('expertFieldUpdated'))),
           h('p', { key: 'h' }, t('expertResetHelp'))], confirmLabel: t('resetExpert'), cancelLabel: t('cancel'), busy, onConfirm: confirmReset, onCancel: () => setConfirm(null) });
       })());
 

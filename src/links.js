@@ -104,7 +104,7 @@ export function resolveLinks(records, readableName) {
   }
   return records.map(record => {
     const links = record.parsed.links.map(link => {
-      const result = { kind: link.kind, label: link.label, target: link.target, line: link.line, status: 'missing', candidates: [] };
+      const result = { kind: link.kind, label: link.label, target: link.target, line: link.line, status: 'missing', candidates: [], ...(link.property ? { property: link.property } : {}) };
       let target;
       try { target = (link.kind === 'markdown' ? decodeURIComponent(link.target) : link.target).replaceAll('\\', '/'); }
       catch { return { ...result, status: 'invalid' }; }

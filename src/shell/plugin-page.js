@@ -104,7 +104,7 @@ export function registerPluginPage(ctx, workbench, React) {
     const state = useSyncExternalStore(titles.subscribe, titles.snapshot, titles.snapshot);
     useEffect(() => titles.retain(), []);
     const t = ctx.locale.bind('whalewingExtensions');
-    return h('section', { className: 'yj-plugin-section', 'data-whalewing-extensions': true, style: { padding: 16, border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 12 } },
+    return h('section', { className: 'ww-plugin-section', 'data-whalewing-extensions': true, style: { padding: 16, border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 12 } },
       h('style', null, CONTROL_STYLE),
       h('div', { style: { display: 'flex', alignItems: 'center', gap: 12, height: 28, minWidth: 0 } },
         h('h4', { style: { margin: 0, fontSize: 14 } }, t('title')),

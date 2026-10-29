@@ -1,5 +1,6 @@
 /** 图片格式头在解码前核验；逐张编码并立即释放图像与 Canvas。 */
-import { LIMITS, validateFiles } from './core.js';
+import { LIMITS, screenFiles } from './core.js';
+import { unsupportedImageReason } from './catalog.js';
 
 const fail = message => { throw new Error(message); };
 const little16 = (b, p) => b[p] | b[p + 1] << 8;
@@ -35,7 +36,7 @@ function inspectIsobmff(bytes, extension) {
   const brands = [ascii(bytes, first[1], 4)];
   for (let p = first[1] + 8; p + 4 <= first[2]; p += 4) brands.push(ascii(bytes, p, 4));
   if (!brands.some(brand => brand === 'avif' || brand === 'avis')) {
-    if (brands.some(brand => ['heic', 'heix', 'heim', 'heis', 'hevc', 'hevx', 'mif1', 'msf1'].includes(brand))) fail('HEIC / HEIF 照片暂不支持：当前客户端不能本地解码，请先在手机或相册里导出为 JPEG');
+    if (brands.some(brand => ['heic', 'heix', 'heim', 'heis', 'hevc', 'hevx', 'mif1', 'msf1'].includes(brand))) fail(unsupportedImageReason('.heic'));
     fail('不是可识别的 AVIF 图片');
   }
   if (extension !== 'avif') fail('AVIF 内容与扩展名不符');
@@ -183,7 +184,7 @@ export function inspectImage(bytes, name) {
     return inspectIco(bytes);
   }
   if (bytes.length >= 16 && ascii(bytes, 4, 4) === 'ftyp') return inspectIsobmff(bytes, extension);
-  if (bytes.length >= 4 && (ascii(bytes, 0, 4) === 'II*\0' || ascii(bytes, 0, 4) === 'MM\0*')) fail('TIFF 图片尚不支持，请先导出为 PNG 或 JPEG');
+  if (bytes.length >= 4 && (ascii(bytes, 0, 4) === 'II*\0' || ascii(bytes, 0, 4) === 'MM\0*')) fail(unsupportedImageReason('.tiff'));
   return fail('请选择有效的 PNG、JPEG、WebP、AVIF、GIF、BMP 或 ICO 图片');
 }
 
@@ -330,9 +331,10 @@ async function processImage(file, plan) {
   } finally { bitmap?.close(); }
 }
 
-/** 在 Worker 内逐张处理；单张失败只记入明细，成功的照常交付，全部失败才报错。 */
+/** 在 Worker 内逐张处理；单张失败（含超过 25 MiB、暂不支持的格式）只记入明细，成功的照常交付，全部失败才报错。 */
 export async function convertImages(files, options, progress = () => {}) {
-  validateFiles(files, 'image');
+  // 个数和总输入整批检查；单个文件的大小和格式问题留到逐张处理时记为它自己的失败。
+  const problems = screenFiles(files, 'image');
   const action = options?.action || 'image';
   if (!['image', 'image-rotate', 'image-crop', 'image-watermark', 'image-stitch'].includes(action)) fail('未知图片操作');
   const mode = action === 'image' ? options.mode || 'convert' : 'convert';
@@ -351,7 +353,12 @@ export async function convertImages(files, options, progress = () => {}) {
     plan.target = options.targetKB * 1024;
   }
   if (typeof globalThis.createImageBitmap !== 'function' || typeof globalThis.OffscreenCanvas !== 'function') fail('当前浏览器缺少后台图片处理能力，请使用支持 Worker 图像处理的 DSH 桌面端');
-  if (action === 'image-stitch') return stitchImages(files, plan);
+  if (action === 'image-stitch') {
+    // 拼接要用到每一张，有一张不合格就整体停止，并写明是哪个文件。
+    const index = problems.findIndex(Boolean);
+    if (index !== -1) fail(`${files[index].name}：${problems[index]}`);
+    return stitchImages(files, plan);
+  }
   if (action === 'image-crop' && files.length !== 1) fail('裁剪时请选择一张图片');
   if (action === 'image-rotate' && (![0, 90, 180, 270].includes(options.angle) || !['none', 'horizontal', 'vertical'].includes(options.flip))) fail('请选择有效旋转角度和翻转方向');
   if (action === 'image-watermark' && (typeof options.watermark !== 'string' || !options.watermark.trim() || options.watermark.length > 100 || !Number.isFinite(options.opacity) || options.opacity < 0.1 || options.opacity > 1 || !Number.isInteger(options.fontSize) || options.fontSize < 10 || options.fontSize > 200 || !['top-left', 'center', 'bottom-right'].includes(options.position))) fail('水印需为 1–100 字，字号 10–200，透明度 10–100%');
@@ -361,6 +368,7 @@ export async function convertImages(files, options, progress = () => {}) {
   for (const [index, file] of files.entries()) {
     progress(index, files.length);
     try {
+      if (problems[index]) fail(problems[index]);
       const output = await processImage(file, plan);
       if (total + output.bytes.length > LIMITS.output) fail('图片输出合计超过 100 MiB');
       total += output.bytes.length;

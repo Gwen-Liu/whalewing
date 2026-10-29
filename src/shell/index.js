@@ -13,8 +13,8 @@ export function createShell(require, validator, avatars) {
   const React = require('react');
   const { createElement: h, useRef, useEffect, useSyncExternalStore } = React;
   const NS = 'whalewing';
-  const { Glyph, Avatar, ActionMenu, Modal, ConfirmDialog, Drawer, Logo, PageHead, avatarArt, presetAvatars } = createSharedUi(React, avatars);
-  const kit = { React, loadChunk: path => require.async(path), Glyph, Avatar, ActionMenu, Modal, ConfirmDialog, Drawer, Logo, PageHead, z, avatarArt, presetAvatars, css, formatFileMention };
+  const { Glyph, Avatar, ActionMenu, Modal, ConfirmDialog, Drawer, useDiscard, Logo, PageHead, avatarArt, presetAvatars } = createSharedUi(React, avatars);
+  const kit = { React, loadChunk: path => require.async(path), Glyph, Avatar, ActionMenu, Modal, ConfirmDialog, Drawer, useDiscard, Logo, PageHead, z, avatarArt, presetAvatars, css, formatFileMention };
   const Workbench = createWorkbenchView({ React, css, Logo, Modal, ActionMenu });
 
   function registerUi(ctx) {
@@ -49,11 +49,11 @@ export function createShell(require, validator, avatars) {
           // 放进浏览器顶层：盖在编辑弹窗之上，也不受页面布局影响；每条新提示都排到最上面。
           try { if (node?.matches(':popover-open')) node.hidePopover(); node?.showPopover?.(); } catch { /* 不支持顶层时按普通浮层显示。 */ }
         }, [value?.id]);
-        return value && h(React.Fragment, null, h('style', null, css), h('div', { ref: element, key: value.id, popover: 'manual', className: `yj-toast yj-toast-${value.kind}`, onMouseEnter: holdToast, onMouseLeave: releaseToast, onFocus: holdToast, onBlur: releaseToast },
-          h('span', { className: 'yj-toast-mark', 'aria-hidden': true }, toastMarks[value.kind] || toastMarks.info),
-          h('span', { className: 'yj-toast-text', role: value.kind === 'error' ? 'alert' : 'status' }, value.text),
-          value.action && h('button', { type: 'button', className: 'yj-toast-action', onClick: () => { publish(null); return value.action.run(); } }, value.action.label),
-          h('button', { type: 'button', className: 'yj-toast-close', onClick: () => publish(null), 'aria-label': t('toastClose') }, '×')));
+        return value && h(React.Fragment, null, h('style', null, css), h('div', { ref: element, key: value.id, popover: 'manual', className: `ww-toast ww-toast-${value.kind}`, onMouseEnter: holdToast, onMouseLeave: releaseToast, onFocus: holdToast, onBlur: releaseToast },
+          h('span', { className: 'ww-toast-mark', 'aria-hidden': true }, toastMarks[value.kind] || toastMarks.info),
+          h('span', { className: 'ww-toast-text', role: value.kind === 'error' ? 'alert' : 'status' }, value.text),
+          value.action && h('button', { type: 'button', className: 'ww-toast-action', onClick: () => { publish(null); return value.action.run(); } }, value.action.label),
+          h('button', { type: 'button', className: 'ww-toast-close', onClick: () => publish(null), 'aria-label': t('toastClose') }, '×')));
       }
       // 标准字形作为文字标识，不维护第二套图标库或读取宿主 DOM。
       function Icon({ size }) { return h(Logo, { size }); }
