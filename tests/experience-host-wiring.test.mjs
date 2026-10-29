@@ -86,7 +86,7 @@ test('AI初始化失败不发布owner，原入口可恢复且并发读取只打�
   assert.equal(calls, 2); assert.deepEqual(results[0], results[1]);
 });
 
-test('AI持久写进行时拒收busy；提交后取消不报假失败，卸载等实际读回再关域', { timeout: 10000 }, async t => {
+test('AI持久写进行时拒收busy；提交后取消不报假失败，卸载等实际读回再关域', async t => {
   const h = await host(t); await h.aiWebHost.manageAiWeb({ action: 'list' });
   const table = h.aiWebHost.resource.owner.table, put = table.put.bind(table), entered = Promise.withResolvers(), release = Promise.withResolvers();
   table.put = async (...args) => { entered.resolve(); await release.promise; return put(...args); };
@@ -106,7 +106,7 @@ test('AI持久写进行时拒收busy；提交后取消不报假失败，卸载�
   } finally { release.resolve(); await Promise.allSettled([operation, disposal]); }
 });
 
-test('取消初始化等待不启动AI业务，卸载等迟到open并关闭域与锁', { timeout: 10000 }, async t => {
+test('取消初始化等待不启动AI业务，卸载等迟到open并关闭域与锁', async t => {
   const h = await host(t), original = h.ctx.storageDomain.open.bind(h.ctx.storageDomain);
   const entered = Promise.withResolvers(), release = Promise.withResolvers(); let closed = 0;
   h.ctx.storageDomain.open = async spec => { entered.resolve(); await release.promise; const domain = await original(spec), close = domain.close.bind(domain); domain.close = async () => { closed++; await close(); }; return domain; };

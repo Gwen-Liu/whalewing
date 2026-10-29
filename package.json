@@ -1,10 +1,14 @@
 {
   "name": "dsh-whalewing",
-  "version": "0.2.1-rc.3.1",
-  "private": true,
+  "version": "0.2.1-rc.3.2",
   "license": "Apache-2.0",
   "icon": "./art/brand/whalewing-app-256.png",
   "description": "鲸翼：专家团队、个人知识与持续技能沉淀",
+  "keywords": ["dsh", "dsh-plugin", "deepseek-harness", "deepseek-harness-plugin", "whalewing", "鲸翼"],
+  "homepage": "https://github.com/gwen-liu/whalewing#readme",
+  "repository": { "type": "git", "url": "git+https://github.com/gwen-liu/whalewing.git" },
+  "bugs": { "url": "https://github.com/gwen-liu/whalewing/issues" },
+  "publishConfig": { "registry": "https://registry.npmjs.org/", "access": "public" },
   "type": "module",
   "exports": {
     ".": "./index.js",
@@ -31,9 +35,10 @@
   "files": ["index.js", "client.js", "client.toolbox.js", "client.model-world.js", "client.portrait-openai.js", "client.portrait-anthropic.js", "client.portrait-google.js", "client.portrait-deepseek.js", "client.portrait-alibaba.js", "client.portrait-moonshotai.js", "client.portrait-zhipuai.js", "client.portrait-bytedance-seed.js", "client.portrait-minimax.js", "client.portrait-tencent.js", "client.portrait-baidu.js", "client.portrait-xiaomi.js", "client.portrait-meituan.js", "client.portrait-stepfun.js", "client.portrait-xai.js", "client.portrait-meta.js", "client.portrait-mistral.js", "client.portrait-perplexity.js", "client.portrait-deepseek-flash.js", "src", "content/roles.js", "content/experts", "content/expert-templates", "content/skills", "content/model-world", "content/avatars", "content/utilities", "content/vault", "cordis.patch.yml", "README.md", "COMPATIBILITY.md", "EXTENDING.md", "MAINTAINING.md", "examples/feature-starter", "examples/stateful-feature", "LICENSE", "NOTICE", "art/brand", "features", "locale"],
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node --test tests/*.test.mjs content/content.test.mjs && npm --prefix examples/feature-starter test && npm --prefix examples/stateful-feature test",
+    "test": "node scripts/run-tests.mjs unit && npm --prefix examples/feature-starter test && npm --prefix examples/stateful-feature test",
     "check": "node --check index.js && node --check client.js",
-    "test:e2e": "node --test --test-concurrency=2 \"e2e/specs/*.test.mjs\""
+    "test:e2e": "node scripts/run-tests.mjs e2e",
+    "test:perf": "node scripts/run-tests.mjs perf"
   },
   "dependencies": { "exceljs": "4.4.0", "docx": "9.10.0", "fflate": "0.8.3", "@xmldom/xmldom": "0.9.12", "saxes": "6.0.0", "pdf-lib": "1.17.1", "pdfjs-dist": "4.10.38", "pdfmake": "0.2.20", "d3-force": "3.0.0", "js-yaml": "4.2.0", "mdast-util-from-markdown": "2.1.0", "mdast-util-gfm": "3.1.0", "micromark-extension-gfm": "3.0.0", "qrcode-generator": "2.0.4", "jsqr": "1.4.0", "@breezystack/lamejs": "1.2.7" },
   "devDependencies": { "esbuild": "0.25.12" },

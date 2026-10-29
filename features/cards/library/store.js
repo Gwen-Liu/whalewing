@@ -16,7 +16,7 @@ import { bookView, bookExcerpt, bookImageName } from './view.js';
  *   uploads/                浏览器分块上传的临时文件
  * 原文件不保存，导入后只留阅读副本；在线书目只从固定的 GitHub 仓库下载，并核对 SHA-256。
  */
-export const catalogUrl = 'https://raw.githubusercontent.com/gwenliu1025/whalewing-library/main/catalog.json';
+export const catalogUrl = 'https://raw.githubusercontent.com/gwen-liu/whalewing-library/main/catalog.json';
 const downloadHosts = new Set(['raw.githubusercontent.com', 'github.com', 'objects.githubusercontent.com', 'release-assets.githubusercontent.com', 'codeload.github.com', 'media.githubusercontent.com']);
 const collator = new Intl.Collator('zh-CN', { numeric: true, sensitivity: 'base' });
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;

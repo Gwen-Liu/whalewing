@@ -30,7 +30,7 @@ async function setup(t, { mode = 'danger-full-access', manager = true } = {}) {
   return { ...h, calls, select, execute, visible, dependencies, action: value => { action = value; }, assistant: h.mounted.service.registry.bases.get('assistant').fiber };
 }
 
-test('实际选择才挂载原生工具，仅当前manager主会话可见，切换与退出撤回', { timeout: 15000 }, async t => {
+test('实际选择才挂载原生工具，仅当前manager主会话可见，切换与退出撤回', async t => {
   const h = await setup(t);
   assert.equal(h.visible(), undefined);
   await h.select('development'); assert.equal(h.visible(), undefined);
@@ -49,7 +49,7 @@ test('实际选择才挂载原生工具，仅当前manager主会话可见，切�
   await h.assistant.dispose(); await tick(); assert.equal(h.visible(), undefined);
 });
 
-test('原生已有定义和原限制隐藏均不补入，不接管Creator能力', { timeout: 15000 }, async t => {
+test('原生已有定义和原限制隐藏均不补入，不接管Creator能力', async t => {
   const h = await setup(t);
   const native = await h.ctx.plugin(NativeManagerTools);
   const definition = h.visible();
@@ -62,7 +62,7 @@ test('原生已有定义和原限制隐藏均不补入，不接管Creator能力'
   await native.dispose();
 });
 
-test('补入后出现原生祖先定义，撤自有覆盖并保留原生定义', { timeout: 15000 }, async t => {
+test('补入后出现原生祖先定义，撤自有覆盖并保留原生定义', async t => {
   const h = await setup(t);
   await h.select(); const owned = h.visible();
   const native = await h.ctx.plugin(NativeManagerTools);
@@ -74,7 +74,7 @@ test('补入后出现原生祖先定义，撤自有覆盖并保留原生定义',
   await native.dispose();
 });
 
-test('会话自身已有原生管理插件时不补入，退出助手保留该原生能力', { timeout: 15000 }, async t => {
+test('会话自身已有原生管理插件时不补入，退出助手保留该原生能力', async t => {
   const h = await setup(t);
   const native = await h.agent.ctx.plugin(NativeManagerTools);
   const definition = h.visible();
@@ -84,7 +84,7 @@ test('会话自身已有原生管理插件时不补入，退出助手保留该�
   await native.dispose();
 });
 
-test('Agent真实释放后撤回自有工具，不影响同profile其它会话', { timeout: 15000 }, async t => {
+test('Agent真实释放后撤回自有工具，不影响同profile其它会话', async t => {
   const h = await setup(t);
   const handle = await h.ctx.agents.create({ sessionId: 'ending', meta: { agentPreset: 'standard' }, agentOptions: { provider: 'fixture', model: 'fixture' } });
   await h.select('manager', handle.agent); assert.ok(h.visible(handle.agent));
@@ -94,7 +94,7 @@ test('Agent真实释放后撤回自有工具，不影响同profile其它会话',
   assert.equal(h.visible(), undefined);
 });
 
-test('依赖缺失只降级管理能力，恢复后挂载，依赖退出后撤回', { timeout: 15000 }, async t => {
+test('依赖缺失只降级管理能力，恢复后挂载，依赖退出后撤回', async t => {
   const h = await setup(t, { manager: false });
   await h.select(); assert.equal(h.visible(), undefined);
   const dependencies = await h.dependencies(); await tick(); assert.ok(h.visible());
@@ -102,7 +102,7 @@ test('依赖缺失只降级管理能力，恢复后挂载，依赖退出后撤�
   assert.ok(h.ctx.whalewingExperts);
 });
 
-for (const outcome of ['rejected', 'cancelled']) test(`原生审批${outcome}不调用管理器`, { timeout: 15000 }, async t => {
+for (const outcome of ['rejected', 'cancelled']) test(`原生审批${outcome}不调用管理器`, async t => {
   const h = await setup(t, { mode: 'read-only' });
   h.ctx.provide('approval', { async request() { return outcome; } });
   await h.select();
@@ -111,7 +111,7 @@ for (const outcome of ['rejected', 'cancelled']) test(`原生审批${outcome}不
   assert.equal(h.calls.length, 0);
 });
 
-for (const exit of ['role', 'assistant', 'dependency', 'caller']) test(`原生审批待决时${exit}退出，迟到批准不开始写入`, { timeout: 15000 }, async t => {
+for (const exit of ['role', 'assistant', 'dependency', 'caller']) test(`原生审批待决时${exit}退出，迟到批准不开始写入`, async t => {
   const h = await setup(t, { mode: 'read-only' });
   const entered = Promise.withResolvers(), answer = Promise.withResolvers();
   let approvalSignal;
@@ -130,7 +130,7 @@ for (const exit of ['role', 'assistant', 'dependency', 'caller']) test(`原生�
   assert.equal(h.calls.length, 0);
 });
 
-test('管理器已接收后退出不自等、不谎报零副作用，等待实际返回', { timeout: 15000 }, async t => {
+test('管理器已接收后退出不自等、不谎报零副作用，等待实际返回', async t => {
   const h = await setup(t);
   const entered = Promise.withResolvers(), completed = Promise.withResolvers();
   let acceptedResult;
@@ -150,7 +150,7 @@ test('管理器已接收后退出不自等、不谎报零副作用，等待实�
   assert.deepEqual(acceptedResult, { application: 'restart-required', restartReason: 'no-hmr' });
 });
 
-test('每轮管理上下文只注入一次，使用实际包路径且角色退出不再注入', { timeout: 15000 }, async t => {
+test('每轮管理上下文只注入一次，使用实际包路径且角色退出不再注入', async t => {
   const h = await setup(t);
   await h.select();
   const messages = [{ role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: '管理插件' }] }];
@@ -164,7 +164,7 @@ test('每轮管理上下文只注入一次，使用实际包路径且角色退�
   assert.equal((await invoke(2)).messages.filter(message => message.source.kind === 'whalewing-plugin-management').length, 0);
 });
 
-test('真实原生管理操作参数和结果保持原语义，不改profile或会话权限', { timeout: 15000 }, async t => {
+test('真实原生管理操作参数和结果保持原语义，不改profile或会话权限', async t => {
   const h = await setup(t, { mode: 'read-only' });
   const approvals = [];
   h.ctx.provide('approval', { async request(input) { approvals.push(input); return 'allowed-once'; } });
@@ -185,7 +185,7 @@ test('真实原生管理操作参数和结果保持原语义，不改profile或�
   assert.equal(h.agent.session.header.agentPreset, 'standard');
 });
 
-test('没有父会话header的真实owned子Agent仍不取得管理主资格', { timeout: 15000 }, async t => {
+test('没有父会话header的真实owned子Agent仍不取得管理主资格', async t => {
   const h = await setup(t);
   await h.select();
   const child = await h.create('owned-without-header', { parentAgent: h.agent });
@@ -197,7 +197,7 @@ test('没有父会话header的真实owned子Agent仍不取得管理主资格', {
   assert.equal(h.calls.length, 0);
 });
 
-test('子Agent自有原生管理定义不被父助手guard接管', { timeout: 15000 }, async t => {
+test('子Agent自有原生管理定义不被父助手guard接管', async t => {
   const h = await setup(t);
   await h.select();
   const child = await h.create('native-child', { parentAgent: h.agent, meta: { origin: 'subagent', parentSession: h.agent.id } });

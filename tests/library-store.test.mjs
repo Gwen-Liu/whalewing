@@ -149,7 +149,7 @@ test('书架：在线书目只从 GitHub 下载并核对 SHA-256，记下许可�
   const { library } = await shelf(t, { fetch });
   const listed = await library.catalog();
   assert.equal(listed.catalog.error, null);
-  assert.equal(listed.catalog.entries[0].url, 'https://raw.githubusercontent.com/gwenliu1025/whalewing-library/main/books/open-book.txt');
+  assert.equal(listed.catalog.entries[0].url, 'https://raw.githubusercontent.com/gwen-liu/whalewing-library/main/books/open-book.txt');
   const downloaded = await library.download({ entry: 'open-book' });
   assert.equal(downloaded.book.title, '开放教材');
   assert.equal(downloaded.book.author, 'OpenStax');

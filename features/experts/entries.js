@@ -1,6 +1,6 @@
 /** 工作台外入口与所属功能共用上下文，停用时一起释放。 */
 export function registerEntries(ctx, kit, api) {
-  const { React, Avatar, css, formatFileMention } = kit;
+  const { React, Avatar, useClosedPopover, css, formatFileMention } = kit;
   const { createElement: h, useState, useRef, useEffect, useSyncExternalStore } = React;
   const NS = 'whalewing', t = ctx.locale.bind(NS);
   function ExpertPicker({ api, sessionId, useProjection, useSessions, t }) {
@@ -20,6 +20,8 @@ export function registerEntries(ctx, kit, api) {
     const mounted = useRef(true);
     useEffect(() => { mounted.current = true; api.loadExperts().catch(reason => { if (mounted.current) setError(reason.message); }); return () => { mounted.current = false; }; }, []);
     const close = () => { panel.current?.hidePopover(); setOpen(false); trigger.current?.focus(); };
+    // 按 Esc、点别处时浏览器自己收起浮层，这里跟着记成已关，下次点一下就能打开。
+    useClosedPopover(panel, () => setOpen(false));
     useEffect(() => {
       if (!open || !panel.current) return;
       const element = panel.current;
@@ -48,7 +50,7 @@ export function registerEntries(ctx, kit, api) {
     };
     return h('div', { className: 'ww-expert-picker' }, h('style', null, css),
       h('button', { type: 'button', ref: trigger, className: 'ww-picker-trigger', 'aria-haspopup': 'dialog', 'aria-expanded': open, onClick: () => setOpen(!open) }, current && h(Avatar, { expert: current, size: 20 }), current?.name || selected || t('expert'), h('span', { 'aria-hidden': true }, '⌄')),
-      h('div', { ref: panel, popover: 'auto', className: 'ww-picker-popover', role: 'dialog', 'aria-label': t('expert'), onToggle: event => { if (event.nativeEvent.newState === 'closed') setOpen(false); }, onKeyDown: event => {
+      h('div', { ref: panel, popover: 'auto', className: 'ww-picker-popover', role: 'dialog', 'aria-label': t('expert'), onKeyDown: event => {
         if (event.key === 'Escape') { event.preventDefault(); close(); }
         if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
           const items = [...event.currentTarget.querySelectorAll('button:not(:disabled)')];

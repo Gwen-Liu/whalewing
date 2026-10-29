@@ -19,16 +19,19 @@ import { skillLibraryContract } from '../features/skills/contract.js';
 import { WhalewingSkillProvider } from '../src/skill-provider.js';
 import { explainError } from '../src/shell/presentation-content.js';
 import Whalewing from '../index.js';
+import { seedBundledSkills } from './skill-seed.mjs';
 
 const text = (name, body = '读取输入，执行任务并检查结果。') => `---\nname: ${name}\ndescription: 任务需要时执行本方法并核对输入和结果\n---\n${body}\n`;
 const note = '---\ntype: atomic\nstatus: seedling\ncreated: 2026-10-08\nupdated: 2026-10-08\naliases: []\n---\n# 来源\n已经核对的业务依据。\n';
 const review = { reviewer: '独立检查者技能测试夹具', positive: '适用输入已经执行并核对结果', negative: '缺失输入被拒收且没有副作用' };
 
-async function setup(t, options = {}) {
+async function setup(t, { seed = true, ...options } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'whalewing-library-'));
   const vault = new Vault(path.join(root, 'vault'));
-  const library = new SkillLibrary(vault, path.join(root, 'dsh', 'skills'), options);
   t.after(() => fs.rm(root, { recursive: true, force: true }));
+  // 用自己的随包目录时按它装；用产品随包技能时先复制本进程装好的一份（要在技能目录位置放别的东西的用例传 seed: false）。
+  if (seed && !options.bundledRoot) await seedBundledSkills(path.join(root, 'dsh', 'skills'));
+  const library = new SkillLibrary(vault, path.join(root, 'dsh', 'skills'), options);
   return { root, vault, library };
 }
 
@@ -93,7 +96,7 @@ test('普通同名文件不接管，损坏正文可修复，链接与越界拒�
 });
 
 test('正式Host两个Remote独立binding且无会话，技能失败不阻断知识初始化', async t => {
-  const { root } = await setup(t), ctx = new Context(); new TypertRegistry(ctx);
+  const { root } = await setup(t, { seed: false }), ctx = new Context(); new TypertRegistry(ctx);
   ctx.provide('commands', { register() {} }); ctx.provide('sessionQuery', {}); ctx.provide('sessionProjections', { register() {} });
   ctx.provide('sessions', { create() { assert.fail('不应新建会话'); } }); ctx.provide('skills', { snapshot: async () => ({ complete: true, skills: [] }) });
   const { service, knowledge, skillsHost } = await mountFeatures(ctx, root, { vaultRoot: path.join(root, 'host-vault') }, false);
@@ -355,7 +358,7 @@ test('用户根身份编码或规模预检未通过时，不把官方投影送�
   assert.equal(list.entries.find(entry => entry.id === 'good.md').discovery, 'unknown');
 });
 
-for (const scenario of ['cancel-late-result', 'cancel-late-error', 'timeout-late-result']) test(`真实FS暂停屏障：${scenario}先结束等待并释放，迟到结果不续发`, { timeout: 5000 }, async t => {
+for (const scenario of ['cancel-late-result', 'cancel-late-error', 'timeout-late-result']) test(`真实FS暂停屏障：${scenario}先结束等待并释放，迟到结果不续发`, async t => {
   const { root } = await setup(t), ctx = new Context(); new TypertRegistry(ctx); new SkillRegistry(ctx);
   await ctx.plugin(LocalFileSystem, { cwd: root, diffBasisMaxBytes: 1024 * 1024 });
   ctx.provide('commands', { register() {} }); ctx.provide('sessionQuery', {}); ctx.provide('sessionProjections', { register() {} }); ctx.provide('sessions', {});

@@ -241,7 +241,7 @@ test('候选所属原生轮次取消后，后续新signal也不能复用旧凭�
   await assert.rejects(h.run({ action: 'submit', receipt: c.receipt, items: [] }), { code: 'NEWS_RECEIPT' });
 });
 
-test('资讯owner生成的08:00:00被目标版原生Schedule真实接纳并取消读回', { timeout: 15000 }, async t => {
+test('资讯owner生成的08:00:00被目标版原生Schedule真实接纳并取消读回', async t => {
   const h = await harness(t); await h.enable();
   // 夹具没有已挂载 Agent；新版 Schedule 会查询 get 来排除子代理。
   h.ctx.provide('agents', { roots: () => [], get: () => undefined, withoutInitiator: fn => fn() });

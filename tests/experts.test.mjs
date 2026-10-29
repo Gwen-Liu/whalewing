@@ -93,7 +93,8 @@ async function harness(t, persistence = true, expertConfig = {}) {
     if (failFlush) throw new Error('fixture persistence failure');
     saved.set(session.id, session.snapshotEvents());
   });
-  const mounted = await mountFeatures(ctx, directory, { experts: expertConfig }, false);
+  // 专家操作自己有 15 秒时限；测试只验证对错，放宽到上限，慢电脑、全量并行时不因为慢而报错（要测时限的用例自己传 operationMs）。
+  const mounted = await mountFeatures(ctx, directory, { experts: { operationMs: 120000, ...expertConfig } }, false);
   const expertPlugin = mounted.service.registry.bases.get('experts').fiber;
   await expertPlugin.await();
   // 保存专家时会列出可选技能；真去列会先把自带的几十个技能全部复制进临时目录，全量并行时要十几秒、超过保存的 15 秒时限。
@@ -123,7 +124,7 @@ async function turn(ctx, agent) {
   await idle;
 }
 
-test('正式命令选择、非法输入、清除与持久化回读', { timeout: 15000 }, async t => {
+test('正式命令选择、非法输入、清除与持久化回读', async t => {
   const h = await harness(t);
   assert.equal((await h.run({ expertId: 'development' })).result.kind, 'success');
   assert.equal(h.state().view.expertId, 'development');
@@ -141,13 +142,13 @@ test('正式命令选择、非法输入、清除与持久化回读', { timeout: 
   assert.equal(h.state().view.expertId, null);
 });
 
-test('没有持久化接收者时status明确失败', { timeout: 15000 }, async t => {
+test('没有持久化接收者时status明确失败', async t => {
   const h = await harness(t, false);
   await h.run({ expertId: 'development' });
   assert.equal((await h.run({ action: 'status' })).result.kind, 'error');
 });
 
-test('真实adapter收到专家上下文且保留complete原生模式和工具；清除后提示撤销', { timeout: 15000 }, async t => {
+test('真实adapter收到专家上下文且保留complete原生模式和工具；清除后提示撤销', async t => {
   const h = await harness(t);
   h.ctx.systemPrompt.section({ name: 'fixture-mode', order: 0, complete: true, text: '原生创造模式' });
   h.ctx.tools.register(defineContentToolFixture({ name: 'native_fixture', description: '原生工具', parameters: {}, async execute() { return [{ type: 'text', text: 'ok' }]; } }));
@@ -168,7 +169,7 @@ test('真实adapter收到专家上下文且保留complete原生模式和工具�
   assert.equal(h.agent.session.snapshotEvents().filter(event => event.type === 'user/message' && event.data.source.kind === 'whalewing-expert').length, 2);
 });
 
-test('专家全文只在历史里看不到时重发，其余轮次发短提醒；换专家、改配置或全文被压缩后重发全文', { timeout: 15000 }, async t => {
+test('专家全文只在历史里看不到时重发，其余轮次发短提醒；换专家、改配置或全文被压缩后重发全文', async t => {
   const h = await harness(t);
   const contexts = () => h.adapter.requests.at(-1).messages.filter(message => message.source.kind === 'whalewing-expert').map(message => message.content[0].text);
   const isFull = text => text.includes('【怎么干活】') && text.includes('先加载再动手');
@@ -203,7 +204,7 @@ test('专家全文只在历史里看不到时重发，其余轮次发短提醒�
   assert.deepEqual(contexts().map(isFull), [true]);
 });
 
-test('新spawn通过正式命令继承，fork直接从成功日志投影继承', { timeout: 15000 }, async t => {
+test('新spawn通过正式命令继承，fork直接从成功日志投影继承', async t => {
   const h = await harness(t);
   await h.run({ expertId: 'development' });
   const child = await h.create('child', { parentAgent: h.agent });
@@ -226,7 +227,7 @@ test('投影忽略失败、错配回执和其它命令', () => {
   Experts.expertProjection.stateSchema.parse(fold([run, done]));
 });
 
-test('运行中拒绝切换，不污染已有身份', { timeout: 15000 }, async t => {
+test('运行中拒绝切换，不污染已有身份', async t => {
   const h = await harness(t);
   await h.run({ expertId: 'development' });
   const entered = Promise.withResolvers();
@@ -244,7 +245,7 @@ test('运行中拒绝切换，不污染已有身份', { timeout: 15000 }, async 
   await running;
 });
 
-test('waterfall保留reject和元数据；同一轮只附加一次', { timeout: 15000 }, async t => {
+test('waterfall保留reject和元数据；同一轮只附加一次', async t => {
   const h = await harness(t);
   await h.run({ expertId: 'development' });
   const input = { agent: h.agent, turn: 1, step: 1, signal: new AbortController().signal };
@@ -258,7 +259,7 @@ test('waterfall保留reject和元数据；同一轮只附加一次', { timeout: 
   assert.equal(await dispatch(original), original);
 });
 
-test('命令结算等待可取消，插件卸载清理命令、投影与等待者', { timeout: 15000 }, async t => {
+test('命令结算等待可取消，插件卸载清理命令、投影与等待者', async t => {
   const h = await harness(t);
   await h.run({ expertId: 'development' });
   h.agent.session.append('command/run', { commandId: 'pending', name: 'whalewing-expert', args: '{"expertId":null}' });
@@ -699,7 +700,7 @@ test('真实 TypertRegistry 核心内部知识与专家分别注册，子插件�
 });
 
 
-test('两种注册顺序均保留原生模型快照，专家不写选择事件或全局默认', { timeout: 15000 }, async t => {
+test('两种注册顺序均保留原生模型快照，专家不写选择事件或全局默认', async t => {
   for (const ownerFirst of [false, true]) {
     const h = await harness(t);
     if (ownerFirst) { await h.expertPlugin.dispose(); await h.ctx.plugin(Experts); }
@@ -724,7 +725,7 @@ test('两种注册顺序均保留原生模型快照，专家不写选择事件�
   }
 });
 
-test('原版保留会话实际模型，manager和普通专家的专属配置不取得选模权', { timeout: 15000 }, async t => {
+test('原版保留会话实际模型，manager和普通专家的专属配置不取得选模权', async t => {
   const h = await harness(t);
   await turn(h.ctx, h.agent);
   h.ctx.agentDefaultModel.currentSelection = () => ({ provider: 'fixture', model: 'new-default' });
@@ -744,7 +745,7 @@ test('原版保留会话实际模型，manager和普通专家的专属配置不�
   }
 });
 
-test('模型准备的身份断言不授予选择权，缺默认和失效路由不回退', { timeout: 15000 }, async t => {
+test('模型准备的身份断言不授予选择权，缺默认和失效路由不回退', async t => {
   const h = await harness(t);
   const api = h.ctx.whalewingExperts;
   const input = { action: 'prepare_model', sessionId: h.agent.id, expertId: 'manager', expectedRevision: 0 };
@@ -773,7 +774,7 @@ test('模型准备的身份断言不授予选择权，缺默认和失效路由�
   assert.equal(h.agent.session.snapshotEvents().some(event => event.type === 'model/selection'), false);
 });
 
-test('原生子代理继承父真实请求型号且保留子任务显式覆盖，不走普通会话选择器', { timeout: 15000 }, async t => {
+test('原生子代理继承父真实请求型号且保留子任务显式覆盖，不走普通会话选择器', async t => {
   const h = await harness(t);
   h.ctx.agentDefaultModel.currentSelection = () => ({ provider: 'fixture', model: 'parent-default' });
   await h.run({ expertId: 'development' });
@@ -788,7 +789,7 @@ test('原生子代理继承父真实请求型号且保留子任务显式覆盖�
   }
 });
 
-test('原版模型准备在取消或卸载后拒收，不发送请求也不改模型', { timeout: 15000 }, async t => {
+test('原版模型准备在取消或卸载后拒收，不发送请求也不改模型', async t => {
   for (const unload of [false, true]) {
     const h = await harness(t);
     await h.run({ expertId: 'manager' });
@@ -801,7 +802,7 @@ test('原版模型准备在取消或卸载后拒收，不发送请求也不改�
   }
 });
 
-test('真实JSONL冷恢复保留原生已用模型，不由专家覆盖为新默认', { timeout: 15000 }, async t => {
+test('真实JSONL冷恢复保留原生已用模型，不由专家覆盖为新默认', async t => {
   const h = await harness(t);
   const created = await h.ctx.agents.create({ sessionId: 'cold-model', meta: { cwd: h.directory, agentPreset: 'standard' }, agentOptions: { provider: 'fixture', model: 'initial' } });
   await h.run({ expertId: 'manager' }, created.agent);
@@ -817,7 +818,7 @@ test('真实JSONL冷恢复保留原生已用模型，不由专家覆盖为新默
   assert.equal(agent.session.snapshotEvents().some(event => event.type === 'model/selection'), false);
 });
 
-test('原版模型准备拒收过期专家版本和退出的会话身份，不接管新身份', { timeout: 15000 }, async t => {
+test('原版模型准备拒收过期专家版本和退出的会话身份，不接管新身份', async t => {
   for (const changeRole of [false, true]) {
     const h = await harness(t);
     await h.run({ expertId: 'manager' });
@@ -831,7 +832,7 @@ test('原版模型准备拒收过期专家版本和退出的会话身份，不�
   }
 });
 
-test('凭据失败保留所选路由和原错误，不静默重试其它型号', { timeout: 15000 }, async t => {
+test('凭据失败保留所选路由和原错误，不静默重试其它型号', async t => {
   const h = await harness(t);
   h.ctx.agentDefaultModel.currentSelection = () => ({ provider: 'fixture', model: 'employee-model' });
   let attempts = 0;
@@ -844,7 +845,7 @@ test('凭据失败保留所选路由和原错误，不静默重试其它型号',
   assert.deepEqual(h.ctx.agentDefaultModel.currentSelection(), { provider: 'fixture', model: 'employee-model' });
 });
 
-test('自动会话保留原生模型快照，manager专用型号不影响任务且未认领拒绝准备', { timeout: 15000 }, async t => {
+test('自动会话保留原生模型快照，manager专用型号不影响任务且未认领拒绝准备', async t => {
   const h = await harness(t);
   await assert.rejects(h.ctx.whalewingExperts.prepareModel({ sessionId: h.agent.id, automation: true }), { code: 'AUTOMATION_IDENTITY' });
   const manager = h.ctx.whalewingExperts.get('manager');
@@ -864,7 +865,7 @@ test('自动会话保留原生模型快照，manager专用型号不影响任务�
   await assert.rejects(h.ctx.whalewingExperts.prepareModel({ sessionId: fresh.id, automation: true }), { code: 'MODEL_UNAVAILABLE' });
 });
 
-test('自动任务用途从目标版JSONL冷日志恢复，普通fork排除父用途且未激活Agent', { timeout: 15000 }, async t => {
+test('自动任务用途从目标版JSONL冷日志恢复，普通fork排除父用途且未激活Agent', async t => {
   const h = await harness(t);
   const created = await h.ctx.agents.create({ sessionId: 'cold-auto', meta: { agentPreset: 'standard' }, agentOptions: { provider: 'fixture', model: 'fixture' } });
   await h.ctx.commands.execute(created.agent, '/whalewing {"action":"automation_claim","purpose":"custom"}', [], new AbortController().signal);
@@ -880,7 +881,7 @@ test('自动任务用途从目标版JSONL冷日志恢复，普通fork排除父�
   assert.equal(forked.purpose, null);
 });
 
-test('未适配的DSH：专家不切换专属模型也不写全局默认，列不出MCP时不拦截请求', { timeout: 15000 }, async t => {
+test('未适配的DSH：专家不切换专属模型也不写全局默认，列不出MCP时不拦截请求', async t => {
   const h = await harness(t);
   // 宿主有 MCP 服务但没有目录接口：专家不做绑定过滤，照常发请求。
   h.ctx.provide('mcpResources', {});
@@ -900,7 +901,7 @@ test('未适配的DSH：专家不切换专属模型也不写全局默认，列�
 });
 
 
-test('四可选原生fiber关闭与重载不卸载五底座，独立持久域保留且模型技能知识仍可用', { timeout: 15000 }, async t => {
+test('四可选原生fiber关闭与重载不卸载五底座，独立持久域保留且模型技能知识仍可用', async t => {
   const h = await harness(t), ctx = h.ctx;
   ctx.provide('profileContext', { dir: h.directory });
   const hosts = [AiWeb, Toolbox, Cards, ModelWorld], fibers = [];

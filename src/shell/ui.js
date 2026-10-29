@@ -19,21 +19,40 @@ export function createSharedUi(React, avatars) {
     return h('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: name === 'more' ? 3.6 : 1.6, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true, className: 'ww-glyph' }, h('path', { d: paths[name] || paths.more }));
   }
 
+  /**
+   * 浮层（popover）被浏览器自己收起时（按 Esc、点别处）通知调用方。
+   * DSH 用的 React 18 只给 <details> 接 toggle 事件，写在浮层上的 onToggle 收不到，菜单会以为自己还开着，下一次点要点两下才打开。
+   */
+  function useClosedPopover(ref, onClosed) {
+    const latest = useRef(onClosed);
+    latest.current = onClosed;
+    // 浮层元素变了就重新挂：浮层可能晚于组件出现（如先显示别的内容），这时下一次渲染（点开浮层）就会挂上。
+    const current = ref.current;
+    useEffect(() => {
+      const element = ref.current;
+      if (!element) return;
+      const listener = event => { if (event.newState === 'closed') latest.current(); };
+      element.addEventListener('toggle', listener);
+      return () => element.removeEventListener('toggle', listener);
+    }, [current]);
+  }
+
   /** 低频动作借助原生 top layer，保持菜单独立于工作区滚动与裁剪。 */
   function ActionMenu({ label, children, iconOnly = false, icon = 'more' }) {
     const anchor = useRef(null);
     const surface = useRef(null);
     const [open, setOpen] = useState(false);
+    useClosedPopover(surface, () => setOpen(false));
     useEffect(() => {
       if (!open || !surface.current) return;
       const element = surface.current;
       const place = () => { const box = anchor.current.getBoundingClientRect(); element.style.left = `${Math.max(12, Math.min(box.right - element.offsetWidth, window.innerWidth - element.offsetWidth - 12))}px`; element.style.top = `${Math.max(12, Math.min(box.bottom + 6, window.innerHeight - element.offsetHeight - 12))}px`; };
-      element.showPopover(); place(); element.querySelector('button,input')?.focus();
+      element.showPopover(); place(); element.querySelector('button:not(:disabled),input:not(:disabled)')?.focus();
       window.addEventListener('resize', place); window.addEventListener('scroll', place, true);
       return () => { window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true); if (element.matches(':popover-open')) element.hidePopover(); };
     }, [open]);
     return h('div', { className: 'ww-action-menu' }, h('button', { type: 'button', ref: anchor, title: label, 'aria-label': label, 'aria-expanded': open, 'aria-haspopup': 'dialog', className: iconOnly ? 'ww-icon-button' : 'ww-menu-trigger', onClick: () => setOpen(value => !value) }, h(Glyph, { name: icon }), !iconOnly && label),
-      h('div', { className: 'ww-menu-surface', ref: surface, popover: 'auto', role: 'dialog', 'aria-label': label, onToggle: event => { if (event.nativeEvent.newState === 'closed') setOpen(false); }, onClick: event => { if (event.target.closest('button:not(:disabled)')) { surface.current?.hidePopover(); setOpen(false); } }, onKeyDown: event => { if (event.key === 'Escape') { event.preventDefault(); surface.current.hidePopover(); setOpen(false); anchor.current.focus(); } } }, children));
+      h('div', { className: 'ww-menu-surface', ref: surface, popover: 'auto', role: 'dialog', 'aria-label': label, onClick: event => { if (event.target.closest('button:not(:disabled)')) { surface.current?.hidePopover(); setOpen(false); } }, onKeyDown: event => { if (event.key === 'Escape') { event.preventDefault(); surface.current.hidePopover(); setOpen(false); anchor.current.focus(); } } }, children));
   }
 
   /** 内置专家用原创插画头像；自定义专家未设置头像时，按名字稳定分配一个预置头像。 */
@@ -48,7 +67,8 @@ export function createSharedUi(React, avatars) {
   }
 
   /** 弹层使用浏览器 top layer，避免宿主滚动容器裁剪。 */
-  function Modal({ title, busy = false, onClose, className = '', children }) {
+  // 右上角“×”统一叫“关闭”：用标题命名会和确认按钮同名（如两个“删除专家”），读屏分不清哪个是关。
+  function Modal({ title, busy = false, onClose, className = '', closeLabel = '关闭', children }) {
     const element = useRef(null);
     useEffect(() => {
       const previous = document.activeElement;
@@ -56,7 +76,7 @@ export function createSharedUi(React, avatars) {
       return () => { element.current?.close(); if (previous?.isConnected) previous.focus(); };
     }, []);
     return h('dialog', { ref: element, className: ['ww-modal ww-page', className].filter(Boolean).join(' '), 'aria-label': title, onCancel: event => { event.preventDefault(); if (!busy) onClose(); }, onClick: event => { if (event.target === event.currentTarget && !busy) onClose(); } },
-      h('header', { className: 'ww-header' }, h('h2', null, title), h('button', { type: 'button', disabled: busy, onClick: onClose, 'aria-label': title }, '×')), children);
+      h('header', { className: 'ww-header' }, h('h2', null, title), h('button', { type: 'button', disabled: busy, onClick: onClose, 'aria-label': closeLabel }, '×')), children);
   }
 
   /**
@@ -71,7 +91,7 @@ export function createSharedUi(React, avatars) {
   }
 
   /** 编辑类表单统一用右侧抽屉：与“编辑专家”同一套样式，底部固定操作按钮。有改动时由调用方在 onClose 里先确认。 */
-  function Drawer({ title, busy = false, onClose, footer, children }) {
+  function Drawer({ title, busy = false, onClose, footer, closeLabel = '关闭', children }) {
     const element = useRef(null);
     useEffect(() => {
       const previous = document.activeElement;
@@ -79,7 +99,7 @@ export function createSharedUi(React, avatars) {
       return () => { element.current?.close(); if (previous?.isConnected) previous.focus(); };
     }, []);
     return h('dialog', { ref: element, className: 'ww-editor ww-page', 'aria-label': title, onCancel: event => { event.preventDefault(); if (!busy) onClose(); }, onClick: event => { if (event.target === event.currentTarget && !busy) onClose(); } },
-      h('header', { className: 'ww-header' }, h('h2', null, title), h('button', { type: 'button', disabled: busy, onClick: onClose, 'aria-label': title }, '×')),
+      h('header', { className: 'ww-header' }, h('h2', null, title), h('button', { type: 'button', disabled: busy, onClick: onClose, 'aria-label': closeLabel }, '×')),
       h('div', { className: 'ww-editor-body' }, children), footer && h('footer', { className: 'ww-row' }, ...footer));
   }
 
@@ -97,5 +117,5 @@ export function createSharedUi(React, avatars) {
       (actions || children) && h('div', { className: 'ww-pagehead-actions' }, actions, children));
   }
 
-  return { Glyph, Avatar, ActionMenu, Modal, ConfirmDialog, Drawer, useDiscard, Logo, PageHead, avatarArt, presetAvatars };
+  return { Glyph, Avatar, ActionMenu, useClosedPopover, Modal, ConfirmDialog, Drawer, useDiscard, Logo, PageHead, avatarArt, presetAvatars };
 }

@@ -8,6 +8,7 @@ import { Vault, digest, layout, relativeName, validateNote } from '../src/vault.
 import { SkillLibrary } from '../src/skills.js';
 import { WhalewingCore, schedulePrefix } from '../src/service.js';
 import { Automation } from '../features/automation/automation.js';
+import { seedBundledSkills } from './skill-seed.mjs';
 
 const note = (title, body = '有来源的任务结论。') => `---\ntype: atomic\nstatus: seedling\ncreated: 2026-10-08\nupdated: 2026-10-08\naliases: []\n---\n\n# ${title}\n\n${body}\n`;
 const skill = (name, body = '先读取来源，检查适用条件，再完成任务并核对结果。') => `---\nname: ${name}\ndescription: 有明确需求时按来源方法完成输入检查与任务验收\n---\n\n${body}\n`;
@@ -67,7 +68,7 @@ test('覆盖提交等待来源时移除再纳入，不复活已经撤销的读�
   assert.equal((await core.vault.settings()).sources[0].throughSeq, -1);
 });
 
-for (const action of ['source_read']) for (const mode of ['cancel', 'timeout', 'dispose', 'late-error']) test(`${action} 宿主读取屏障：${mode}结束本地等待，迟到结果不发布`, { timeout: 5000 }, async t => {
+for (const action of ['source_read']) for (const mode of ['cancel', 'timeout', 'dispose', 'late-error']) test(`${action} 宿主读取屏障：${mode}结束本地等待，迟到结果不发布`, async t => {
   const { core, human, hold } = await sourceFixture(t), barrier = hold(), controller = new AbortController();
   let returned = 0, actualSignal;
   const originalDispatch = core.dispatch.bind(core);
@@ -117,6 +118,7 @@ async function fixture(t) {
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const vault = new Vault(path.join(directory, 'vault'));
   await vault.initialize();
+  await seedBundledSkills(path.join(directory, 'skills'));
   return { directory, vault, library: new SkillLibrary(vault, path.join(directory, 'skills')) };
 }
 

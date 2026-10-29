@@ -10,6 +10,7 @@ import { Vault } from '../src/vault.js';
 import { SkillLibrary } from '../src/skills.js';
 import { skillLibraryContract } from '../features/skills/contract.js';
 import { apply as skillTool } from '../features/skills/tool.js';
+import { seedBundledSkills } from './skill-seed.mjs';
 
 const contract = skillLibraryContract(z);
 const review = { reviewer: '测试夹具独立检查角色', positive: '适用输入与结果已经核对', negative: '无来源输入已阻断检查' };
@@ -23,6 +24,7 @@ async function setup(t) {
   t.after(() => fs.rm(directory, { force: true, recursive: true }));
   const vault = new Vault(path.join(directory, 'vault'));
   await vault.initialize();
+  await seedBundledSkills(path.join(directory, 'skills'));
   const library = new SkillLibrary(vault, path.join(directory, 'skills'));
   const ctx = { logger: { warn() {} }, get: () => undefined, on() { return () => {}; } };
   const provider = new WhalewingSkillProvider(ctx, { signal: new AbortController().signal, invalidate() {} }, library, allSkills);

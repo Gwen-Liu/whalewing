@@ -6,6 +6,7 @@ import path from 'node:path';
 import { Vault } from '../src/vault.js';
 import { SkillLibrary } from '../src/skills.js';
 import { WhalewingCore, conversationText, schedulePrefix } from '../src/service.js';
+import { seedBundledSkills } from './skill-seed.mjs';
 
 const note = body => `---\ntype: atomic\nstatus: seedling\ncreated: 2026-10-08\nupdated: 2026-10-08\naliases: []\n---\n# 来源\n${body}\n`;
 const name = 'whalewing-user-regression';
@@ -27,6 +28,7 @@ async function setup(t) {
   const vault = new Vault(path.join(root, 'vault'));
   await vault.initialize();
   const source = await vault.write('40-知识/来源.md', note('旧内容'), '');
+  await seedBundledSkills(path.join(root, 'skills'));
   return { root, vault, source, library: new SkillLibrary(vault, path.join(root, 'skills')) };
 }
 

@@ -12,7 +12,7 @@ test('鲸翼注入的上下文都不算员工原话，也不打断定时整理�
   assert.deepEqual([...conversationText(events).keys()], [0, 2, 6]);
 });
 
-test('小鲸插件管理上下文写进会话后，知识沉淀只取员工原话', { timeout: 15000 }, async t => {
+test('小鲸插件管理上下文写进会话后，知识沉淀只取员工原话', async t => {
   const h = await managementHarness(t);
   assert.equal((await h.run({ expertId: 'manager' })).result.kind, 'success');
   const idle = new Promise(resolve => {

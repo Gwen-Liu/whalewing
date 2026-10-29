@@ -67,7 +67,7 @@ test('生成Client只注册延迟工厂，模块加载阶段不访问DOM或创�
   assert.equal(registrations[0].id, 'dsh-whalewing');
   const requests = [];
   const plugin = registrations[0].factory((name) => { requests.push(name); return {}; });
-  assert.deepEqual(requests, ['react']);
+  assert.deepEqual(requests, ['react', 'react-dom']);
   assert.equal(typeof plugin.apply, 'function');
   assert.ok(plugin.inject.includes('remote.commands') && plugin.inject.includes('remote.session'));
 });

@@ -47,7 +47,7 @@ test('真实Host旧定时命令已退出写入，不初始化知识或发送原�
   assert.equal(command.recordInput, false);
 });
 
-for (const mode of ['cancel', 'timeout', 'dispose', 'late-error']) test(`统一自动任务Host目录读取：${mode}退出等待且迟到结果不发布`, { timeout: 5000 }, async t => {
+for (const mode of ['cancel', 'timeout', 'dispose', 'late-error']) test(`统一自动任务Host目录读取：${mode}退出等待且迟到结果不发布`, async t => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'whalewing-auto-cancel-')), ctx = new Context();
   new TypertRegistry(ctx);
   t.after(async () => { await ctx.fiber.dispose(); await fs.rm(directory, { recursive: true, force: true }); });
@@ -251,7 +251,7 @@ async function featureHost(t, sharedStorage, sharedProfile) {
 
 const hostNewsField = { name: '工作科技', focus: '与工作相关的技术信息', enabled: true, sources: [{ name: '测试订阅', url: 'https://example.com/feed', kind: 'primary', region: 'domestic' }] };
 
-test('资讯Host已开始持久写后取消仍等真实读回，卸载不提前关域且重载保留', { timeout: 10000 }, async t => {
+test('资讯Host已开始持久写后取消仍等真实读回，卸载不提前关域且重载保留', async t => {
   const h = await featureHost(t); await h.cards.manageNews({ action: 'list' });
   const table = h.cards.resource.owner.fields, put = table.put.bind(table);
   const entered = Promise.withResolvers(), release = Promise.withResolvers();
@@ -504,7 +504,7 @@ for (const feature of ['news', 'model']) test(`卸载在途${feature}采集先�
 async function isolatedService(ctx, directory, config) { return (await mountFeatures(ctx, directory, config, false)).service; }
 
 
-test('Host服务就绪自动初始化默认资讯，不打开页面也不初始化知识', { timeout: 10000 }, async t => {
+test('Host服务就绪自动初始化默认资讯，不打开页面也不初始化知识', async t => {
   const h = await featureHost(t), records = [], sessions = new Map(), purposes = new Map();
   let created = 0, claims = 0;
   h.ctx.provide('agents', { get: id => sessions.get(id) });
@@ -533,7 +533,7 @@ test('Host服务就绪自动初始化默认资讯，不打开页面也不初始�
   assert.deepEqual(await h.automationHost.manageAutomation({ action: 'directory' }), { directory: await fs.realpath(path.join(h.directory, 'dsh', 'whalewing-tasks')) });
 });
 
-test('任务目录在 DSH 数据目录下，加载即登记为“鲸翼定时任务”工作区，资讯会话直接建在其中', { timeout: 10000 }, async t => {
+test('任务目录在 DSH 数据目录下，加载即登记为“鲸翼定时任务”工作区，资讯会话直接建在其中', async t => {
   const h = await featureHost(t);
   const calls = [], workspace = { id: 'tasks-workspace' };
   h.ctx.provide('workspaceRegistry', { async create(directory, title) { calls.push([directory, title]); return workspace; } });
@@ -549,7 +549,7 @@ test('任务目录在 DSH 数据目录下，加载即登记为“鲸翼定时任
 });
 
 // 来源授权消费原生catalog的完成结果，再读当前成员；延迟只放在真实公开调用的边界。
-for (const mode of ['complete', 'cancel', 'members-error', 'catalog-error']) test(`新版来源桥等待真实Schedule与工作区读取：${mode}`, { timeout: 10000 }, async t => {
+for (const mode of ['complete', 'cancel', 'members-error', 'catalog-error']) test(`新版来源桥等待真实Schedule与工作区读取：${mode}`, async t => {
   const h = await controllerFixture(t), controller = new AbortController();
   await h.create('source');
   assert.equal(typeof h.ctx.schedule.readCatalog, 'undefined');

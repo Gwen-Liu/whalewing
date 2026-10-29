@@ -181,7 +181,7 @@ test('自动任务严格契约覆盖六选一规则，拒绝多规则与任意�
   assert.throws(() => contract.input.parse({ ...base, purpose: 'knowledge', spec: { ...base.spec, after_seconds: 60 } }));
 });
 
-test('目标版原生Schedule真实持久化、CAS、自然到期回执、取消与历史删除', { timeout: 15000 }, async t => {
+test('目标版原生Schedule真实持久化、CAS、自然到期回执、取消与历史删除', async t => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'whalewing-native-schedule-'));
   const ctx = new Context(), messages = [];
   t.after(async () => { await ctx.fiber.dispose(); await fs.rm(directory, { recursive: true, force: true }); });

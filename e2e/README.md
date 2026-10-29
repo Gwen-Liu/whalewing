@@ -17,7 +17,7 @@ npm run build
 npm run test:e2e
 ```
 
-只跑一个文件：`node --test e2e/specs/model-world.test.mjs`；只跑名字里带某段文字的：加 `--test-name-pattern="对决"`。两个文件并行时全部跑完约 4 分钟。
+只跑一个文件：`npm run test:e2e -- e2e/specs/model-world.test.mjs`；只跑名字里带某段文字的：再加 `--test-name-pattern="对决"`。走 `npm run test:e2e` 会用低优先级、限制并行数，卡住的测试到点会被结束，见[修改与验证](../MAINTAINING.md#修改与验证)。8 核以上两个文件并行，全部跑完约 4.5 分钟。
 
 需要：
 

@@ -11,6 +11,7 @@ import path from 'node:path';
 import { WhalewingSkillProvider } from '../src/skill-provider.js';
 import { Vault } from '../src/vault.js';
 import { SkillLibrary } from '../src/skills.js';
+import { seedBundledSkills } from './skill-seed.mjs';
 
 // 随包技能 = 鲸翼自写的 whalewing-* 加上来源清单里收录的开源技能。
 const bundledSkills = [...['whalewing-check', 'whalewing-clarify', 'whalewing-code-review', 'whalewing-coding', 'whalewing-data-analysis', 'whalewing-debugging', 'whalewing-frontend-design', 'whalewing-knowledge', 'whalewing-news', 'whalewing-plugin-management', 'whalewing-research', 'whalewing-skill-evolution', 'whalewing-slides', 'whalewing-ui-review', 'whalewing-visual', 'whalewing-web-testing', 'whalewing-writing'], ...JSON.parse(await fs.readFile(new URL('../scripts/skill-sources.json', import.meta.url), 'utf8')).map(item => item.name)].sort();
@@ -20,6 +21,7 @@ async function setup(t) {
   t.after(() => fs.rm(directory, { force: true, recursive: true }));
   const vault = new Vault(path.join(directory, 'vault'));
   await vault.initialize();
+  await seedBundledSkills(path.join(directory, 'skills'));
   const library = new SkillLibrary(vault, path.join(directory, 'skills'));
   const lifecycle = new AbortController();
   const ctx = { logger: { warn() {} }, get: () => undefined, on() { return () => {}; } };

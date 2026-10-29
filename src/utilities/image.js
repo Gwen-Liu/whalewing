@@ -1,5 +1,5 @@
 /** 图片格式头在解码前核验；逐张编码并立即释放图像与 Canvas。 */
-import { LIMITS, screenFiles } from './core.js';
+import { LIMITS, screenFiles, describeProblems, failureReason } from './core.js';
 import { unsupportedImageReason } from './catalog.js';
 
 const fail = message => { throw new Error(message); };
@@ -11,9 +11,6 @@ function dimensions(width, height, mime) {
   if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 1 || height < 1 || width * height > LIMITS.pixels) fail('图片尺寸无效或超过 3,200 万像素');
   return { width, height, mime };
 }
-
-/** 可读取的图片扩展名；解码交给浏览器自带解码器，不引入额外依赖。 */
-export const imageExtensions = Object.freeze(['png', 'jpg', 'jpeg', 'jfif', 'webp', 'avif', 'gif', 'bmp', 'ico']);
 
 /** ISOBMFF 盒子遍历（AVIF/HEIF 共用）：返回 [类型, 内容起点, 盒子终点]。 */
 function* boxes(b, start, end) {
@@ -354,9 +351,8 @@ export async function convertImages(files, options, progress = () => {}) {
   }
   if (typeof globalThis.createImageBitmap !== 'function' || typeof globalThis.OffscreenCanvas !== 'function') fail('当前浏览器缺少后台图片处理能力，请使用支持 Worker 图像处理的 DSH 桌面端');
   if (action === 'image-stitch') {
-    // 拼接要用到每一张，有一张不合格就整体停止，并写明是哪个文件。
-    const index = problems.findIndex(Boolean);
-    if (index !== -1) fail(`${files[index].name}：${problems[index]}`);
+    // 拼接要用到每一张，有不合格的就整体停止，并写明是哪些文件、为什么。
+    if (problems.some(Boolean)) fail(describeProblems(files.map((file, index) => [file.name, problems[index]])));
     return stitchImages(files, plan);
   }
   if (action === 'image-crop' && files.length !== 1) fail('裁剪时请选择一张图片');
@@ -379,11 +375,11 @@ export async function convertImages(files, options, progress = () => {}) {
       if (output.format === 'jpeg') notes.add('JPEG 透明区域填充白色');
       for (const note of output.notes) notes.add(note);
     } catch (error) {
-      firstError ??= error;
-      failed.push(index); details.push(`${file.name}：失败，${error instanceof Error ? error.message : '处理出错'}`);
+      firstError ??= failureReason(error);
+      failed.push(index); details.push(`${file.name}：失败，${failureReason(error)}`);
     }
   }
-  if (!outputs.length) { if (files.length === 1) throw firstError; fail(`${files.length} 张图片全部处理失败：${firstError.message}`); }
+  if (!outputs.length) fail(files.length === 1 ? firstError : `${files.length} 张图片全部处理失败：${firstError}`);
   const summary = [`已处理 ${outputs.length} 张图片${failed.length ? `，${failed.length} 张失败` : ''}`, ...notes, '原件保持不变'].join('；');
   return { files: outputs, summary, listing: details, failed };
 }

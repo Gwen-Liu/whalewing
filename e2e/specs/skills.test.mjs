@@ -42,7 +42,7 @@ async function settled(read, expected, message, timeout = 5_000) {
 
 /**
  * 做一个会弹出右上角提示的动作，等新的那条提示出来（每条新提示都是新元素，旧的会被换掉）。
- * 编辑抽屉开着时，提示上的“×”被抽屉挡着点不中，所以不先关旧提示，而是等旧的那条被换掉。
+ * 不先关旧提示，而是等旧的那条被换掉：这样也核对了新提示确实是这次动作弹出来的。
  */
 async function nextToast(page, act, kind) {
   const previous = await page.$('.ww-toast');
@@ -212,6 +212,10 @@ test('反例：技能标识为空时不保存，提示标识规则，已填内�
     assert.ok(await editor.isVisible(), '抽屉保持打开');
     assert.equal(await editor.locator('textarea').inputValue(), content, '已填内容还在');
     assert.ok(await identifier(editor).isEnabled(), '标识还能填');
+    // 抽屉开着时右上角提示也点得到（原来被抽屉挡住）：点提示上的“×”，提示收起，抽屉还开着。
+    await message.getByRole('button', { name: '关闭' }).click({ timeout: 5000 });
+    await message.waitFor({ state: 'detached' });
+    assert.ok(await editor.isVisible(), '只收起提示，抽屉还开着');
     await discardDrawer(page, editor, '取消');
     assert.equal(await chipCount(page, '我的'), mine);
     assert.deepEqual(userSkills(dsh.home), onDisk, '磁盘上没有多出技能');
