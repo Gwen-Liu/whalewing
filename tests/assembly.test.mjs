@@ -6,7 +6,10 @@ import { mkdtemp, mkdir, writeFile, rm, readFile } from 'node:fs/promises';
 import { parts } from '../features/index.js';
 import { baseHosts } from '../index.js';
 import { clients } from '../src/shell/features.js';
-import { validateComposition, validateDistribution, validateSourceClosure, validateChunks } from '../scripts/assembly.mjs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { validateComposition, validateDistribution, validateSourceClosure, validateRuntimeDependencies, validateChunks } from '../scripts/assembly.mjs';
+import { processEntries } from '../scripts/build.mjs';
 
 const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 const composition = () => ({ parts: structuredClone(parts), baseHosts: Object.entries(baseHosts), clients: Object.entries(clients), manifest: structuredClone(manifest) });
@@ -96,4 +99,38 @@ test('实际metafile只消费运行声明，未分发源码及漏声明依赖均
   assert.deepEqual(validateSourceClosure({ ...data, metafile }), ['src/consumer.js']);
   data.manifest.files = data.manifest.files.filter(file => file !== 'src');
   assert.throws(() => validateSourceClosure({ ...data, metafile }), /实际源码未分发/);
+});
+
+// 2026-10-30：同事从 npm 装鲸翼要多下载 287 个包，其中 220 多个只给浏览器端用、构建时早已打进 client*.js。
+test('浏览器分块打包进去的第三方包写在 devDependencies 即可；服务端外部引用仍须是运行依赖', async t => {
+  const { data } = await distribution(t);
+  data.manifest.devDependencies = { '@sample/office': '1.0.0' };
+  const bundled = { inputs: { 'src/consumer.js': { imports: [{ path: 'node_modules/@sample/office/index.js', original: '@sample/office', external: false }] } } };
+  assert.deepEqual(validateSourceClosure({ ...data, metafile: bundled, bundled: true }), ['src/consumer.js']);
+  assert.throws(() => validateSourceClosure({ ...data, metafile: bundled }), /运行依赖未声明 @sample\/office/, '服务端代码不打包，只写在 devDependencies 时用户那边找不到');
+  const external = { inputs: { 'src/consumer.js': { imports: [{ path: '@sample/office', external: true }] } } };
+  assert.throws(() => validateSourceClosure({ ...data, metafile: external, bundled: true }), /运行依赖未声明 @sample\/office/, '浏览器端留作外部引用的包要由运行环境提供');
+});
+
+test('dependencies 只放服务端运行时真正 import 的包，多写一个就拒收', () => {
+  const metafile = { inputs: { 'src/host.js': { imports: [{ path: 'node:fs', external: true }, { path: 'js-yaml', external: true }, { path: '@sample/tool/api', external: true }, { path: './local.js', external: false }] } } };
+  assert.deepEqual(validateRuntimeDependencies({ manifest: { dependencies: { 'js-yaml': '4.2.0' } }, metafile }), ['@sample/tool', 'js-yaml']);
+  assert.throws(() => validateRuntimeDependencies({ manifest: { dependencies: { 'js-yaml': '4.2.0', exceljs: '4.4.0' } }, metafile }), /没有用到这些 dependencies：exceljs/);
+});
+
+test('用 fork 启动的服务端子进程入口都登记进构建分析', () => {
+  const root = fileURLToPath(new URL('../', import.meta.url));
+  const found = [];
+  const walk = dir => {
+    for (const entry of readdirSync(path.join(root, dir), { withFileTypes: true })) {
+      const relative = `${dir}/${entry.name}`;
+      if (entry.isDirectory()) walk(relative);
+      else if (entry.name.endsWith('.js')) {
+        for (const match of readFileSync(path.join(root, relative), 'utf8').matchAll(/\bfork\(\s*fileURLToPath\(\s*new URL\(\s*'([^']+)'/g)) found.push(path.posix.join(dir, match[1]));
+      }
+    }
+  };
+  for (const dir of ['src', 'features']) walk(dir);
+  assert.ok(found.length > 0, '至少有电子书解析子进程');
+  assert.deepEqual(found.filter(entry => !processEntries.includes(entry)), []);
 });

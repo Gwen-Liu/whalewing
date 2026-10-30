@@ -78,10 +78,14 @@ export function validateChunks({ parts, chunks, metafile }) {
   if (new Set(owners).size !== owners.length || new Set(artifacts).size !== artifacts.length) fail('重分块实现或产物重复');
 }
 
-/** esbuild 的实际输入证明源码闭包；只把本包直接 import 的外部包与运行声明比较。 */
-export function validateSourceClosure({ root, manifest, metafile, resources = [], generated = [] }) {
+/**
+ * esbuild 的实际输入证明源码闭包；只把本包直接 import 的外部包与声明比较。
+ * bundled：浏览器分块在构建时已把第三方包打进生成文件，这类包写在 devDependencies 即可，用户安装时不再下载。
+ */
+export function validateSourceClosure({ root, manifest, metafile, resources = [], generated = [], bundled = false }) {
   const inputs = [];
-  const declared = { ...manifest.dependencies, ...manifest.peerDependencies };
+  const runtime = { ...manifest.dependencies, ...manifest.peerDependencies };
+  const buildTime = bundled ? { ...runtime, ...manifest.devDependencies } : runtime;
   for (const [source, input] of Object.entries(metafile.inputs)) {
     const absolute = path.resolve(root, source), relative = path.relative(root, absolute).replaceAll('\\', '/');
     if (!relativePath(relative) || relative.startsWith('node_modules/')) continue;
@@ -90,8 +94,8 @@ export function validateSourceClosure({ root, manifest, metafile, resources = []
     for (const imported of input.imports) {
       const value = imported.original ?? (imported.external ? imported.path : '');
       if (!value || value.startsWith('.') || path.isAbsolute(value) || isBuiltin(value)) continue;
-      const name = value.startsWith('@') ? value.split('/').slice(0, 2).join('/') : value.split('/')[0];
-      if (!declared[name]) fail(`实际运行依赖未声明 ${name}（${relative}）`);
+      const name = packageName(value);
+      if (!(imported.external ? runtime : buildTime)[name]) fail(`实际运行依赖未声明 ${name}（${relative}）`);
     }
   }
   for (const resource of resources) {
@@ -99,3 +103,22 @@ export function validateSourceClosure({ root, manifest, metafile, resources = []
   }
   return inputs;
 }
+
+/**
+ * dependencies 是用户安装鲸翼时 pnpm 要下载的全部内容，只能放服务端（Host 与子进程）运行时真正 import 的包。
+ * 浏览器端用的包构建时已打进 client*.js，写进 dependencies 会让每个用户多下载上百个用不到的包。
+ * @param metafile 服务端入口的 esbuild 分析结果（packages: 'external'）。
+ */
+export function validateRuntimeDependencies({ manifest, metafile }) {
+  const used = new Set();
+  for (const input of Object.values(metafile.inputs)) {
+    for (const imported of input.imports) {
+      if (imported.external && !imported.path.startsWith('.') && !path.isAbsolute(imported.path) && !isBuiltin(imported.path)) used.add(packageName(imported.path));
+    }
+  }
+  const unused = Object.keys(manifest.dependencies ?? {}).filter(name => !used.has(name));
+  if (unused.length) fail(`服务端运行时没有用到这些 dependencies：${unused.join('、')}；只在浏览器端用的包请写进 devDependencies`);
+  return [...used].sort();
+}
+
+const packageName = specifier => specifier.startsWith('@') ? specifier.split('/').slice(0, 2).join('/') : specifier.split('/')[0];

@@ -1,2 +1,4 @@
 * text=auto eol=lf
 *.pdf binary
+features/cards/library/pdfjs/** binary
+features/cards/library/pdfjs/SOURCE.json text eol=lf diff merge

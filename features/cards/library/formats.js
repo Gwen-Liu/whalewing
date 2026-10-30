@@ -422,10 +422,14 @@ function palm(bytes, filename) {
 }
 
 let pdfjs = null;
-/** PDF.js 体积大，只在遇到 PDF 时加载；解析器内联运行，不另起 PDF.js 线程。 */
+/**
+ * PDF.js 体积大，只在遇到 PDF 时加载；解析器内联运行，不另起 PDF.js 线程。
+ * 用的是随插件分发的那份（scripts/vendor-pdfjs.mjs 原样拷贝），用户安装时不用再下载 pdfjs-dist 和原生画布程序。
+ */
+const pdfAssets = new URL('./pdfjs/', import.meta.url);
 async function loadPdfjs() {
   if (!pdfjs) {
-    const [main, worker] = await Promise.all([import('pdfjs-dist/legacy/build/pdf.mjs'), import('pdfjs-dist/legacy/build/pdf.worker.mjs')]);
+    const [main, worker] = await Promise.all([import('./pdfjs/pdf.min.mjs'), import('./pdfjs/pdf.worker.min.mjs')]);
     globalThis.pdfjsWorker = { WorkerMessageHandler: worker.WorkerMessageHandler };
     pdfjs = main;
   }
@@ -434,10 +438,9 @@ async function loadPdfjs() {
 /** PDF 只提取文字：有书签按书签分章，没有就每 10 页一章；页眉页脚和页码按重复规律去掉。 */
 async function pdf(bytes, filename) {
   const { getDocument } = await loadPdfjs();
-  const assets = new URL('./', import.meta.resolve('pdfjs-dist/package.json'));
   let document;
   try {
-    document = await getDocument({ data: bytes, cMapUrl: fileURLToPath(new URL('cmaps/', assets)), cMapPacked: true, standardFontDataUrl: fileURLToPath(new URL('standard_fonts/', assets)), isEvalSupported: false, disableFontFace: true, useSystemFonts: false, verbosity: 0 }).promise;
+    document = await getDocument({ data: bytes, cMapUrl: fileURLToPath(new URL('cmaps/', pdfAssets)), cMapPacked: true, standardFontDataUrl: fileURLToPath(new URL('standard_fonts/', pdfAssets)), isEvalSupported: false, disableFontFace: true, useSystemFonts: false, verbosity: 0 }).promise;
   } catch (error) {
     if (error?.name === 'PasswordException') fail('这本 PDF 设置了打开密码，请先在 PDF 阅读器里去掉密码再导入');
     fail('PDF 文件已损坏或无法解析');

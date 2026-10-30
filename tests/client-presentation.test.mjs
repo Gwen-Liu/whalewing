@@ -21,7 +21,7 @@ const sorted = value => Object.fromEntries(Object.entries(value).sort(([a], [b])
 // 2026-10-27 顶栏页签改成带图标的胶囊、“更多”改成方钮；个人知识阅读区改成正文加右侧栏（目录、反链、出链）并显示笔记属性，
 // 去掉了原来正文下面的“链接状态”“反向链接”折叠区和“已定位原文第几行”框（4 个词条）；技能详情正文不再限制 80 字宽。
 // 同日按用户纠正，模型世界从功能页签组里拿出来，单独一个小胶囊放回这一行最右、紧挨着“…”。
-// 同日用户定鲸翼是全新项目、和旧名彻底无关：样式前缀统一改成 ww-（WhaleWing）。把前缀换回旧名后指纹与改名前的基线逐字相同，样式本身没变。
+// 同日用户定鲸翼是全新项目、不留早期开发时的名字：样式前缀统一改成 ww-（WhaleWing）。把前缀换回早期前缀后指纹与之前的基线逐字相同，样式本身没变。
 // 同日按用户反馈，让出窗口标题栏的几条样式从只对 macOS 改成 macOS 和 Windows 桌面版都生效。
 // 2026-10-28 用户要求电子书阅读器改成电脑上的读法：正文一栏上下滚动、目录在左侧，去掉左右翻页（“上一页”“下一页”两个词条），
 // 新增“本章小节”“正文”“查看大图”和章末“停一下再往下滚，进入下一章”四个词条。
@@ -277,4 +277,12 @@ test('“更多”的三个点用粗笔画，16px 下也看得见', () => {
 test('技能详情的正文铺满详情卡，不在宽屏右边留一大片空白', () => {
   assert.match(css, /.ww-page .ww-skill-library .ww-skill-detail pre{max-width:none;/);
   assert.doesNotMatch(css, /ww-skill-detail pre{max-width:80ch/);
+});
+
+// 2026-10-30 用户反馈：卸载鲸翼后点开还没撤掉的鲸翼页，提示“插件内部出错”，像是插件坏了。
+test('插件卸载或停用后接口已撤下，提示说清是状态变化、重启 DSH 后消失', () => {
+  const { text } = explainError('gateway/definition-unavailable', 'its strict definition was withdrawn and SRC fallback is forbidden');
+  assert.match(text, /鲸翼已经卸载或停用/);
+  assert.match(text, /重启 DSH/);
+  assert.doesNotMatch(text, /插件内部出错|withdrawn/);
 });
