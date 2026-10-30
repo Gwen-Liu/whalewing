@@ -56,6 +56,8 @@ AI 的 revision/CAS、头像和容量仍归 AI；Cards 的迁移、receipt、日
 
 办公工坊和模型世界各自持有重资源构建闭包，主构建静态组合。保持原生 `require.async` 分块及 Worker、立绘、字体和许可的真实依赖关系，不把重视图提前装回主包。文件白名单要同时覆盖实际运行资源及公开开发材料；运行包不混入主测试隐私样本，完整开发源码另行提供。只删除已没有消费者的资源，不根据文件名推断归属。
 
+`dependencies` 是用户安装鲸翼时 pnpm 要下载的全部内容，只放服务端（Host 与 `fork` 启动的子进程）运行时真正 import 的包；浏览器端用的第三方包构建时已打进 `client*.js`，写在 `devDependencies`。构建按实际 import 核对，多写、漏写都拒收；新增 `fork` 子进程入口要登记在 `scripts/build.mjs` 的 `processEntries`。电子书导入用的 PDF.js 由 `node scripts/vendor-pdfjs.mjs` 从开发依赖 `pdfjs-dist` 原样拷进 `features/cards/library/pdfjs`（只拷文字提取用得到的部分，不带原生画布程序 `@napi-rs/canvas`），升级 `pdfjs-dist` 后重新运行并提交，`tests/library-pdfjs.test.mjs` 逐文件核对指纹。
+
 生成文件包括根 `client.js`、各 `client.*.js`、`cordis.patch.yml` 和内置图标，修改其来源后重建，不手改产物。主入口最后写入只减少观察到半成品的机会，不等于多文件原子发布。
 
 入口用原生 `__ModuleLoader__.load({ id, factory })`，分块以相同包 id 和各自 `chunk` 注册同步工厂，通过 `require.async('./client.<功能>.js')` 获取；版本及成功缓存归平台，不自建下载器、跨块 ESM 依赖或永久失败缓存。入口与全部浏览器脚本总字节受既有基线约束；验证冷首屏、首次及重复访问、失败重试、取消与迟到响应，真实页面另核对 Worker 和模型目录。

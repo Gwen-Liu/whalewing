@@ -9,12 +9,14 @@ import { roles } from '../content/roles.js';
 import { loadExpertAvatars, expertAvatarIds, presetAvatarIds } from '../src/expert-avatars.js';
 import { baseHosts } from '../index.js';
 import { clients } from '../src/shell/features.js';
-import { validateComposition, validateDistribution, validateSourceClosure, validateChunks } from './assembly.mjs';
+import { validateComposition, validateDistribution, validateSourceClosure, validateRuntimeDependencies, validateChunks } from './assembly.mjs';
 import { buildToolbox } from '../features/toolbox/build.mjs';
 import { buildModelWorld } from '../features/model-world/build.mjs';
 
 const PACKAGE = 'dsh-whalewing';
 const ROOT = new URL('../', import.meta.url);
+/** 用 fork 启动的服务端子进程入口（电子书解析）。新增子进程时登记在这里，构建才会核对它的依赖。 */
+export const processEntries = ['features/cards/library/parse-process.js'];
 // 本插件不贡献原生模式；专家身份、工具与工作台作为独立 Host 能力装配。
 export const patchSchema = yaml.JSON_SCHEMA;
 
@@ -67,8 +69,9 @@ export function renderArtifacts() {
   });
   validateChunks({ parts, chunks: [toolbox, modelWorld], metafile: shell.metafile });
   // Host 仅分析实际静态依赖，不在构建时启动服务；重复接线也以构建错误拒收。
+  // 用 fork 启动的子进程入口同样跑在服务端，要一起分析。
   const host = buildSync({
-    absWorkingDir: root, entryPoints: ['index.js', ...parts.filter(part => part.kind === 'optional').map(part => `features/${part.id}/host.js`)], outdir: 'host-analysis',
+    absWorkingDir: root, entryPoints: ['index.js', ...processEntries, ...parts.filter(part => part.kind === 'optional').map(part => `features/${part.id}/host.js`)], outdir: 'host-analysis',
     bundle: true, platform: 'node', format: 'esm', packages: 'external', write: false, metafile: true, logOverride: { 'duplicate-object-key': 'error' },
   });
   const client = '// 生成来源：src/shell/index.js、视图、契约及随包资源；请修改真源后重新生成。\n'
@@ -86,7 +89,9 @@ export function renderArtifacts() {
     ...[...expertAvatarIds, ...presetAvatarIds].map(id => `content/avatars/${id}.webp`), ...toolbox.resources, ...modelWorld.resources,
   ];
   validateDistribution({ root, manifest, parts, roles, resources, generated: Object.keys(artifacts) });
-  for (const metafile of [host.metafile, shell.metafile, ...toolbox.metafiles, ...modelWorld.metafiles]) validateSourceClosure({ root, manifest, metafile });
+  validateSourceClosure({ root, manifest, metafile: host.metafile });
+  validateRuntimeDependencies({ manifest, metafile: host.metafile });
+  for (const metafile of [shell.metafile, ...toolbox.metafiles, ...modelWorld.metafiles]) validateSourceClosure({ root, manifest, metafile, bundled: true });
   return artifacts;
 }
 

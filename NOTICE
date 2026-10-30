@@ -32,6 +32,10 @@ CC BY-NC-SA 4.0 单独授权，不适用 Apache License 2.0；商用须先取得
   content/utilities/THIRD_PARTY_NOTICES.txt
 - 中文字体 Noto Sans SC（SIL Open Font License 1.1）：
   content/utilities/NotoSansSC-LICENSE.txt
+- 电子书导入用的 PDF.js（Apache-2.0），连同它的字符映射表（Adobe，BSD-3-Clause）和
+  标准字体（Foxit 为 BSD-3-Clause，Liberation 为 SIL Open Font License 1.1），从 pdfjs-dist 原样拷贝：
+  features/cards/library/pdfjs 下的 LICENSE、cmaps/LICENSE、standard_fonts/LICENSE_FOXIT、
+  standard_fonts/LICENSE_LIBERATION；来源版本和逐文件指纹见同目录 SOURCE.json
 - 模型目录数据 models.dev（MIT）与 Epoch AI 评测数据（CC BY 4.0）：
   content/model-world/NOTICE.md 及同目录的 LICENSE 文件
 - 知识图谱布局力改编自 d3-force 与 d3-quadtree（ISC）：
