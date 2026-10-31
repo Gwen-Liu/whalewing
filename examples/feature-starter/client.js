@@ -49,7 +49,7 @@ var package_default = {
   scripts: { build: "node scripts/build.mjs", test: "node --test tests/*.test.mjs" },
   whalewingExtension: { id: "hello" },
   devDependencies: { esbuild: "0.25.12" },
-  engines: { dsh: "0.2.1-rc.3" },
+  engines: { dsh: "0.2.1-rc.5" },
   dsh: {
     bundle: { patch: "./cordis.patch.yml" },
     client: { platform: "web", immediately: true, inject: ["dsh-whalewing"] }

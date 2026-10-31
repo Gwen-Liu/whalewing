@@ -66,7 +66,7 @@
 
 ## 1. 测试范围
 
-- 对象与版本：鲸翼插件 `dsh-whalewing` 0.2.1-rc.3.1（开发版，本仓库 `plugins/whalewing`），运行在插件开发依赖里的原版 DSH 0.2.1-rc.3 浏览器版上。
+- 对象与版本：鲸翼插件 `dsh-whalewing` 0.2.1-rc.5.1（开发版，本仓库 `plugins/whalewing`），运行在插件开发依赖里的原版 DSH 0.2.1-rc.5 浏览器版上。
 - 环境：`e2e/support/dsh.mjs` 的 `startDsh()` 每个测试文件新建一套临时 DSH（独立 DSH_HOME、知识库、文档目录，测完整个删掉），无头 Chromium，`locale: zh-CN`，默认视口 1440×900；桌面版标题栏用 `openWhaleWing(page, url, { desktop: true })` 模拟、用 `titlebarProblems()` 判断。
 - 依据（预期出处，按优先顺序）：
   1. `docs/业务能力设计.md`（下文简称“设计”，引用写成「章节」第 n 条）——以 2026-10-27 工作区里的版本为准，含当天新增的“梯队按四舍五入后的整数比较”“PDF 压缩已内置”和「验证原则」里的功能测试要求（这几处在出清单期间才出现在工作区，已同步进 MW-10、TOOL-02 和第 2 节）；
