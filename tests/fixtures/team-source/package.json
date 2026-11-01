@@ -1,0 +1,11 @@
+{
+  "name": "dsh-fixture-team",
+  "version": "0.0.0",
+  "private": true,
+  "description": "测试用扩展：给鲸翼提供团队专家、团队知识和团队技能，只用于本仓库的测试和隔离环境走查",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": { ".": "./host.js", "./package.json": "./package.json", "./locale/*": "./locale/*" },
+  "engines": { "dsh": "0.2.1-rc.5" },
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
+}

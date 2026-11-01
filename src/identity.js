@@ -1,13 +1,15 @@
 import { requireExactProjection } from './session-projection.js';
 import { z } from 'zod';
 import { abort, fail } from './vault.js';
+import { automationPurposes } from '../features/automation/contract.js';
 
 export const claimCommands = new Set(['whalewing']);
+export { automationPurposes };
 
 /** 自动任务用途只从本命令成功回执恢复，取消计划不会抹掉排除知识来源所需身份。 */
 export const automationProjection = {
   key: 'whalewingAutomation', stateVersion: 1,
-  stateSchema: z.object({ purpose: z.enum(['knowledge', 'custom', 'news']).nullable(), inherited: z.number(), pending: z.array(z.string()) }),
+  stateSchema: z.object({ purpose: z.enum(automationPurposes).nullable(), inherited: z.number(), pending: z.array(z.string()) }),
   init: (_header, inheritedEventCount) => ({ purpose: null, inherited: inheritedEventCount, pending: [] }),
   apply(state, event) {
     if (state.purpose || event.seq < state.inherited) return state;
@@ -16,11 +18,11 @@ export const automationProjection = {
     let purpose = null;
     if (event.data.kind === 'success') try {
       const result = JSON.parse(event.data.text);
-      if (result.action === 'automation_claim' && ['knowledge', 'custom', 'news'].includes(result.purpose)) purpose = result.purpose;
+      if (result.action === 'automation_claim' && automationPurposes.includes(result.purpose)) purpose = result.purpose;
     } catch { /* 损坏或其它命令回执不授予用途。 */ }
     return { ...state, purpose, pending: state.pending.filter(id => id !== event.data.commandId) };
   },
-  wire: { viewSchema: z.enum(['knowledge', 'custom', 'news']).nullable(), view: state => state.purpose },
+  wire: { viewSchema: z.enum(automationPurposes).nullable(), view: state => state.purpose },
 };
 
 /** 没有 signal 的宿主只读调用只取消本地等待，写操作始终等待真实接纳结果。 */
@@ -41,6 +43,6 @@ export async function automationIdentity(projections, sessionId, signal) {
   requireExactProjection(result, sessionId);
   if (!Object.hasOwn(result.values, 'whalewingAutomation')) fail('AUTOMATION_IDENTITY', '自动任务投影未恢复，请保留原会话并检查日志及插件加载');
   const purpose = result.values.whalewingAutomation;
-  if (purpose !== null && !['knowledge', 'custom', 'news'].includes(purpose)) fail('AUTOMATION_IDENTITY', '自动任务投影无效');
+  if (purpose !== null && !automationPurposes.includes(purpose)) fail('AUTOMATION_IDENTITY', '自动任务投影无效');
   return purpose;
 }

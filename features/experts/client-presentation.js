@@ -50,6 +50,11 @@ export const zh = {
   "expertTemplateApplied": "已套用模板“{name}”",
   "expertTemplateSkipped": "已套用模板“{name}”；这些技能当前没有装，已跳过：{skills}",
   "expertCustom": "自定义",
+  "viewExpert": "查看专家",
+  "copyExpert": "复制为我的专家",
+  "expertViewClose": "关闭",
+  "expertSourceView": "这位专家由「{name}」提供，只能查看；需要改的话可以复制成你自己的专家",
+  "expertSourceEdit": "这位专家由「{name}」提供，保存后改动交给「{name}」；模型和 MCP 跟随你本机的设置，这里不绑定",
   "editExpert": "编辑专家",
   "expertName": "专家名字",
   "expertDescription": "一句话介绍",
@@ -92,11 +97,24 @@ export const styles = [
 `.ww-page .ww-expert-grid{grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}.ww-page .ww-expert-grid>.ww-card{overflow:hidden;min-height:0;padding:20px 20px 30px;gap:12px}.ww-expert-grid>.ww-card .ww-avatar{border-radius:999px;object-fit:cover}.ww-expert-grid>.ww-card h2{font-size:18px;line-height:1.4}.ww-expert-grid>.ww-card>p{flex:1;min-height:0;font-size:13px;line-height:1.7;color:var(--ww-ink-2)}
 .ww-expert-foot{display:flex;align-items:center;gap:8px;margin-top:auto}.ww-expert-meta{flex:1;min-width:0;font-size:12.5px;color:var(--ww-ink-2)}.ww-page .ww-expert-foot .ww-card-start{flex:none;width:auto;min-height:32px;padding:0 14px;border:1px solid var(--ww-line-2);background:var(--ww-surface);font-size:13px}.ww-page .ww-expert-foot .ww-card-start.ww-primary{border-color:var(--ww-fill);background:var(--ww-fill);color:var(--ww-on-fill)}
 .ww-page .ww-expert-grid>[data-lead]{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;column-gap:24px;padding:24px 28px 30px}.ww-expert-grid>[data-lead]>.ww-card-top{grid-column:1}.ww-expert-grid>[data-lead]>p{grid-column:1;max-width:64ch;margin:0}.ww-expert-grid>[data-lead]>.ww-expert-foot{grid-column:2;grid-row:1/3}.ww-expert-grid>[data-lead] h2{font-size:22px}
-.ww-page .ww-expert-grid>.ww-add-card{min-height:180px}.ww-team-settings .ww-menu-trigger{white-space:nowrap}`
+.ww-page .ww-expert-grid>.ww-add-card{min-height:180px}.ww-team-settings .ww-menu-trigger{white-space:nowrap}
+.ww-editor-fields{border:0;margin:0;min-width:0}`
 ];
 
 // 专属错误只解释本领域；输入原文与公共运输错误由共用呈现机制处理。
 export const errors = {
+  "EXPERT_SOURCE_CLOSED": [
+    "提供这位专家的扩展已关闭或卸载（扩展问题）",
+    "在 DSH「插件」页重新开启这个扩展，或改选其他专家"
+  ],
+  "EXPERT_SOURCE_READONLY": [
+    "这位专家由扩展提供，在这里只能查看（扩展的规则）",
+    "复制为你自己的专家后再改，或到提供它的扩展里改"
+  ],
+  "EXPERT_SOURCE_SAVE": [
+    "扩展没有保存这位专家（扩展问题）",
+    "表单已保留；按提示处理后重试，或到提供它的扩展里查看原因"
+  ],
   "EXPERT_READBACK": [
     "操作已提交，但没能确认结果（本机文件问题）",
     "请刷新查看是否已生效，不要重复提交"

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
 import { spawnSync } from 'node:child_process';
-import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm, symlink, unlink, rmdir, realpath } from 'node:fs/promises';
 import { Context, Service } from '@deepseek-ai/cordis';
 import { TypertRegistry } from '@deepseek-ai/dsh-typert-registry';
 import { FeatureRegistry } from '../src/features.js';
@@ -176,6 +176,30 @@ test('随包技能按活动功能过滤list与缓存get，关闭不删文件，�
   assert.ok((await provider.get(news, options)).content);
 });
 
+
+// 企业版功能测试发现：扩展登记的目录是短文件名或联接、技能位置是真实路径时，两种写法对不上会把扩展技能滤掉。
+test('扩展技能目录按联接路径登记、技能位置是真实路径时照样放行；目录外的不放行', async t => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'whalewing-skill-link-'));
+  const real = path.join(directory, 'real'), linked = path.join(directory, 'linked');
+  await mkdir(path.join(real, 'team-method'), { recursive: true });
+  await writeFile(path.join(real, 'team-method', 'SKILL.md'), '---\nname: team-method\ndescription: 扩展目录里的方法\n---\n正文。\n');
+  await symlink(real, linked, 'junction');
+  const library = new SkillLibrary(new Vault(path.join(directory, 'vault')), path.join(directory, 'skills'));
+  const features = [{ id: 'team', kind: 'extension', package: 'fixture', skills: [linked] }];
+  const control = { signal: new AbortController().signal, invalidate() {} };
+  const provider = new WhalewingSkillProvider({ logger: { warn() {} }, get() {}, on() { return () => {}; } }, control, library, () => ({ features }));
+  t.after(async () => {
+    await provider.dispose();
+    // 先只删联接本身，再清临时目录，免得顺着联接删到目标里。
+    await unlink(linked).catch(() => rmdir(linked));
+    await rm(directory, { recursive: true, force: true });
+  });
+  const inReal = { source: 'bundled', name: 'team-method', locator: { path: await realpath(path.join(real, 'team-method', 'SKILL.md')) } };
+  const inLink = { ...inReal, locator: { path: path.join(linked, 'team-method', 'SKILL.md') } };
+  assert.equal(provider.allowed(inReal), true, '真实路径写法的技能位置也算在扩展目录里');
+  assert.equal(provider.allowed(inLink), true);
+  assert.equal(provider.allowed({ ...inReal, locator: { path: path.join(directory, 'elsewhere', 'SKILL.md') } }), false, '目录外的不放行');
+});
 
 test('外部发现迟到返回不恢复已关闭技能，核心dispose后不新开watcher', async t => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'whalewing-skill-late-'));

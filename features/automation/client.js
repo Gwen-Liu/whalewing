@@ -20,6 +20,8 @@ export function createView(kit) {
     const [taskHistory, setTaskHistory] = useState(null);
     const [selectedTask, setSelectedTask] = useState('');
     const workspaces = useSyncExternalStore(api.subscribeWorkspaces, api.workspaces, api.workspaces);
+    // 两个内置任务：名称和指令由插件给，员工只定时间（每日记忆还定处理范围）。
+    const builtInTitle = { knowledge: 'knowledgeTask', thinking: 'thinkingTask' };
     const taskTiming = draft => {
       // HTML time 控件可能省略秒；只补齐原生输入格式，不在客户端计算触发时间。
       const time = /^\d{2}:\d{2}$/.test(draft.time) ? `${draft.time}:00` : draft.time;
@@ -30,8 +32,10 @@ export function createView(kit) {
     };
     const beginTask = purpose => {
       if (taskDraft) { setTaskDraftHidden(false); return; }
-      // 只有知识整理需要处理范围；自建任务不涉及工作区。
-      setTaskDraft({ purpose, title: purpose === 'knowledge' ? t('knowledgeTask') : purpose === 'news' ? t('newsDaily') : '', prompt: '', workspaceScope: purpose === 'knowledge' ? { mode: 'all', excludedWorkspaceIds: [] } : undefined, rule: 'daily', time: '00:15:00', timeZone: 'Asia/Shanghai', weekdays: '1,2,3,4,5', seconds: '3600', at: '', expression: '0 8 * * *' });
+      // 只有每日记忆需要处理范围；每周思考只读知识库，自建任务不涉及工作区。
+      // 默认时间：每日记忆每天 01:00，每周思考每周一 07:00（北京时间）。
+      const weekly = purpose === 'thinking';
+      setTaskDraft({ purpose, title: builtInTitle[purpose] ? t(builtInTitle[purpose]) : purpose === 'news' ? t('newsDaily') : '', prompt: '', workspaceScope: purpose === 'knowledge' ? { mode: 'all', excludedWorkspaceIds: [] } : undefined, rule: weekly ? 'weekly' : 'daily', time: purpose === 'knowledge' ? '01:00:00' : weekly ? '07:00:00' : '00:15:00', timeZone: 'Asia/Shanghai', weekdays: weekly ? '1' : '1,2,3,4,5', seconds: '3600', at: '', expression: '0 8 * * *' });
       setTaskDraftHidden(false);
     };
     const editTask = task => run(async () => {
@@ -84,6 +88,17 @@ export function createView(kit) {
       if (!saved || saved.status !== (action === 'pause' ? 'paused' : 'active')) throw new Error(t('taskReadback'));
       return () => setAutomations(catalog);
     }, 'taskToggled');
+    // 升级前建的内置任务：读最新记录后提交一次保存，后端换上当前版本的指令，处理范围和时间照旧。
+    const upgradeTask = task => run(async () => {
+      const signal = operation.current?.controller.signal;
+      const current = await api.automationRequest({ action: 'read', sessionId: task.sessionId, id: task.id }, signal);
+      if (!current.task || current.legacy || !builtInTitle[current.purpose] || !['active', 'paused'].includes(current.status)) throw new Error(t('taskReadback'));
+      const receipt = await api.automationRequest({ action: 'update', sessionId: task.sessionId, id: task.id, expected: current.task, expectedStatus: current.status }, signal);
+      const catalog = await api.automationCatalog(signal);
+      const saved = catalog.tasks.find(item => item.id === task.id && item.sessionId === task.sessionId);
+      if (receipt.updated !== true || !saved || saved.outdated) throw new Error(t('taskReadback'));
+      return () => setAutomations(catalog);
+    }, 'taskUpgraded');
     const cancelTask = task => run(async () => {
       const signal = operation.current?.controller.signal;
       const receipt = await api.automationRequest({ action: 'delete', sessionId: task.sessionId, id: task.id }, signal);
@@ -99,7 +114,7 @@ export function createView(kit) {
     let body;
       const pending = api.pendingAutomation();
       const locked = Boolean(api.automationCacheIssue());
-      const knowledgeTasks = automations.tasks.filter(task => task.purpose === 'knowledge');
+      const missingBuiltIns = Object.keys(builtInTitle).filter(purpose => !automations.tasks.some(task => task.purpose === purpose));
       const allTasks = [...automations.tasks, ...automations.legacyTasks.map(task => ({ ...task, legacy: true }))];
       const taskKey = task => `${task.sessionId}:${task.id}`;
       const selected = allTasks.find(task => taskKey(task) === selectedTask) || allTasks[0];
@@ -112,7 +127,7 @@ export function createView(kit) {
       const upcoming = allTasks.filter(task => task.status === 'active' && task.scheduledAt).sort((a, b) => Date.parse(a.scheduledAt) - Date.parse(b.scheduledAt))[0];
       const failed = allTasks.filter(task => dotKind(api.lastRun(task)) === 'err').length;
       const summary = [`${allTasks.length} 个任务`, upcoming && `下一次 ${short(upcoming.scheduledAt)} ${upcoming.title || ''}`.trim(), failed > 0 && `${failed} 个上次没完成`].filter(Boolean).join(' · ');
-      const taskStatus = task => (task.purpose === 'news' && !cardsEnabled ? '所属功能已关闭 · ' : '') + t(task.status === 'active' ? 'taskActive' : task.status === 'paused' ? 'taskPaused' : 'taskInactive');
+      const taskStatus = task => (task.purpose === 'news' && !cardsEnabled ? '所属功能已关闭 · ' : '') + (task.outdated ? t('taskOutdatedShort') + ' · ' : '') + t(task.status === 'active' ? 'taskActive' : task.status === 'paused' ? 'taskPaused' : 'taskInactive');
       const taskActions = task => h(ActionMenu, { label: t('taskActions'), iconOnly: true },
         !task.legacy && automations.controls !== false && ['active', 'paused'].includes(task.status) && button(task.status === 'paused' ? 'taskResume' : 'taskPause', () => toggleTask(task), Boolean(taskDraft)),
         !task.legacy && task.purpose !== 'news' && ['active', 'paused'].includes(task.status) && button('editTask', () => editTask(task), Boolean(taskDraft)),
@@ -130,7 +145,7 @@ export function createView(kit) {
           h('aside', { className: 'ww-task-list', 'aria-label': t('schedule') },
             taskDraft && taskDraftHidden && button('taskDraftResume', () => setTaskDraftHidden(false)),
 
-            !knowledgeTasks.length && h('article', { className: 'ww-task-template' }, h('h3', null, t('knowledgeTask')), h('small', null, t('taskDisabled')), button('enableTask', () => beginTask('knowledge'), locked || Boolean(pending) || automations.legacyTasks.length > 0 || Boolean(taskDraft))),
+            ...missingBuiltIns.map(purpose => h('article', { key: purpose, className: 'ww-task-template' }, h('h3', null, t(builtInTitle[purpose])), h('small', null, t('taskDisabled')), button('enableTask', () => beginTask(purpose), locked || Boolean(pending) || purpose === 'knowledge' && automations.legacyTasks.length > 0 || Boolean(taskDraft)))),
             ...allTasks.map(task => h('article', { key: taskKey(task), className: `ww-task-row${selected && taskKey(task) === taskKey(selected) ? ' ww-selected' : ''}` },
               h('button', { type: 'button', className: 'ww-task-select', 'aria-pressed': selected && taskKey(task) === taskKey(selected), onClick: () => { setSelectedTask(taskKey(task)); setTaskHistory(null); } },
                 h('span', null, statusDot(api.lastRun(task)), task.title || t(task.legacy ? 'taskLegacy' : 'schedule')), h('small', null, taskStatus(task), ' · ', task.status === 'active' ? beijing(task.scheduledAt) : t('rule_' + (task.kind === 'every' ? 'every_seconds' : task.kind === 'after' ? 'at' : task.kind)))), taskActions(task)))),
@@ -139,9 +154,9 @@ export function createView(kit) {
               row(button('taskRecover', recoverTask), button('openTaskSession', () => run(async () => api.openAutomation(pending.sessionId)))),
               taskRecovery?.pending?.sessionId === pending.sessionId && h(React.Fragment, null, help('taskPendingMissing'), !taskDraft && button('taskDraftResume', () => beginTask(pending.purpose), locked))),
         taskDraft && !taskDraftHidden && h('section', { className: 'ww-task-editor', 'aria-label': t(taskDraft.id ? 'editTask' : 'newTask') },
-          h('h2', null, t(taskDraft.id ? 'editTask' : taskDraft.purpose === 'knowledge' ? 'knowledgeTask' : 'newTask')),
-          taskDraft.purpose === 'knowledge' && help('taskScopeHelp'), help('taskModelHelp'),
-          field('taskTitle', taskDraft.title, value => patchTask('title', value), { disabled: busy || taskDraft.purpose === 'knowledge' && !taskDraft.id }),
+          h('h2', null, t(taskDraft.id ? 'editTask' : builtInTitle[taskDraft.purpose] ?? 'newTask')),
+          taskDraft.purpose === 'knowledge' && help('taskScopeHelp'), taskDraft.purpose === 'thinking' && help('thinkingTaskHelp'), help('taskModelHelp'),
+          field('taskTitle', taskDraft.title, value => patchTask('title', value), { disabled: busy || Boolean(builtInTitle[taskDraft.purpose]) && !taskDraft.id }),
           taskDraft.purpose === 'custom' && h('label', { className: 'ww-field' }, t('taskPrompt'), h('textarea', { value: taskDraft.prompt, disabled: busy, onChange: event => patchTask('prompt', event.target.value) })),
           taskDraft.purpose === 'knowledge' && h(WorkspacePicker, { items: workspaces.items || [], scope: taskDraft.workspaceScope, disabled: busy, t, onChange: value => patchTask('workspaceScope', value) }),
           taskDraft.purpose === 'knowledge' && help('workspaceScopeHelp'),
@@ -163,7 +178,8 @@ export function createView(kit) {
                 h('div', { className: 'ww-task-fact' }, h('small', null, t('taskTime')), h('strong', { title: selected.status === 'active' ? beijing(selected.scheduledAt) : undefined }, selected.status === 'active' ? short(selected.scheduledAt) : t(selected.status === 'paused' ? 'taskPaused' : 'taskInactive'))),
                 h('div', { className: `ww-task-fact ww-task-fact-${dotKind(lastRun)}` }, h('small', null, t('taskLastRun')), h('strong', null, statusDot(lastRun), lastRun ? t('runStatus_' + lastRun.status) : t('taskNeverRun')), lastRun && h('span', null, runText(lastRun)))),
               // 内置任务的指令是给模型看的，员工只需要知道它做什么。
-              selected.purpose === 'knowledge' ? help('taskScopeHelp') : selected.purpose === 'news' ? help('newsTaskFixed') : h('p', { className: 'ww-task-prompt' }, selected.displayPrompt ?? selected.prompt),
+              selected.outdated && h('div', { className: 'ww-schedule-off', role: 'status' }, h('div', null, h('strong', null, t(selected.purpose === 'knowledge' ? 'taskOutdatedKnowledge' : 'taskOutdated')), help('taskOutdatedHelp')), button(selected.purpose === 'knowledge' ? 'taskUpgradeKnowledge' : 'taskUpgrade', () => upgradeTask(selected), locked || Boolean(taskDraft), { className: 'ww-primary' })),
+              selected.purpose === 'knowledge' ? help('taskScopeHelp') : selected.purpose === 'thinking' ? help('thinkingTaskHelp') : selected.purpose === 'news' ? help('newsTaskFixed') : h('p', { className: 'ww-task-prompt' }, selected.displayPrompt ?? selected.prompt),
               selected.legacy && help('taskLegacyHelp'),
               h('details', null, h('summary', null, t('taskDetails')), help('scheduleHelp'), help('taskModelHelp'), help('taskStatusHelp')))
               : h('div', { className: 'ww-task-empty' }, h(Glyph, { name: 'spark', size: 28 }), h('h2', null, t('taskSelect')))),

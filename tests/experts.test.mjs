@@ -934,3 +934,96 @@ test('四可选原生fiber关闭与重载不卸载五底座，独立持久域保
   assert.deepEqual(await ctx.whalewingModelWorld.manageModelWorld({ action: 'status' }), world);
   for (const [host, method] of [[previous[0], 'manageAiWeb'], [previous[1], 'manageNews'], [previous[2], 'manageModelWorld']]) await assert.rejects(host[method]({ action: method === 'manageModelWorld' ? 'status' : 'list' }), /卸载/);
 });
+
+// 2026-11-01 专家来源插槽：扩展把专家推给专家团队，和自己的专家一起显示；没装扩展时一切照旧。
+const sourceLabel = { zh: '团队', en: 'Team' };
+async function teamExtension(ctx, setup) {
+  let source;
+  const fiber = await ctx.plugin({ inject: ['whalewing'], apply(current) {
+    current.whalewing.features.register(current, { id: 'team', api: 1, package: 'dsh-fixture-team' });
+    source = setup(current);
+  } });
+  return { fiber, source: () => source };
+}
+const lead = { id: 'lead', revision: 1, name: '团队组长', description: '按团队规范带大家干活', prompt: '团队提示词：先看团队规范再动手', skills: ['whalewing-debugging'] };
+const guide = { id: 'guide', revision: 3, name: '新人向导', description: '带新人熟悉团队', prompt: '团队提示词：耐心解释', readOnly: true };
+
+test('没装专家来源时专家列表、模型工具和管理列表与原来完全相同', async t => {
+  const h = await harness(t);
+  const registry = h.ctx.whalewingExperts;
+  assert.deepEqual(registry.list(), registry.store.list());
+  assert.deepEqual(await registry.manage({ action: 'list' }), registry.store.list(true));
+  assert.ok((await registry.manage({ action: 'list' })).experts.every(expert => !Object.hasOwn(expert, 'source') && !Object.hasOwn(expert, 'readOnly')));
+  // 只登记功能、不登记专家来源的扩展也不改变列表。
+  await h.ctx.plugin({ inject: ['whalewing'], apply(current) { current.whalewing.features.register(current, { id: 'plain', api: 1, package: 'dsh-fixture-plain' }); } });
+  assert.deepEqual(await registry.manage({ action: 'list' }), registry.store.list(true));
+});
+
+test('来源专家和自己的专家一起列出，可以选来开会话并注入团队提示词', async t => {
+  const h = await harness(t);
+  const contract = expertContract(z);
+  const team = await teamExtension(h.ctx, current => { const source = current.whalewing.experts.registerSource(current, { label: sourceLabel, async save() { throw new Error('不该保存'); } }); source.set([lead, guide]); return source; });
+  const listed = contract.result.parse(await h.ctx.whalewingExperts.manage({ action: 'list' }));
+  const fromTeam = listed.experts.filter(expert => expert.source);
+  assert.deepEqual(fromTeam.map(expert => [expert.id, expert.readOnly, expert.source.label.zh, expert.model, expert.mcpServers.length, expert.builtin]), [['team--lead', false, '团队', null, 0, false], ['team--guide', true, '团队', null, 0, false]]);
+  assert.deepEqual(listed.experts.slice(0, -2).map(expert => expert.id), h.ctx.whalewingExperts.store.list(true).experts.map(expert => expert.id), '自己的专家在前，顺序不变');
+  assert.ok(h.ctx.whalewingExperts.list().experts.some(expert => expert.id === 'team--lead'), '模型工具读的列表也有来源专家');
+  assert.equal((await h.run({ expertId: 'team--lead' })).result.kind, 'success');
+  assert.equal(h.state().view.expertId, 'team--lead');
+  await turn(h.ctx, h.agent);
+  const context = () => h.adapter.requests.at(-1).messages.filter(message => message.source.kind === 'whalewing-expert').at(-1).content[0].text;
+  assert.match(context(), /本轮专家身份：团队组长[\s\S]*团队提示词：先看团队规范再动手[\s\S]*whalewing-debugging/);
+  // 扩展换了列表：同一会话下一轮用新的提示词。
+  team.source().set([{ ...lead, revision: 2, prompt: '团队提示词：第二版' }]);
+  await turn(h.ctx, h.agent);
+  assert.match(context(), /团队提示词：第二版/);
+});
+
+test('维护人在专家团队里改来源专家：保存交给扩展，只读、删除、模型绑定和版本冲突都拒收', async t => {
+  const h = await harness(t);
+  const contract = expertContract(z);
+  const saves = [];
+  let closeDuringSave = null;
+  const team = await teamExtension(h.ctx, current => {
+    const source = current.whalewing.experts.registerSource(current, { label: sourceLabel, async save(input, { signal }) {
+      assert.ok(signal instanceof AbortSignal);
+      saves.push(input);
+      if (closeDuringSave) await closeDuringSave();
+      return { ...lead, ...input.expert, id: input.id, revision: input.expectedRevision + 1 };
+    } });
+    source.set([lead, guide]); return source;
+  });
+  const registry = h.ctx.whalewingExperts;
+  const current = registry.get('team--lead');
+  const fields = { name: '团队组长', description: '改过的介绍', avatar: null, prompt: '改过的提示词', model: null, skills: ['whalewing-debugging'], mcpServers: [] };
+  const saved = contract.result.parse(await registry.manage({ action: 'save', id: 'team--lead', expectedRevision: current.revision, expert: fields }));
+  assert.deepEqual(saves.at(-1), { id: 'lead', expectedRevision: 1, expert: { name: '团队组长', description: '改过的介绍', avatar: null, prompt: '改过的提示词', skills: ['whalewing-debugging'] } });
+  assert.deepEqual([saved.expert.id, saved.expert.revision, saved.expert.description], ['team--lead', 2, '改过的介绍']);
+  assert.equal(Object.hasOwn(saved.expert, 'source'), false, '保存回执和自定义专家同一格式');
+  assert.equal((await registry.manage({ action: 'list' })).experts.find(expert => expert.id === 'team--lead').revision, 2, '列表马上读回扩展确认的版本');
+  await assert.rejects(registry.manage({ action: 'save', id: 'team--lead', expectedRevision: 1, expert: fields }), { code: 'CONFLICT' });
+  await assert.rejects(registry.manage({ action: 'save', id: 'team--lead', expectedRevision: 2, expert: { ...fields, model: { provider: 'fixture', model: 'fixture' } } }), { code: 'EXPERT_INPUT' });
+  await assert.rejects(registry.manage({ action: 'save', id: 'team--guide', expectedRevision: 3, expert: { ...fields, name: '新人向导' } }), { code: 'EXPERT_SOURCE_READONLY' });
+  for (const action of ['remove', 'restore']) await assert.rejects(registry.manage({ action, id: 'team--lead', expectedRevision: 2 }), { code: 'EXPERT_SOURCE_READONLY' });
+  assert.equal(saves.length, 1);
+  // 扩展在保存途中被关掉：不认这次结果。
+  closeDuringSave = () => team.fiber.dispose();
+  await assert.rejects(registry.manage({ action: 'save', id: 'team--lead', expectedRevision: 2, expert: fields }), { code: 'EXPERT_SOURCE_CLOSED' });
+});
+
+test('扩展关闭后来源专家撤下，已选它的会话说明原因；重开恢复，卸载后迟到的 set 被拒收', async t => {
+  const h = await harness(t);
+  let team = await teamExtension(h.ctx, current => { const source = current.whalewing.experts.registerSource(current, { label: sourceLabel }); source.set([lead]); return source; });
+  assert.equal((await h.run({ expertId: 'team--lead' })).result.kind, 'success');
+  const old = team.source();
+  await team.fiber.dispose();
+  assert.equal((await h.ctx.whalewingExperts.manage({ action: 'list' })).experts.some(expert => expert.source), false);
+  assert.throws(() => h.ctx.whalewingExperts.get('team--lead'), { code: 'EXPERT_SOURCE_CLOSED' });
+  assert.throws(() => old.set([lead]), { code: 'FEATURE_CLOSED' });
+  assert.equal((await h.run({ expertId: 'team--lead' })).result.kind, 'error', '来源关闭时不能选它');
+  team = await teamExtension(h.ctx, current => { const source = current.whalewing.experts.registerSource(current, { label: sourceLabel }); source.set([lead]); return source; });
+  assert.equal(h.ctx.whalewingExperts.get('team--lead').name, '团队组长');
+  // 来源还在但这位专家被移除：和“专家已删除”同一条路。
+  team.source().set([]);
+  assert.throws(() => h.ctx.whalewingExperts.get('team--lead'), { code: 'EXPERT_DELETED' });
+});

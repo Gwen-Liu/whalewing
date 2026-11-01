@@ -10,13 +10,21 @@ export const digest = value => createHash('sha256').update(value).digest('hex');
 const types = new Set(['capture', 'timeline', 'project', 'area', 'source', 'atomic', 'moc', 'output', 'asset-index']);
 const states = { capture: ['inbox', 'processed', 'archived'], source: ['unread', 'reading', 'processed'], atomic: ['seedling', 'evergreen'], project: ['active', 'paused', 'completed', 'archived'], output: ['draft', 'reviewing', 'published', 'delivered'] };
 /** 初始化预建的通用二级目录；员工可在各区内按需新建同级目录。 */
-export const layout = ['00-系统/索引/任务', '20-项目/工作', '20-项目/学习', '30-领域/职业发展', '40-知识/产品与业务', '40-知识/工作方法', '40-知识/工程与工具', '40-知识/人工智能', '40-知识/学习与成长', '50-来源/书籍', '50-来源/网页', '50-来源/课程与视频', '50-来源/对话与会议', '60-时间线/日记', '60-时间线/周记', '60-时间线/月记', '60-时间线/人生事件', '70-作品/报告', '70-作品/文章', '70-作品/PPT', '80-外部索引/代码项目', '80-外部索引/工作文件', '80-外部索引/数字资产', '90-归档/已完成项目'];
+// 任务记录 2026-11-01 起放在 60-时间线/任务（照第二大脑的改版）；早先建好的 00-系统/索引/任务 保留不动，只是新库不再建。
+export const layout = ['20-项目/工作', '20-项目/学习', '30-领域/个人管理', '30-领域/职业发展', '40-知识/产品与业务', '40-知识/工作方法', '40-知识/工程与工具', '40-知识/人工智能', '40-知识/学习与成长', '50-来源/书籍', '50-来源/网页', '50-来源/课程与视频', '50-来源/对话与会议', '60-时间线/日记', '60-时间线/周记', '60-时间线/月记', '60-时间线/任务', '60-时间线/人生事件', '70-作品/报告', '70-作品/文章', '70-作品/PPT', '80-外部索引/代码项目', '80-外部索引/工作文件', '80-外部索引/数字资产', '90-归档/已完成项目', '90-归档/收件箱结案'];
 const templateRoot = fileURLToPath(new URL('../content/vault/', import.meta.url));
 const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 // 首个随包版本未写 bundle.json；只认这些原样内容（日期还原为 __DATE__）为员工未改动。
 const legacyBundle = new Set(['c9770da34452c86f4a31fa919540da7c75d8a9dc8d120a8822aad41ee14307e4', '69f4777784f8315f716ea7c91103f5705493b4044ebaa710923f8e4fde848b66', '953ad741f9838e278f9f0096e995763068c467bffe2dac4d8cfd95200da2e28c', '08cba17b369e0ff458a7b62e3c29a36b2912c94bed865bd596c568b4482dd47e']);
 const localDate = (now = new Date()) => `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 let bundleSource;
+
+/**
+ * 随包内容分两种：
+ * - 随包文件：00-系统 下的规则、首页、模板、视图和根目录入口，插件维护，升级时更新员工没改过的；
+ * - 起步笔记：其他分区里的骨架（如 30-领域/个人管理 的关于我），只在第一次建一次，之后归员工，插件不再改，删了也不再补。
+ */
+const isSeed = name => name.includes('/') && !name.startsWith('00-系统/');
 
 /** 随包规则、模板、根级入口与 Obsidian 视图；.base 只接受 00-系统/Bases 下的文件。 */
 async function bundleFiles(date) {
@@ -33,16 +41,17 @@ async function bundleFiles(date) {
     return { version: digest(JSON.stringify(files)), files };
   })();
   const source = await bundleSource;
-  const files = source.files.map(({ name, raw }) => {
+  const all = source.files.map(({ name, raw }) => {
     const content = raw.replaceAll('__DATE__', date);
     if (name.includes('/') && name.endsWith('.md')) validateNote(content, name);
     return { name, content };
   });
-  return { version: source.version, files };
+  return { version: source.version, files: all.filter(file => !isSeed(file.name)), seeds: all.filter(file => isSeed(file.name)) };
 }
 
 const undated = text => text.replace(/^(created|updated): \d{4}-\d{2}-\d{2}$/gm, '$1: __DATE__');
-const manifest = (version, files) => JSON.stringify({ schema: 1, version, files }, null, 2) + '\n';
+// seeded：已经建过的起步笔记，之后不再补建（员工删了也不补）。
+const manifest = (version, files, seeded = []) => JSON.stringify({ schema: 1, version, files, seeded: [...seeded].sort() }, null, 2) + '\n';
 const keepCreated = (content, previous) => {
   const created = /^---\n[\s\S]*?^created: (\d{4}-\d{2}-\d{2})$/m.exec(previous.replace(/\r\n/g, '\n'))?.[1];
   return created ? content.replace(/^created: \d{4}-\d{2}-\d{2}$/m, `created: ${created}`) : content;
@@ -83,6 +92,44 @@ export function validateNote(content, relativePath) {
   const title = /^#\s+(.+)$/m.exec(body)?.[1]?.trim();
   if (!title || title !== path.posix.basename(relativePath, '.md')) fail('NOTE_TITLE', '标题须与文件名一致');
   return { ...data, title };
+}
+
+/** 文风检查不看的分区：系统文件、别人的来源、自己的作品、归档。 */
+const styleSkipped = ['00-系统/', '50-来源/', '70-作品/', '90-归档/'];
+const escapeRegExp = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** 从知识库规则“用词对照”表取左列的词。这张表是唯一的一份，员工改了表，检查就按新表数。 */
+export function styleWords(rules) {
+  const at = rules.indexOf('用词对照');
+  if (at < 0) return [];
+  const words = [];
+  let inTable = false;
+  for (const line of rules.slice(at).split('\n')) {
+    if (!line.startsWith('|')) { if (inTable) break; continue; }
+    inTable = true;
+    const cell = line.split('|')[1]?.trim();
+    if (!cell || cell === '别用' || /^:?-+:?$/.test(cell)) continue;
+    words.push(...cell.split('、').map(word => word.trim()).filter(Boolean));
+  }
+  return [...new Set(words)];
+}
+
+/** 数正文里的审计腔。不数：代码、「」里的原话、引用块、链接地址、双链（那是别的笔记的标题），以及员工自己写的“随手记录”“我说过的话”。 */
+export function styleHits(body, words) {
+  const prose = body
+    .replace(/^## (随手记录|我说过的话)\n[\s\S]*?(?=^## |(?![\s\S]))/gm, '')
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/`[^`\n]*`/g, '')
+    .replace(/「[^」]*」/g, '')
+    .replace(/^>.*$/gm, '')
+    .replace(/\]\([^)]*\)/g, ']')
+    .replace(/\[\[[^\]]*\]\]/g, '');
+  const hits = {};
+  for (const word of words) {
+    const count = (prose.match(new RegExp(escapeRegExp(word), /[a-z]/i.test(word) ? 'gi' : 'g')) || []).length;
+    if (count) hits[word] = count;
+  }
+  return hits;
 }
 
 export function relativeName(value, internal = false) {
@@ -171,6 +218,13 @@ function unlinkedView(node) {
   return { ...node, ...(node.children ? { children: node.children.map(unlinkedView) } : {}) };
 }
 
+/** 扩展提供的只读笔记：解析正文和属性；链接不在本库的关系里，不解析，也没有反链。 */
+export function sourceDocument(note) {
+  const current = parseRecord(note);
+  const properties = current.parsed.properties.map(({ key, values }) => ({ key, values: values.map(({ text }) => ({ text })) }));
+  return { path: note.path, content: note.content, hash: note.hash, readOnly: true, source: note.source, view: unlinkedView(current.parsed.view), links: [], anchors: current.parsed.anchors, properties, backlinks: [], totalBacklinks: 0 };
+}
+
 async function exists(file) {
   try { return await fs.lstat(file); }
   catch (error) { if (error.code === 'ENOENT') return null; throw error; }
@@ -242,7 +296,17 @@ export class Vault {
         hashes[name] = digest(content);
         initializedFiles.push(name);
       }
-      await this.atomic('.whalewing/bundle.json', manifest(bundle.version, hashes), signal);
+      // 起步笔记：没有才建；初始化中断后重来时已有的那篇原样保留。
+      const seeded = [];
+      for (const { name, content } of bundle.seeds) {
+        abort(signal);
+        const target = await this.resolve(name, true);
+        await fs.mkdir(path.dirname(target), { recursive: true });
+        if (!(await this.readInternal(name))) await fs.writeFile(target, content, { flag: 'wx', encoding: 'utf8' });
+        seeded.push(name);
+        initializedFiles.push(name);
+      }
+      await this.atomic('.whalewing/bundle.json', manifest(bundle.version, hashes, seeded), signal);
       await this.atomic('.whalewing/settings.json', JSON.stringify({ schema: 1, sources: [] }, null, 2) + '\n', signal);
       await fs.unlink(await this.resolve('.whalewing/initializing.json', true));
       return { initialized: true, root: this.root, files: initializedFiles };
@@ -262,12 +326,14 @@ export class Vault {
     await this.requireReady();
     const date = localDate(), bundle = await bundleFiles(date);
     const recorded = await this.readInternal('.whalewing/bundle.json');
-    if (recorded && JSON.parse(recorded.content).version === bundle.version) return { upgraded: false, added: [], updated: [], kept: [] };
+    if (recorded && JSON.parse(recorded.content).version === bundle.version) return { upgraded: false, added: [], updated: [], kept: [], retired: [] };
     return this.locked(async () => {
       const previous = (await this.readInternal('.whalewing/bundle.json'))?.content;
-      const shipped = previous ? JSON.parse(previous).files || {} : null;
+      const previousManifest = previous ? JSON.parse(previous) : null;
+      const shipped = previousManifest ? previousManifest.files || {} : null;
+      const seeded = new Set(previousManifest?.seeded ?? []);
       for (const folder of [...zones, ...layout]) await fs.mkdir(await this.resolve(folder, true), { recursive: true });
-      const hashes = {}, added = [], updated = [], kept = [];
+      const hashes = {}, added = [], updated = [], kept = [], retired = [];
       for (const { name, content } of bundle.files) {
         abort(signal);
         const current = await this.readInternal(name);
@@ -289,8 +355,26 @@ export class Vault {
         await this.atomic(name, next, signal);
         hashes[name] = digest(next); updated.push(name);
       }
-      await this.atomic('.whalewing/bundle.json', manifest(bundle.version, hashes), signal);
-      return { upgraded: true, added, updated, kept };
+      // 新版不再随包的文件（改名或删掉的模板）：员工没改过就收走（先留备份），改过的原样留给员工。
+      const stillShipped = new Set(bundle.files.map(file => file.name));
+      for (const [name, hash] of Object.entries(shipped ?? {})) {
+        abort(signal);
+        if (stillShipped.has(name) || isSeed(name)) continue;
+        const existing = await this.readInternal(name).catch(() => null);
+        if (!existing || existing.hash !== hash) continue;
+        await this.backup(name, existing, signal);
+        await fs.unlink(await this.resolve(name, true));
+        retired.push(name);
+      }
+      // 起步笔记只建一次：没建过、库里也没有同名文件时才建，员工后来删了不再补。
+      for (const { name, content } of bundle.seeds) {
+        abort(signal);
+        if (seeded.has(name)) continue;
+        if (!(await this.readInternal(name))) { await this.atomic(name, content, signal); added.push(name); }
+        seeded.add(name);
+      }
+      await this.atomic('.whalewing/bundle.json', manifest(bundle.version, hashes, seeded), signal);
+      return { upgraded: true, added, updated, kept, retired };
     }, signal);
   }
 
@@ -656,7 +740,24 @@ export class Vault {
       } catch (error) { issues.push(`${name}：${error.message}`); }
       if (issues.length >= this.limits.maxResults) break;
     }
-    return { valid: issues.length === 0, issues: issues.slice(0, this.limits.maxResults), notes: records.length };
+    // 文风只提示，不算出错：按规则里的用词表数日记、任务记录、知识笔记这些员工自己的笔记。
+    const rules = records.find(record => record.path === '00-系统/规则/知识库规则.md');
+    const words = rules ? styleWords(rules.content) : [];
+    const flagged = [];
+    if (words.length) {
+      for (const record of records) {
+        abort(signal);
+        if (!record.path.includes('/') || styleSkipped.some(prefix => record.path.startsWith(prefix))) continue;
+        let body;
+        try { ({ body } = frontmatter(record.content)); } catch { continue; }
+        const hits = styleHits(body, words);
+        if (Object.keys(hits).length) flagged.push({ path: record.path, words: hits });
+      }
+    }
+    return {
+      valid: issues.length === 0, issues: issues.slice(0, this.limits.maxResults), notes: records.length,
+      style: { words: words.length, total: flagged.length, notes: flagged.slice(0, this.limits.maxResults) },
+    };
   }
 
   async settings() {

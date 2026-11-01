@@ -23,6 +23,8 @@ export function createShell(require, validator, avatars) {
   function registerUi(ctx) {
       ctx.effect(() => ctx.locale.register(NS, { zh, en }), '鲸翼文案');
       const t = ctx.locale.bind(NS);
+      // 扩展登记的来源名是 { zh, en }，按 DSH 当前语言取一份。
+      kit.resolveText = value => ctx.locale.resolveText(value);
       const { bridge, clients, workbenchSession } = createClients(ctx, t, z, explainError);
       let toast = null;
       let toastTimer;

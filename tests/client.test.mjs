@@ -658,7 +658,9 @@ test('定时默认模板与组件缺失帮助不创建会话、不读取知识�
     await button(f.render(), '定时任务').props.onClick();
     const sections = nodes(f.render()).filter(node => node.type === 'h2');
     assert.equal(sections[0].props.children[0], '定时任务');
-    assert.ok(JSON.stringify(f.render()).includes('DSH 工作知识整理'));
+    // 两个内置任务都默认关闭：每日记忆和每周思考各一张“设置并启用”。
+    const templates = nodes(f.render()).filter(node => node.props.className === 'ww-task-template');
+    assert.deepEqual(templates.map(node => nodes(node).find(child => child.type === 'h3').props.children.join('')), ['每日记忆', '每周思考']);
     assert.equal(button(f.render(), '设置并启用').props.disabled, false);
     assert.equal(button(f.render(), '新增定时任务').props.disabled, false);
     assert.deepEqual(f.calls, [['automation', { action: 'catalog' }]]);
@@ -706,7 +708,7 @@ test('定时内置整理只提交时间选择，采用北京时间默认且不�
   const f = await fixture({ automation: async input => {
     if (input.action === 'catalog') return taskCatalog(tasks);
     submitted = input;
-    const record = taskRecord({ title: 'DSH 工作知识整理', prompt: '仅由后端owner给出的指令' });
+    const record = taskRecord({ title: '每日记忆', prompt: '仅由后端owner给出的指令' });
     tasks.push({ ...record, sessionId: input.sessionId, status: 'active', purpose: 'knowledge' });
     return { ok: true, value: { task: record, recovered: false } };
   } });
@@ -718,8 +720,59 @@ test('定时内置整理只提交时间选择，采用北京时间默认且不�
   assert.equal(nodes(f.render()).some(node => node.type === 'textarea'), false);
   await button(f.render(), '确认创建计划').props.onClick();
   assert.equal(submitted.purpose, 'knowledge');
-  assert.deepEqual(submitted.spec, { daily: { time: '00:15:00', time_zone: 'Asia/Shanghai' } });
+  assert.deepEqual(submitted.spec, { daily: { time: '01:00:00', time_zone: 'Asia/Shanghai' } });
   assert.equal(f.calls.some(([kind]) => ['knowledge', 'expert', 'prompt'].includes(kind)), false);
+});
+
+// 2026-11-01 照第二大脑改版新增：每周思考默认每周一 07:00，只读知识库，没有处理范围，名称和指令由插件给。
+test('每周思考：默认每周一 07:00 北京时间，不带处理范围，名称不能改，只提交时间', async () => {
+  const tasks = []; let submitted;
+  const workspaceState = { items: [{ workspaceId: 'w0', name: '甲', path: 'E:/甲', sessionIds: [] }] };
+  const f = await fixture({ workspaceState, automation: async input => {
+    if (input.action === 'catalog') return taskCatalog(tasks);
+    submitted = input;
+    const record = taskRecord({ title: '每周思考', kind: 'weekly', weekdays: [1], time: '07:00:00.000' });
+    tasks.push({ ...record, sessionId: input.sessionId, status: 'active', purpose: 'thinking' });
+    return { ok: true, value: { task: record, recovered: false } };
+  } });
+  await button(f.render(), '定时任务').props.onClick();
+  const card = nodes(f.render()).filter(node => node.props.className === 'ww-task-template').find(node => JSON.stringify(node).includes('每周思考'));
+  nodes(card).find(node => node.type === 'button').props.onClick();
+  const form = JSON.stringify(f.render());
+  assert.ok(form.includes('不读 DSH 对话'), '说明它只读写个人知识库');
+  assert.equal(form.includes('全部工作区'), false, '没有处理范围');
+  assert.equal(taskField(f, '任务名称').props.value, '每周思考'); assert.equal(taskField(f, '任务名称').props.disabled, true);
+  assert.equal(taskField(f, '时间规则').props.value, 'weekly'); assert.equal(taskField(f, '星期（1 周一至 7 周日）').props.value, '1');
+  assert.equal(nodes(f.render()).some(node => node.type === 'textarea'), false);
+  await button(f.render(), '确认创建计划').props.onClick();
+  assert.equal(submitted.purpose, 'thinking');
+  assert.deepEqual(submitted.spec, { weekly: { time: '07:00:00', time_zone: 'Asia/Shanghai', weekdays: [1] } });
+  assert.equal(submitted.workspaceScope, undefined);
+  const after = nodes(f.render()).filter(node => node.props.className === 'ww-task-template');
+  assert.deepEqual(after.map(node => nodes(node).find(child => child.type === 'h3').props.children.join('')), ['每日记忆'], '建好后只剩每日记忆的模板');
+});
+
+test('升级前的“DSH 工作知识整理”：列表写“可换新版”，详情点“换成每日记忆”只提交一次保存，不带指令和范围', async () => {
+  const scope = { mode: 'all', excludedWorkspaceIds: [] };
+  let record = taskRecord({ title: 'DSH 工作知识整理', prompt: '旧版指令' }), outdated = true, updated;
+  const f = await fixture({ automation: async input => {
+    if (input.action === 'catalog') return taskCatalog([{ ...record, sessionId: 'knowledge-1', purpose: 'knowledge', status: 'active', workspaceScope: scope, ...(outdated ? { outdated: true } : {}) }]);
+    if (input.action === 'read') return { ok: true, value: { task: record, purpose: 'knowledge', status: 'active', displayPrompt: record.prompt, workspaceScope: scope } };
+    assert.equal(input.action, 'update'); updated = input;
+    record = { ...record, title: '每日记忆', prompt: '新版指令' }; outdated = false;
+    return { ok: true, value: { id: record.id, updated: true, record } };
+  } });
+  await button(f.render(), '定时任务').props.onClick();
+  const page = JSON.stringify(f.render());
+  assert.ok(page.includes('可换新版'));
+  assert.ok(page.includes('“DSH 工作知识整理”已换成每日记忆'));
+  assert.ok(page.includes('处理范围和时间照旧'));
+  await button(f.render(), '换成每日记忆').props.onClick();
+  assert.deepEqual(Object.keys(updated).sort(), ['action', 'expected', 'expectedStatus', 'id', 'sessionId'], '不带名称、指令和处理范围，由插件换上新版');
+  assert.deepEqual(updated.expected, taskRecord({ title: 'DSH 工作知识整理', prompt: '旧版指令' }));
+  const done = JSON.stringify(f.render());
+  assert.equal(done.includes('可换新版'), false); assert.equal(done.includes('换成每日记忆'), false);
+  assert.ok(done.includes('已换成新版'));
 });
 
 test('定时创建回执未知只保存身份，刷新和重载回读已接受计划不重投', async () => {
@@ -811,7 +864,7 @@ test('定时编辑使用完整原生record做CAS，冲突回读保留草稿且�
 });
 
 test('定时编辑时间适配原生change，知识指令不可编辑且写后回读失败保留表单', async () => {
-  let record = taskRecord({ title: 'DSH 工作知识整理', prompt: '后端知识指令' }), breakRead = false;
+  let record = taskRecord({ title: '每日记忆', prompt: '后端知识指令' }), breakRead = false;
   const updates = [];
   const f = await fixture({ automation: async input => {
     if (input.action === 'catalog') return taskCatalog([{ ...record, sessionId: 'auto-knowledge', status: 'active', purpose: 'knowledge' }]);
@@ -831,7 +884,7 @@ test('定时编辑时间适配原生change，知识指令不可编辑且写后�
 });
 
 test('定时取消明确说明历史影响，失败保留卡片，成功回读后恢复未启用模板', async () => {
-  let tasks = [{ ...taskRecord({ title: 'DSH 工作知识整理' }), sessionId: 'knowledge-1', purpose: 'knowledge', status: 'active' }], failDelete = true;
+  let tasks = [{ ...taskRecord({ title: '每日记忆' }), sessionId: 'knowledge-1', purpose: 'knowledge', status: 'active' }], failDelete = true;
   const f = await fixture({ automation: async input => {
     if (input.action === 'catalog') return taskCatalog(tasks);
     assert.equal(input.action, 'delete');
@@ -1059,6 +1112,26 @@ test('首次进入个人知识直连文件服务，不准备会话或选择专�
   assert.equal(f.calls.some(([kind]) => ['expert', 'open', 'projections', 'claim'].includes(kind)), false);
   assert.deepEqual(f.calls, [['knowledge', { action: 'status' }], ['knowledge', { action: 'graph', query: '', offset: 0 }]]);
   assert.ok(nodes(f.render()).some(node => node.type === 'section' && node.props['aria-label'] === '关系图谱'));
+});
+
+// 2026-11-01 功能测试发现：文风结果的函数放在页面组件外面，拿不到 h，弹窗一画就整页空白。这里真的画一次检查弹窗。
+test('检查弹窗写出属性链接结果和文风结果：用了不推荐词的列出篇名和词数，没用到的写一句没问题', async () => {
+  for (const [style, expected] of [
+    [{ words: 22, total: 1, notes: [{ path: '60-时间线/日记/2026/2026-11-01.md', words: { 回读: 1, 口径: 2 } }] }, ['文风：1 篇用了规则里不推荐的词，可以对照规则的“用词对照”改成平常话', '60-时间线/日记/2026/2026-11-01.md：回读×1、口径×2']],
+    [{ words: 22, total: 0, notes: [] }, ['文风：没有用到规则里不推荐的词']],
+  ]) {
+    const f = await fixture({ knowledge: async input => {
+      if (input.action === 'graph') return { ok: true, value: { nodes: [], edges: [], total: 0, offset: 0, truncated: false } };
+      if (input.action === 'search') return { ok: true, value: { notes: [], truncated: false, total: 0 } };
+      if (input.action === 'validate') return { ok: true, value: { valid: true, issues: [], notes: 30, style } };
+      return { ok: true, value: { initialized: true, root: 'fixture-vault' } };
+    } });
+    await button(f.render(), '个人知识').props.onClick();
+    await button(f.render(), '检查属性与链接').props.onClick();
+    const text = JSON.stringify(f.render());
+    assert.ok(text.includes('知识检查'), '弹窗打开了');
+    for (const line of expected) assert.ok(text.includes(line), line);
+  }
 });
 
 test('知识页不受旧工作台未认领或会话服务失败阻塞，取消信号传到Remote', async () => {
@@ -3269,18 +3342,18 @@ test('定时多选全选与排除通过真实表单传入API，新增工作区�
   const workspaceState = { items: ['甲', '乙', '丙'].map((name, i) => ({ workspaceId: 'w' + i, name, path: 'E:/'+name, sessionIds: [] })) }; const tasks=[]; let submitted;
   const f=await fixture({workspaceState,automation:async input=>{
     if(input.action==='catalog')return taskCatalog(tasks);
-    submitted=input;const task=taskRecord({title:'DSH 工作知识整理'});tasks.push({...task,sessionId:input.sessionId,purpose:'knowledge',status:'active',workspaceScope:input.workspaceScope});return {ok:true,value:{task,recovered:false}};
+    submitted=input;const task=taskRecord({title:'每日记忆'});tasks.push({...task,sessionId:input.sessionId,purpose:'knowledge',status:'active',workspaceScope:input.workspaceScope});return {ok:true,value:{task,recovered:false}};
   }});
   await button(f.render(),'定时任务').props.onClick();button(f.render(),'设置并启用').props.onClick();
   assert.equal(checkboxLabel(f,'全部工作区').props.checked,true);assert.ok(nodes(f.render()).some(node=>node.props['aria-haspopup']==='dialog'&&node.props['aria-label']==='已选 3 个工作区'));
   checkboxLabel(f,'乙').props.onChange({target:{checked:false}});assert.equal(checkboxLabel(f,'乙').props.checked,false);assert.equal(checkboxLabel(f,'甲').props.checked,true);
   workspaceState.items.push({workspaceId:'w3',name:'丁',path:'E:/丁',sessionIds:[]});assert.equal(checkboxLabel(f,'丁').props.checked,true);
   await button(f.render(),'确认创建计划').props.onClick();
-  assert.deepEqual(submitted.workspaceScope,{mode:'all',excludedWorkspaceIds:['w1']});assert.deepEqual(submitted.spec,{daily:{time:'00:15:00',time_zone:'Asia/Shanghai'}});
+  assert.deepEqual(submitted.workspaceScope,{mode:'all',excludedWorkspaceIds:['w1']});assert.deepEqual(submitted.spec,{daily:{time:'01:00:00',time_zone:'Asia/Shanghai'}});
 });
 
 test('定时显式多选和编辑保留处理范围，空选择拒收且不创建会话',async()=>{
-  const workspaceState={items:['甲','乙','丙'].map((name,i)=>({workspaceId:'w'+i,name,path:'E:/'+name,sessionIds:[]}))};let scope={mode:'selected',workspaceIds:['w0','w2']};const record=taskRecord({title:'DSH 工作知识整理'});let updated;
+  const workspaceState={items:['甲','乙','丙'].map((name,i)=>({workspaceId:'w'+i,name,path:'E:/'+name,sessionIds:[]}))};let scope={mode:'selected',workspaceIds:['w0','w2']};const record=taskRecord({title:'每日记忆'});let updated;
   const f=await fixture({workspaceState,automation:async input=>{
     if(input.action==='catalog')return taskCatalog([{...record,sessionId:'task-one',purpose:'knowledge',status:'active',workspaceScope:scope}]);
     if(input.action==='read')return {ok:true,value:{task:record,purpose:'knowledge',status:'active',displayPrompt:record.prompt,workspaceScope:scope}};
@@ -3291,7 +3364,7 @@ test('定时显式多选和编辑保留处理范围，空选择拒收且不创�
   assert.deepEqual(updated.workspaceScope,{mode:'selected',workspaceIds:['w0','w1']});assert.deepEqual(updated.expected,record);
   const empty=await fixture({workspaceState});await button(empty.render(),'定时任务').props.onClick();button(empty.render(),'设置并启用').props.onClick();
   checkboxLabel(empty,'全部工作区').props.onChange({target:{checked:false}});
-  await button(empty.render(),'确认创建计划').props.onClick();assert.equal(empty.calls.some(([kind])=>kind==='create'),false);assert.ok(nodes(empty.render()).some(node=>node.props.role==='alert'));assert.equal(taskField(empty,'任务名称').props.value,'DSH 工作知识整理');
+  await button(empty.render(),'确认创建计划').props.onClick();assert.equal(empty.calls.some(([kind])=>kind==='create'),false);assert.ok(nodes(empty.render()).some(node=>node.props.role==='alert'));assert.equal(taskField(empty,'任务名称').props.value,'每日记忆');
 });
 
 test('自建任务不显示处理范围：新建不带工作区，旧任务编辑时说明并去掉原清单',async()=>{

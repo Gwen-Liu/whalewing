@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { FileSystemSkillProvider } from '@deepseek-ai/dsh-skill-filesystem';
 import { fail } from './vault.js';
+import { isInside } from './skill-roots.js';
 
 
 
@@ -79,14 +80,10 @@ export class WhalewingSkillProvider extends FileSystemSkillProvider {
   allowed(candidate) {
     if (this.closed) return false;
     if (candidate.source === 'bundled') {
-      const location = path.resolve(candidate.locator.path);
-      const installed = path.relative(this.library.builtinDir, location);
-      if (!installed.startsWith('..' + path.sep) && !path.isAbsolute(installed)) {
-        return this.bundledEnabled(candidate);
-      } else {
-        const active = [...this.extensionRoots()].some(directory => { const child = path.relative(directory, location); return child && !child.startsWith('..' + path.sep) && !path.isAbsolute(child); });
-        return active;
-      }
+      // 目录和技能位置可能一边是短文件名或联接、一边是真实路径，按真实路径比较。
+      const location = candidate.locator.path;
+      if (isInside(this.library.builtinDir, location)) return this.bundledEnabled(candidate);
+      return [...this.extensionRoots()].some(directory => isInside(directory, location));
     }
     return true;
   }

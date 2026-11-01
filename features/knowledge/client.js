@@ -5,9 +5,20 @@ import { registerFeature } from '../../src/shell/feature.js';
 import { createMarkdown } from '../../src/shell/markdown.js';
 import { useFeature } from '../../src/shell/feature.js';
 
+/** 检查弹窗里的文风结果：几篇用了规则里不推荐的词，各是哪些（最多列十篇）。 */
+function styleLines(h, validation, t) {
+  const style = validation.style;
+  if (!style?.words) return [];
+  if (!style.total) return [h('p', { key: 'style' }, t('styleClean'))];
+  return [h('p', { key: 'style' }, t('styleFlagged', { count: style.total })),
+    ...style.notes.slice(0, 10).map(note => h('p', { key: `style-${note.path}`, className: 'ww-muted' }, `${note.path}：${Object.entries(note.words).map(([word, count]) => `${word}×${count}`).join('、')}`))];
+}
+
 /** 本页持有自己的草稿、动作和恢复状态；切走时不把状态交给外壳。 */
 export function createView(kit) {
   const { React, Glyph, ActionMenu, Modal, ConfirmDialog } = kit;
+  // 扩展登记的来源名是 { zh, en }；取不到语言服务时用中文。
+  const labelText = label => kit.resolveText ? kit.resolveText(label) : label.zh;
   const GraphCanvas = createGraphCanvas(React);
   const { createElement: h, useState, useRef, useEffect, useLayoutEffect, useSyncExternalStore } = React;
   const plainText = node => node.value ?? (node.children || []).map(plainText).join('');
@@ -175,7 +186,14 @@ export function createView(kit) {
       })
       : api.request(id, { action, ...extra });
     const refreshNotes = async () => command('search', { query });
-    const applyNotes = (value) => { setNotes(value.notes); setTruncated(Boolean(value.truncated)); };
+    // 扩展的搜索出了问题只在右上角说明，个人结果照常显示。
+    // 来源笔记的路径以“@功能id/”开头，来源名在结果顶层；个人笔记原样不动。
+    const applyNotes = (value) => {
+      const labels = value.sourceLabels;
+      setNotes(labels ? value.notes.map(item => item.path.startsWith('@') ? { ...item, sourceTag: labels[item.path.slice(1, item.path.indexOf('/'))] } : item) : value.notes);
+      setTruncated(Boolean(value.truncated));
+      if (value.sourceIssues?.length) notify(value.sourceIssues.join('；'), { kind: 'error' });
+    };
     // 列表是派生视图，其失败不否定已经提交并回读的单文件结果。
     const refreshAfterMutation = async () => {
       try { return { found: await refreshNotes() }; }
@@ -331,23 +349,23 @@ export function createView(kit) {
         button('search', () => run(async () => { const value = await refreshNotes(); return () => applyNotes(value); }), !status?.initialized, { className: 'ww-ghost' }),
         button('newNote', newNote, !status?.initialized || dirty || Boolean(readbackPath), { className: 'ww-ghost' }),
         button('graph', () => loadGraph(''), !status?.initialized || dirty || conflict || Boolean(readbackPath), { className: 'ww-ghost' }),
-        h(ActionMenu, { label: t('libraryTools'), iconOnly: true }, button('localGraph', () => loadGraph(note.path), !note || dirty || conflict || Boolean(readbackPath)), button('validate', () => run(async () => { const value = await command('validate'); return () => setValidation(value); }), !status?.initialized),
+        h(ActionMenu, { label: t('libraryTools'), iconOnly: true }, button('localGraph', () => loadGraph(note.path), !note || Boolean(note.source) || dirty || conflict || Boolean(readbackPath)), button('validate', () => run(async () => { const value = await command('validate'); return () => setValidation(value); }), !status?.initialized),
           h('details', null, h('summary', null, t('restore')), row(field('restorePath', restorePath, setRestorePath), button('restore', () => run(async () => { await command('restore', { path: restorePath, expectedHash: '' }); const value = await readAfterMutation(restorePath); const refreshed = await refreshAfterMutation(); return () => { setNote(value); setPath(value.path); setContent(value.content); setConflict(false); setEditing(false); setGraph(null); graphRequest.current = null; applyRefreshed(refreshed); }; }, 'restored'), !status?.initialized || !restorePath.trim() || dirty || Boolean(readbackPath) || Boolean(note?.readOnly && note.path === restorePath)))),
           h('details', null, h('summary', null, t('root')), status ? h('p', null, status.root, status.locationNotice && h('span', null, status.locationNotice)) : help('preparing')))),
-      validation && h(Modal, { title: t('validation'), onClose: () => setValidation(null), className: 'ww-confirm' }, h('div', { className: 'ww-confirm-body' }, h('p', null, t(validation.valid ? 'valid' : 'invalid', { count: validation.notes })), ...(validation.issues || []).map((issue, i) => h('p', { key: i }, issue))), h('footer', { className: 'ww-dialog-actions' }, button('closePanel', () => setValidation(null), false, { className: 'ww-primary' }))),
+      validation && h(Modal, { title: t('validation'), onClose: () => setValidation(null), className: 'ww-confirm' }, h('div', { className: 'ww-confirm-body' }, h('p', null, t(validation.valid ? 'valid' : 'invalid', { count: validation.notes })), ...(validation.issues || []).map((issue, i) => h('p', { key: i }, issue)), ...styleLines(h, validation, t)), h('footer', { className: 'ww-dialog-actions' }, button('closePanel', () => setValidation(null), false, { className: 'ww-primary' }))),
       // search 的截断只描述当前搜索列表，不代表独立目录或图谱缺失数据。
       Boolean(query.trim()) && notes.length > 0 && truncated && help('truncated'),
       h('div', { className: 'ww-knowledge-split', ref: directorySplit.frame, style: { '--ww-directory-width': `${directorySplit.width}px` } }, h('aside', { className: 'ww-note-tree', 'aria-label': t('notes') },
         query.trim() ? notes.length ? notes.map(item => h('div', { key: item.path, className: 'ww-note-row' },
           h('input', { type: 'checkbox', checked: selectedPaths.includes(item.path), 'aria-label': t('selectForQuestion', { name: item.title || item.path }), disabled: busy || (!selectedPaths.includes(item.path) && selectedPaths.length >= 12), onChange: event => { setSelectedPaths(event.target.checked ? [...selectedPaths, item.path] : selectedPaths.filter(value => value !== item.path)); } }),
-          h('button', { type: 'button', className: 'ww-note', disabled: busy || dirty, title: `${item.title || item.path}\n${item.path}`, onClick: () => selectNote(item) }, h('span', { className: 'ww-tree-title' }, item.title || item.path)))) : help('emptyNotes') : h(Directory, { api, t, selected: path, disabled: busy || dirty, onSelect: selectNote, selectedPaths, version: directoryVersion, onToggle: (name, selected) => { setSelectedPaths(value => selected ? [...value, name] : value.filter(path => path !== name)); } })),
+          h('button', { type: 'button', className: 'ww-note', disabled: busy || dirty, title: `${item.title || item.path}\n${item.path}`, onClick: () => selectNote(item) }, h('span', { className: 'ww-tree-title' }, item.title || item.path), item.sourceTag && h('span', { className: 'ww-tag' }, labelText(item.sourceTag))))) : help('emptyNotes') : h(Directory, { api, t, selected: path, disabled: busy || dirty, onSelect: selectNote, selectedPaths, version: directoryVersion, onToggle: (name, selected) => { setSelectedPaths(value => selected ? [...value, name] : value.filter(path => path !== name)); } })),
         h('div', { ...directorySplit.separator, className: 'ww-directory-separator', 'aria-label': t('directoryResize') }),
         h('div', { className: graphView ? 'ww-note-canvas ww-graph-mode' : 'ww-note-canvas' }, graphView || h(React.Fragment, null, h('div', { className: 'ww-note-toolbar' }, h('details', { className: 'ww-note-path', open: editing }, h('summary', { title: path }, h(Glyph, { name: 'file', size: 14 }), path.split('/').at(-1) || t('noteDetails')), field('notePath', path, setPath, { readOnly: Boolean(note || readbackPath) })),
           row(button('read', () => note ? setEditing(false) : selectNote({ path }), !path.trim() || dirty), button('edit', () => { if (!note?.readOnly) setEditing(true); }, !status?.initialized || Boolean(note?.readOnly)), button('back', () => selectNote(history.current.at(-1), true), !history.current.length || dirty)),
             dirty && h('span', { className: 'ww-draft-chip', role: 'status' }, t('draftDirty'), h('button', { type: 'button', onClick: () => setConfirm({ kind: 'draft' }) }, t('discard'))),
             note && !editing && h('button', { type: 'button', className: 'ww-side-toggle', 'aria-pressed': sideShown, title: sideShown ? '收起目录与链接' : '显示目录与链接', 'aria-label': sideShown ? '收起目录与链接' : '显示目录与链接', onClick: toggleSide }, h(Glyph, { name: 'panel', size: 16 }))),
           h('div', { className: ['ww-note-body', sideShown && (readerWide ? 'ww-with-side' : 'ww-side-overlay')].filter(Boolean).join(' ') }, h('div', { className: 'ww-note-scroll', ref: scrollRef, onScroll: spy },
-          note?.readOnly && h('div', { className: 'ww-notice', role: 'status' }, t('noteReadOnly')),
+          note?.readOnly && h('div', { className: 'ww-notice', role: 'status' }, note.source ? t('noteSourceReadOnly', { name: labelText(note.source.label) }) : t('noteReadOnly')),
           editing ? h('label', null, t('content'), h('textarea', { 'aria-label': t('content'), value: content, disabled: busy || !status?.initialized, onChange: (event) => setContent(event.target.value), spellCheck: false })) : note ? h('div', { className: 'ww-reader', 'aria-label': t('reading') }, readerBody()) : help('selectNote'),
           linkIssue && h('div', { className: 'ww-notice', role: 'status' }, t(linkIssue.status === 'ambiguous' ? 'linkAmbiguous' : linkIssue.status.startsWith('fragment_') ? 'fragmentMissing' : linkIssue.status === 'attachment' ? 'linkAttachment' : linkIssue.status === 'invalid' ? 'invalidLink' : 'linkMissing'), `：${linkIssue.target}`,
             ...linkIssue.candidates.map(candidate => h('button', { type: 'button', key: candidate, disabled: busy || dirty, onClick: () => selectNote({ path: candidate }) }, candidate)), linkIssue.candidateTotal > linkIssue.candidates.length && help('truncated'), linkIssue.path && button('read', () => selectNote({ path: linkIssue.path }), dirty)),

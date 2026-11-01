@@ -7,7 +7,8 @@ import configSchema from '@deepseek-ai/schemastery';
 import { bindTypertRemote, RemoteError } from '@deepseek-ai/dsh-typert-protocol';
 import { commonPrompt, expertTemplates, retiredBuiltinIds } from '../../content/roles.js';
 import { expertContract } from './contract.js';
-import { ExpertStore, expertDomain, expertChangeDomain, expertError } from './store.js';
+import { ExpertStore, expertDomain, expertChangeDomain, expertError, validateAvatar } from './store.js';
+import { isSourceExpertId } from '../../src/extension-sources.js';
 
 export const inject = ['whalewing', 'commands', 'sessionProjections', 'sessions', 'agents', 'storageDomain', 'typert', 'skills', 'tools', 'sessionController', 'agentDefaultModel', 'llm'];
 export const Config = configSchema.object({ operationMs: configSchema.number().min(1000).max(120000).default(15000), maxExperts: configSchema.number().step(1).min(7).max(1000).default(200) });
@@ -85,7 +86,33 @@ export class ExpertRegistry extends Service {
     this.typertRemote = bindTypertRemote(this, 'whalewingExperts', { namespace: 'whalewingExperts' });
     ctx.typert.register(contract.host);
   }
-  get(id) { return this.store.get(id); }
+  /** 扩展登记的专家来源在核心里；没有来源时专家列表和读取与原来完全一样。 */
+  sources() { return this.ctx.get('whalewing')?.sources; }
+  get(id) {
+    if (!isSourceExpertId(id)) return this.store.get(id);
+    const sources = this.sources();
+    if (!sources) throw expertError('EXPERT_SOURCE_CLOSED', '这位专家来自已关闭或卸载的扩展；请重新开启扩展，或改选其他专家');
+    return sources.getExpert(id);
+  }
+  withSources(value) {
+    const extra = this.sources()?.expertList() ?? [];
+    return extra.length ? { ...value, experts: [...value.experts, ...extra] } : value;
+  }
+  /** 维护人在专家团队里改扩展提供的专家：校验同自定义专家，模型和 MCP 不绑定，保存交给扩展。 */
+  async saveSource(input, signal) {
+    const sources = this.sources();
+    const previous = this.get(input.id);
+    if (previous.readOnly) throw expertError('EXPERT_SOURCE_READONLY', `这位专家来自「${previous.source.label.zh}」，只能查看；可以“复制为我的专家”后再改`);
+    if (previous.revision !== input.expectedRevision) throw expertError('CONFLICT', '专家已被另一处修改，请保留当前表单并刷新后重试');
+    const fields = contract.fields.parse(input.expert);
+    if (fields.model !== null || fields.mcpServers.length) throw expertError('EXPERT_INPUT', '扩展提供的专家不绑定模型和 MCP；需要的话先“复制为我的专家”');
+    const catalog = await this.catalog(undefined, signal);
+    for (const name of fields.skills) if (!previous.skills.includes(name) && !catalog.skills.some(item => item.name === name)) throw expertError('BINDING_UNAVAILABLE', `技能 ${name} 当前不可用，未修改绑定`);
+    if (fields.avatar !== previous.avatar) fields.avatar = await validateAvatar(fields.avatar);
+    signal?.throwIfAborted();
+    const { source: _source, readOnly: _readOnly, ...expert } = await sources.saveExpert(input.id, { expectedRevision: input.expectedRevision, expert: { name: fields.name, description: fields.description, avatar: fields.avatar, prompt: fields.prompt, skills: [...new Set(fields.skills)] } }, signal);
+    return { expert };
+  }
   /** 管理能力只消费已完成的普通主会话选择，不自行重建专家身份。 */
   selectedFor(agent) {
     if (!agent || this.ctx.agents.get(agent.id) !== agent || isSubagent(this.ctx, agent)) return null;
@@ -105,7 +132,7 @@ export class ExpertRegistry extends Service {
     const owner = this.ctx.get('mcpResources');
     return !owner || typeof owner.catalog === 'function';
   }
-  list() { return this.store.list(); }
+  list() { return this.withSources(this.store.list()); }
   /** 客户端图片准入和 Host 组装共用此准备；默认值只读宿主，不保存另一份路由配置。 */
   async prepareModel(input, signal) {
     signal = AbortSignal.any([this.closing.signal, AbortSignal.timeout(this.config.operationMs), ...(signal ? [signal] : [])]);
@@ -183,10 +210,14 @@ export class ExpertRegistry extends Service {
       const input = contract.input.parse(raw);
       signal?.throwIfAborted();
       // 管理界面另要“改过哪些、原版有没有更新”；模型工具读的 list() 不带这些。
-      if (input.action === 'list') return this.store.list(true);
+      if (input.action === 'list') return this.withSources(this.store.list(true));
       if (input.action === 'templates') return { templates: expertTemplates.map(item => ({ ...item, skills: [...item.skills] })) };
       if (input.action === 'catalog') return await this.catalog(input.sessionId, signal);
       if (input.action === 'prepare_model') return await this.prepareModel(input, signal);
+      if (['save', 'remove', 'restore'].includes(input.action) && isSourceExpertId(input.id)) {
+        if (input.action !== 'save') throw expertError('EXPERT_SOURCE_READONLY', '扩展提供的专家不能在这里删除或恢复原版；请到提供它的扩展里处理');
+        return await this.saveSource(input, signal);
+      }
       if (input.action === 'save') {
         const previous = this.store.previousForSave(input);
         const catalog = await this.catalog(undefined, signal);

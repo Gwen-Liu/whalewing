@@ -11,11 +11,13 @@ import { WhalewingCore } from './src/service.js';
 import { abort, defaultLimits, fail, frontmatter } from './src/vault.js';
 import { vaultLocation } from './src/vault-location.js';
 import { FileSystemSkillProvider } from '@deepseek-ai/dsh-skill-filesystem';
-import { automationProjection, claimCommands, automationIdentity } from './src/identity.js';
+import { automationProjection, claimCommands, automationIdentity, automationPurposes } from './src/identity.js';
 import { FeatureRegistry } from './src/features.js';
+import { ExtensionSources } from './src/extension-sources.js';
 import { installNewsGate } from './src/news-gate.js';
 import { workbenchContract } from './src/workbench-contract.js';
 import { apply as installSkills } from './src/skill-provider.js';
+import { isInside } from './src/skill-roots.js';
 import { parts } from './features/index.js';
 import * as Experts from './features/experts/host.js';
 import * as Assistant from './features/assistant/host.js';
@@ -82,6 +84,7 @@ export default class Whalewing extends Service {
       readSourceScope: (accept, signal) => this.readSourceScope(accept, signal),
       automationIdentity: (id, signal) => this.automationIdentity(id, signal),
       schedule: () => ctx.get('schedule'),
+      sources: () => this.sources,
       changed: () => ctx.emit('whalewing/changed'),
       discover: async (record, caller, signal) => {
         ctx.emit('whalewing/changed');
@@ -103,6 +106,9 @@ export default class Whalewing extends Service {
     this.skills = this.core.skills;
     this.apiVersion = 1;
     this.registry = new FeatureRegistry(ctx, parts);
+    // 扩展提供的专家和知识只在内存里，随各自登记撤销；总开关关闭时一起清掉。
+    this.sources = new ExtensionSources(this.registry, { changed: kind => { if (kind === 'experts') ctx.emit('whalewing-experts/changed'); }, maxNoteBytes: this.vault.limits.maxNoteBytes, maxResults: this.vault.limits.maxResults });
+    ctx.effect(() => () => this.sources.dispose(), '鲸翼扩展来源');
     this.features = Object.assign(() => this.registry.snapshot(), { register: (scope, manifest) => this.registry.register(scope, manifest) });
     const handlers = this.commandHandlers = new Map();
     this.typertRemote = bindTypertRemote(this, 'whalewing', { namespace: 'whalewingWorkbench' });
@@ -118,7 +124,7 @@ export default class Whalewing extends Service {
           const input = JSON.parse(rawInput);
           if (input?.action === 'automation_skip') return this.newsGate.notice(input, agent, signal);
           if (input?.action === 'automation_claim') {
-            if (Object.keys(input).length !== 2 || !['knowledge', 'custom', 'news'].includes(input.purpose)) fail('INPUT', '自动任务认领只接受用途');
+            if (Object.keys(input).length !== 2 || !automationPurposes.includes(input.purpose)) fail('INPUT', '自动任务认领只接受用途');
             if (agent.status !== 'idle' || agent.session.header?.origin === 'subagent' || agent.session.header?.agentPreset !== 'standard') fail('AUTOMATION_SESSION', '自动任务只认领空闲的 standard 普通会话');
             const previous = ctx.sessionProjections.stateOf(agent.session, 'whalewingAutomation')?.purpose;
             if (previous && previous !== input.purpose) fail('AUTOMATION_IDENTITY', '此会话已属于其它自动任务用途');
@@ -190,7 +196,39 @@ export default class Whalewing extends Service {
     return {
       search: (query, options = {}) => read({ action: 'search', query: schema.string().max(200).parse(query), ...schema.strictObject({}).parse(Object.fromEntries(Object.entries(options).filter(([key]) => key !== 'signal'))) }, options.signal),
       read: path => read(schema.strictObject({ action: schema.literal('read'), path: schema.string() }).parse({ action: 'read', path })),
+      registerSource: (scope, options) => this.sources.registerKnowledge(scope, options),
     };
+  }
+
+  get experts() {
+    return { registerSource: (scope, options) => this.sources.registerExperts(scope, options) };
+  }
+
+  /** 技能库“扩展”一组：只列 DSH 实际从扩展技能目录发现的技能；没有带技能目录的扩展时不读注册表。 */
+  extensionRoots() {
+    return [...this.registry.entries.values()].filter(entry => entry.kind === 'extension' && entry.skills.length && entry.fiber.state === 2);
+  }
+
+  async extensionSkills(signal) {
+    const entries = this.extensionRoots();
+    if (!entries.length) return { extensions: [] };
+    const listed = await this.ctx.skills.list({ signal });
+    abort(signal);
+    // DSH 注册表报的是真实路径，扩展登记的目录可能是短文件名或联接，按真实路径比较。
+    return { extensions: entries.map(entry => ({
+      id: entry.id, package: entry.package, ...(this.sources.labelOf(entry.id) ? { label: this.sources.labelOf(entry.id) } : {}),
+      skills: listed.filter(skill => typeof skill.path === 'string' && entry.skills.some(directory => isInside(directory, skill.path))).map(({ name, description }) => ({ name, description: description ?? '' })).sort((a, b) => a.name.localeCompare(b.name)),
+    })) };
+  }
+
+  async extensionSkill(feature, name, signal) {
+    const entry = this.extensionRoots().find(item => item.id === feature);
+    if (!entry) fail('SKILL_SOURCE_CLOSED', '提供这项技能的扩展已关闭或卸载，请刷新技能库');
+    const skill = await this.ctx.skills.get(name, { signal });
+    abort(signal);
+    const location = typeof skill?.path === 'string' ? skill.path : '';
+    if (!skill || !entry.skills.some(directory => isInside(directory, location))) fail('SKILL_MISSING', '这项技能已不在扩展里，或被同名的其它技能顶替了，请刷新技能库');
+    return { extension: { id: entry.id, package: entry.package, ...(this.sources.labelOf(entry.id) ? { label: this.sources.labelOf(entry.id) } : {}), name: skill.name, description: skill.description ?? '', content: skill.content ?? '' } };
   }
 
   watchFeatures(signal) { return this.registry.watch(signal); }

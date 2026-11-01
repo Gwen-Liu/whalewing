@@ -9,7 +9,8 @@ export function expertContract(z) {
   const deleted = z.strictObject({ id, name: text, revision, builtin: z.boolean() });
   // 有原版的专家（内置专家、改为模板的原内置专家）可以逐项恢复原版；列表另带“改过哪些、原版在哪些有更新”。
   const field = z.enum(['name', 'description', 'avatar', 'prompt', 'model', 'skills', 'mcpServers']);
-  const listed = expert.extend({ customized: z.array(field).optional(), baseUpdated: z.array(field).optional() });
+  // 扩展提供的专家带来源和只读标记；内置和自定义专家没有这两个字段。
+  const listed = expert.extend({ customized: z.array(field).optional(), baseUpdated: z.array(field).optional(), source: z.strictObject({ id: text, label: z.strictObject({ zh: text, en: text }) }).optional(), readOnly: z.boolean().optional() });
   const skill = text.min(1).max(100), print = text.max(64);
   // 员工相对原版改了什么，单独存一个域：fields 是员工改过的字段（值仍在专家记录里），技能只记增删；
   // base 是改时原版的指纹（'' 表示旧记录推断不出当时的原版）；revision 与 record（记录内容指纹）对应专家记录，对不上就重新推断。

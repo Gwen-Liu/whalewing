@@ -1,5 +1,5 @@
-// 定时任务：页面摘要、状态点与执行记录、新增与取消自建任务、时间规则说明、放弃草稿、知识整理设置、每日资讯。
-// 任务绝不能真的到点运行：新建的任务定在一年后，用例结束前在界面上“取消计划”；不点知识整理的“确认创建计划”。
+// 定时任务：页面摘要、状态点与执行记录、新增与取消自建任务、时间规则说明、放弃草稿、每日记忆和每周思考的设置、每日资讯。
+// 任务绝不能真的到点运行：新建的任务定在一年后，用例结束前在界面上“取消计划”；不点每日记忆、每周思考的“确认创建计划”。
 // 临时 DSH 没有历史运行，启动前按 DSH 的落盘格式放一条“只有送达回执、会话里查不到结果”的自建任务（见 schedules-fixture.mjs）。
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -96,7 +96,7 @@ const asParts = time => { const p = beijingParts(time); return [p.month, p.day, 
 // ===================== 页面、状态点、执行记录 =====================
 
 // 需求§定时任务（看得到结果：页头写几个任务、下一次是哪个、几个上次没完成；列表每个任务前一个状态点；详情是“下次时间”“上次运行”两张小卡，上次运行写结果、计划时间和是否补发）；需求§定时任务（每日资讯：知识卡片开启时默认初始化，每天北京时间 08:00）
-test('页头一句写任务数和下一次，左侧有未启用的知识整理和任务列表，详情是“下次时间”“上次运行”两张小卡', async t => {
+test('页头一句写任务数和下一次，左侧有未启用的每日记忆、每周思考和任务列表，详情是“下次时间”“上次运行”两张小卡', async t => {
   const now = Date.now();
   await withPage(browser, t, async ({ page, errors, external }) => {
     await openSchedules(page);
@@ -112,10 +112,13 @@ test('页头一句写任务数和下一次，左侧有未启用的知识整理�
     assert.ok(head.startsWith(`${tasks.length} 个任务 · 下一次 ${shortBeijing(Date.parse(next.record.scheduledAt))} ${next.record.title}`), `页头：${head}`);
     assert.doesNotMatch(head, /[1-9]\d* 个上次没完成/, '没有出错的任务，不报没完成');
 
-    const template = page.locator('.ww-task-template');
-    assert.equal(await template.locator('h3').innerText(), 'DSH 工作知识整理');
-    assert.match(await template.innerText(), /未启用/);
-    await template.getByRole('button', { name: '设置并启用' }).waitFor();
+    // 两个内置任务默认都不开：每日记忆、每周思考各一张“未启用”的卡。
+    const templates = page.locator('.ww-task-template');
+    assert.deepEqual(await templates.locator('h3').allInnerTexts(), ['每日记忆', '每周思考']);
+    for (const template of await templates.all()) {
+      assert.match(await template.innerText(), /未启用/);
+      await template.getByRole('button', { name: '设置并启用' }).waitFor();
+    }
     for (const task of tasks) {
       const item = row(page, task.record.title);
       assert.equal(await item.locator('small').innerText(), `已启用 · ${fullBeijing(Date.parse(task.record.scheduledAt))}`, `${task.record.title} 的下次时间`);
@@ -379,23 +382,27 @@ test('反例：放弃任务草稿时点“取消”，草稿原样保留，任�
   assert.equal(JSON.stringify(storedTasks(dsh.home)), tasksBefore);
 });
 
-// ===================== 知识整理 =====================
+// ===================== 每日记忆和每周思考 =====================
 
-// 需求§定时任务（DSH 工作知识整理默认关闭，员工确认后启用，建议每日北京时间 00:15；处理范围默认全部工作区，可以排除个别；子代理会话和定时任务自己的会话不纳入）
-test('知识整理设置：说明只整理普通对话，名称不能改，处理范围默认全部工作区，默认每天 00:15 并写出之后三次（不启用）', async t => {
+const builtInTemplate = (page, name) => page.locator('.ww-task-template').filter({ has: page.getByRole('heading', { name, exact: true }) });
+
+// 需求§定时任务（每日记忆默认关闭，员工确认后启用，建议每日北京时间 01:00；处理范围默认全部工作区，可以排除个别；子代理会话和定时任务自己的会话不纳入）
+// 2026-11-01 照第二大脑改版：原“DSH 工作知识整理”改名每日记忆，默认时间从 00:15 改到 01:00。
+test('每日记忆设置：说明只整理普通对话，名称不能改，处理范围默认全部工作区，默认每天 01:00 并写出之后三次（不启用）', async t => {
   const now = beijingTime(2026, 10, 27, 10, 0);
   await withPage(browser, t, async ({ page, errors }) => {
     await page.clock.setFixedTime(new Date(now));
     await openSchedules(page);
-    await page.locator('.ww-task-template').getByRole('button', { name: '设置并启用' }).click();
+    await builtInTemplate(page, '每日记忆').getByRole('button', { name: '设置并启用' }).click();
     const form = taskEditor(page);
-    assert.equal(await form.locator('h2').innerText(), 'DSH 工作知识整理');
+    assert.equal(await form.locator('h2').innerText(), '每日记忆');
     const help = await form.locator('.ww-muted').first().innerText();
     assert.match(help, /普通对话/, `说明整理什么：${help}`);
     assert.match(help, /子任务/, '说明不含子任务');
     assert.match(help, /自动任务/, '说明不含自动任务');
+    assert.match(help, /日记、任务记录和项目进展/, `说明写成什么：${help}`);
     const name = form.getByRole('textbox', { name: '任务名称' });
-    assert.equal(await name.inputValue(), 'DSH 工作知识整理');
+    assert.equal(await name.inputValue(), '每日记忆');
     assert.equal(await name.isDisabled(), true, '名称不能改');
 
     const workspaces = storedWorkspaces(dsh.home);
@@ -410,13 +417,41 @@ test('知识整理设置：说明只整理普通对话，名称不能改，处�
 
     assert.equal(await form.getByRole('combobox', { name: '时间规则' }).inputValue(), 'daily');
     const preview = await form.locator('.ww-task-preview').innerText();
-    assert.ok(preview.startsWith('每天 00:15 · 之后三次：'), preview);
-    assert.deepEqual(listedRuns(preview), nextClockRuns(now, { hour: 0, minute: 15 }).map(asParts));
+    assert.ok(preview.startsWith('每天 01:00 · 之后三次：'), preview);
+    assert.deepEqual(listedRuns(preview), nextClockRuns(now, { hour: 1, minute: 0 }).map(asParts));
     await discardTaskDraft(page);
-    await page.locator('.ww-task-template').getByRole('button', { name: '设置并启用' }).waitFor();
+    await builtInTemplate(page, '每日记忆').getByRole('button', { name: '设置并启用' }).waitFor();
     assert.deepEqual(errors, []);
   });
-  assert.equal(storedTasks(dsh.home).some(task => task.record.title === 'DSH 工作知识整理'), false, '没有启用知识整理');
+  assert.equal(storedTasks(dsh.home).some(task => task.record.title === '每日记忆'), false, '没有启用每日记忆');
+});
+
+// 需求§定时任务（每周思考默认关闭，员工确认后启用，建议每周一北京时间 07:00；只读写个人知识库，不读 DSH 对话，没有处理范围）
+test('每周思考设置：说明只读写知识库，名称不能改，没有处理范围，默认每周一 07:00 并写出之后三次（不启用）', async t => {
+  const now = beijingTime(2026, 10, 27, 10, 0);
+  await withPage(browser, t, async ({ page, errors }) => {
+    await page.clock.setFixedTime(new Date(now));
+    await openSchedules(page);
+    await builtInTemplate(page, '每周思考').getByRole('button', { name: '设置并启用' }).click();
+    const form = taskEditor(page);
+    assert.equal(await form.locator('h2').innerText(), '每周思考');
+    const help = await form.locator('.ww-muted').first().innerText();
+    assert.match(help, /待你决定/, `说明做什么：${help}`);
+    assert.match(help, /不读 DSH 对话/, '说明不读对话');
+    const name = form.getByRole('textbox', { name: '任务名称' });
+    assert.equal(await name.inputValue(), '每周思考');
+    assert.equal(await name.isDisabled(), true, '名称不能改');
+    assert.equal(await form.getByRole('button', { name: /个工作区/ }).count(), 0, '没有处理范围');
+    assert.equal(await form.getByRole('combobox', { name: '时间规则' }).inputValue(), 'weekly');
+    assert.equal(await form.getByRole('textbox', { name: '星期（1 周一至 7 周日）' }).inputValue(), '1');
+    const preview = await form.locator('.ww-task-preview').innerText();
+    assert.ok(preview.startsWith('每周一 07:00 · 之后三次：'), preview);
+    assert.deepEqual(listedRuns(preview), nextClockRuns(now, { hour: 7, minute: 0, weekdays: [1] }).map(asParts));
+    await discardTaskDraft(page);
+    await builtInTemplate(page, '每周思考').getByRole('button', { name: '设置并启用' }).waitFor();
+    assert.deepEqual(errors, []);
+  });
+  assert.equal(storedTasks(dsh.home).some(task => task.record.title === '每周思考'), false, '没有启用每周思考');
 });
 
 // ===================== 取消计划 =====================

@@ -18,6 +18,8 @@ export const zh = {
   "validate": "检查属性与链接",
   "valid": "检查通过，共 {count} 篇笔记",
   "invalid": "发现待处理项，共 {count} 篇笔记",
+  "styleClean": "文风：没有用到规则里不推荐的词",
+  "styleFlagged": "文风：{count} 篇用了规则里不推荐的词，可以对照规则的“用词对照”改成平常话",
   "saved": "已保存",
   "deleted": "已移到可恢复区",
   "restored": "已恢复",
@@ -43,6 +45,7 @@ export const zh = {
   "invalidLink": "此链接不是有效的库内笔记引用",
   "linkAttachment": "这是附件引用，不作为笔记打开，也未检查附件是否存在",
   "noteReadOnly": "此笔记仅供阅读，不在插件编辑、删除或恢复范围内",
+  "noteSourceReadOnly": "这篇笔记由「{name}」提供，在这里只能阅读；要修改请到「{name}」里改",
   "missingGraphNote": "此笔记尚不存在；这里只展示引用关系，不是实际文件",
   "missingGraphSources": "引用来源",
   "reading": "笔记阅读",
@@ -72,10 +75,13 @@ export const en = {
   "graphDataError": "The graph references missing nodes; reload the graph",
   "linkAttachment": "This is an attachment reference, not a note; attachment existence has not been checked",
   "noteReadOnly": "This note is read-only; editing, deleting and restoring are not available in the plugin",
+  "noteSourceReadOnly": "This note comes from {name} and is read-only here; edit it in {name}",
   "missingGraphNote": "This note does not exist. The graph shows references, not a file",
   "missingGraphSources": "Referenced by",
   "graph": "Knowledge graph",
-  "directoryResize": "Resize note directory"
+  "directoryResize": "Resize note directory",
+  "styleClean": "Writing: none of the discouraged words from the rules",
+  "styleFlagged": "Writing: {count} notes use words the rules discourage; see the word table in the rules"
 };
 export const styles = [
 `.ww-note{text-align:left;overflow-wrap:anywhere}.ww-note small{display:block;color:var(--dsw-alias-label-secondary);font-weight:400}`,
@@ -124,6 +130,22 @@ export const styles = [
 
 // 专属错误只解释本领域；输入原文与公共运输错误由共用呈现机制处理。
 export const errors = {
+  "EXTENSION_SOURCE_CLOSED": [
+    "提供这篇笔记的扩展已关闭或卸载（扩展问题）",
+    "在 DSH「插件」页重新开启这个扩展后再打开，或换一篇笔记"
+  ],
+  "EXTENSION_NOTE_READ_ONLY": [
+    "这篇笔记由扩展提供，在鲸翼里只能阅读（扩展的规则）",
+    "要修改请到提供它的扩展里改"
+  ],
+  "EXTENSION_NOTE_LOCAL": [
+    "这篇扩展笔记没有本机文件，不能引用给小鲸助手（扩展问题）",
+    "取消选择这篇笔记后再提问，或请扩展先把笔记同步到本机"
+  ],
+  "EXTENSION_NOTE_READ": [
+    "扩展没能读出这篇笔记（扩展问题）",
+    "稍后重试；仍不行请检查提供它的扩展是否正常"
+  ],
   "SOURCE_CONFIG": [
     "插件没找到可用的配置目录或知识库位置（DSH 设置问题）",
     "请确认 DSH 正常启动，并检查插件配置里的知识库位置，然后重启 DSH"

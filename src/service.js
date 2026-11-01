@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { Vault, abort, digest, fail } from './vault.js';
+import { Vault, abort, digest, fail, sourceDocument } from './vault.js';
+import { isSourceNotePath } from './extension-sources.js';
 import { SkillLibrary } from './skills.js';
 import { ProfileSources } from './profile-sources.js';
 
@@ -139,10 +140,27 @@ export class WhalewingCore {
       this.dependencies.changed?.();
       return result;
     }
+    const sources = this.dependencies.sources?.();
+    // 以 @ 开头的路径是扩展提供的只读笔记；扩展自己调用时只碰个人知识。
+    if (isSourceNotePath(args.path)) {
+      if (caller.kind === 'plugin') fail('EXTENSION_NOTE_PLUGIN', '扩展只能读取个人知识，不能读取其它扩展提供的笔记');
+      if (['write', 'remove', 'restore'].includes(args.action)) fail('EXTENSION_NOTE_READ_ONLY', '这篇笔记由扩展提供，在鲸翼里只能阅读；要修改请到提供它的扩展里改');
+      if (args.action === 'graph') fail('EXTENSION_NOTE_GRAPH', '扩展提供的笔记不在个人知识的关系图谱里');
+      if (!sources) fail('EXTENSION_SOURCE_CLOSED', '这篇笔记来自已关闭或卸载的扩展；请重新开启扩展后再打开');
+      if (args.action === 'read') { const { absolutePath: _absolutePath, ...note } = await sources.readKnowledge(args.path, signal); return note; }
+      if (args.action === 'document') return sourceDocument(await sources.readKnowledge(args.path, signal));
+    }
     switch (args.action) {
       case 'status': return { version: pluginVersion, initialized: await this.vault.initialized(), root: this.vault.root, skillsDir: this.skills.root, limits: this.vault.limits, scheduleAvailable: Boolean(this.dependencies.schedule()), ...(await this.bundleStatus(signal)) };
       case 'initialize': await this.vault.initialize(signal); this.dependencies.changed?.(); return this.dispatch({ action: 'status' }, caller);
-      case 'search': return this.vault.search(args.query, signal);
+      case 'search': {
+        const personal = await this.vault.search(args.query, signal);
+        // 空查询是列个人笔记；没有登记知识来源时原样返回个人结果。
+        if (caller.kind === 'plugin' || !args.query?.trim() || !sources?.hasKnowledge()) return personal;
+        const merged = await sources.searchKnowledge(args.query, signal);
+        if (!merged) return personal;
+        return { notes: [...personal.notes, ...merged.notes], truncated: personal.truncated || merged.truncated, total: personal.total + merged.total, ...(Object.keys(merged.labels).length ? { sourceLabels: merged.labels } : {}), ...(merged.issues.length ? { sourceIssues: merged.issues } : {}) };
+      }
       case 'browse': return this.vault.browse(args.directory, args.offset, signal);
       case 'read': return this.vault.read(args.path);
       case 'document': return this.vault.document(args.path, signal);
@@ -200,10 +218,14 @@ export class WhalewingCore {
     let bytes = 0;
     for (const name of args.paths) {
       abort(signal);
-      const note = await this.vault.read(name);
+      const fromSource = isSourceNotePath(name);
+      const extensions = fromSource && this.dependencies.sources?.();
+      if (fromSource && !extensions) fail('EXTENSION_SOURCE_CLOSED', '选定的笔记来自已关闭或卸载的扩展；请重新开启扩展，或取消选择这篇笔记');
+      const note = fromSource ? await extensions.readKnowledge(name, signal) : await this.vault.read(name);
+      if (fromSource && !note.absolutePath) fail('EXTENSION_NOTE_LOCAL', `「${note.source.label.zh}」的笔记「${path.posix.basename(name, '.md')}」没有本机文件，不能引用给小鲸助手；请取消选择这篇笔记`);
       bytes += Buffer.byteLength(note.content);
       if (bytes > 98304) fail('QUESTION_LIMIT', '选定笔记正文超过 96 KiB；请缩小范围后提问，不截断来源冒充完整依据');
-      const absolutePath = path.join(this.vault.root, note.path).replaceAll('\\', '/');
+      const absolutePath = fromSource ? note.absolutePath.replaceAll('\\', '/') : path.join(this.vault.root, note.path).replaceAll('\\', '/');
       sources.push({ path: note.path, absolutePath, hash: note.hash });
       excerpts.push(JSON.stringify({ path: note.path, absolutePath, sha256: note.hash, lines: note.content.replace(/\r\n/g, '\n').split('\n').map((line, i) => `${i + 1}: ${line}`).join('\n') }));
     }

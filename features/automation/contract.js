@@ -1,3 +1,6 @@
+/** 自动任务的四种用途：每日记忆（knowledge）、每周思考（thinking）、自建任务和每日资讯。前后端和会话身份共用这一份。 */
+export const automationPurposes = ['knowledge', 'thinking', 'custom', 'news'];
+
 /** 工作区身份由宿主登记表持有；全选保留排除项以覆盖后续新增工作区。 */
 export function workspaceScopeContract(z) {
   const ids = z.array(z.string().min(1).max(200)).max(500).refine(values => new Set(values).size === values.length, '工作区不得重复');
@@ -23,7 +26,7 @@ export const runStatuses = ['waiting', 'running', 'completed', 'error', 'interru
 
 /** 自动任务只做宿主管理协议适配；时间和 expected 记录的语义仍由 Schedule 校验。 */
 export function automationContract(z) {
-  const text = z.string(), id = text.regex(/^[\w-]{1,100}$/), purpose = z.enum(['knowledge', 'custom', 'news']);
+  const text = z.string(), id = text.regex(/^[\w-]{1,100}$/), purpose = z.enum(automationPurposes);
   const workspaceScope = workspaceScopeContract(z);
   const daily = z.strictObject({ time: text.max(30), time_zone: text.max(100) });
   const weekly = daily.extend({ weekdays: z.array(z.number().int()).min(1).max(7) });
@@ -37,6 +40,8 @@ export function automationContract(z) {
   const input = z.union([
     z.strictObject({ action: z.literal('create'), sessionId: id, purpose: z.literal('custom'), spec, workspaceScope: workspaceScope.optional() }),
     z.strictObject({ action: z.literal('create'), sessionId: id, purpose: z.literal('knowledge'), spec: timing, workspaceScope: workspaceScope.optional() }),
+    // 每周思考只读知识库，不读会话，没有处理范围。
+    z.strictObject({ action: z.literal('create'), sessionId: id, purpose: z.literal('thinking'), spec: timing }),
     z.discriminatedUnion('action', [
       z.strictObject({ action: z.literal('catalog') }),
       z.strictObject({ action: z.literal('directory') }),
@@ -52,7 +57,8 @@ export function automationContract(z) {
   const runStatus = z.enum(runStatuses);
   const entry = record.extend({ sessionId: text, status: z.enum(['active', 'paused', 'inactive']), lastDelivery: delivery.optional(), lastRun: delivery.extend({ status: runStatus }).optional() });
   const presentation = { workspaceScope: workspaceScope.optional(), displayPrompt: text };
-  const managed = entry.extend({ purpose, ...presentation });
+  // outdated：内置任务的指令不是当前版本（比如升级前建的“DSH 工作知识整理”），页面提示员工点一下换成新版。
+  const managed = entry.extend({ purpose, ...presentation, outdated: z.literal(true).optional() });
   const result = z.union([
     z.strictObject({ available: z.boolean(), controls: z.boolean().optional(), tasks: z.array(managed), legacyTasks: z.array(entry), issues: z.array(z.strictObject({ sessionId: text, message: text })) }),
     z.strictObject({ task: z.union([record, managed]), recovered: z.boolean() }),

@@ -118,7 +118,8 @@ test('首个知识请求自动建库，并发只初始化一次，不登记来�
   assert.equal(count, 1);
   assert.ok(statuses.every(value => value.initialized && value.root === core.vault.root));
   assert.deepEqual((await core.vault.settings()).sources, []);
-  assert.equal((await core.vault.files()).length, 18);
+  // 22 篇随包内容：根入口、首页、3 份规则、14 个模板，加三篇关于自己的起步笔记。
+  assert.equal((await core.vault.files()).length, 22);
   await core.execute({ action: 'status' }, { kind: 'model' });
   assert.equal(count, 1);
 });

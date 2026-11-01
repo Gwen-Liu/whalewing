@@ -1,10 +1,16 @@
 filters:
-  and:
-    - 'type == "output"'
-    - 'output_type == "task-record"'
+  or:
+    - and:
+        - 'type == "timeline"'
+        - 'timeline_type == "task"'
+    - and:
+        - 'type == "output"'
+        - 'output_type == "task-record"'
 properties:
+  date:
+    displayName: 日期
   actual_date:
-    displayName: 实际日期
+    displayName: 日期（早先的记录）
   project:
     displayName: 所属项目
   status:
@@ -16,7 +22,20 @@ views:
     name: 任务记录
     order:
       - file.name
+      - date
       - actual_date
       - project
       - status
-      - updated
+    sort:
+      - property: date
+        direction: DESC
+  - type: table
+    name: 最近任务
+    order:
+      - file.name
+      - project
+      - status
+    sort:
+      - property: updated
+        direction: DESC
+    limit: 15

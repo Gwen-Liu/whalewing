@@ -22,7 +22,11 @@ export function skillLibraryContract(z) {
     z.strictObject({ action: z.literal('stage'), name: text, content: text.max(1048576), sourcePaths: z.array(text).min(1).max(20), sourceHashes: z.record(text, text), expectedHash: hash }),
     z.strictObject({ action: z.literal('publish'), name: text, expectedHash: hash, activeHash: hash, review: z.strictObject({ reviewer: text, positive: text, negative: text }) }),
     ...['disable', 'restore', 'rollback'].map(action => z.strictObject({ action: z.literal(action), name: text, expectedHash: hash })),
+    // 扩展带的技能只读：列出 DSH 实际从各扩展技能目录发现的技能，读其中一项的正文。
+    z.strictObject({ action: z.literal('extensions') }),
+    z.strictObject({ action: z.literal('extension_read'), feature: text.min(1).max(80), name: text.min(1).max(100) }),
   ]);
+  const extensionLabel = z.strictObject({ zh: text, en: text });
   // 知识提炼的技能来源笔记变了：changed 内容有改动，missing 找不到或读不出，otherVault 来源在另一个知识库无法核对。技能照常可用，只提示复核。
   const review = z.strictObject({ changed: z.array(text), missing: z.array(text), otherVault: z.literal(true).optional() });
   const entry = z.strictObject({
@@ -37,6 +41,8 @@ export function skillLibraryContract(z) {
     z.strictObject({ id, removed: z.literal(true) }),
     z.strictObject({ id, reset: z.literal(true), baseId: id }),
     z.strictObject({ name: text, state, hash, sourcePaths: z.array(text).optional(), discovery: z.literal('verified').optional(), behavior: text.optional() }),
+    z.strictObject({ extensions: z.array(z.strictObject({ id: text, package: text, label: extensionLabel.optional(), skills: z.array(z.strictObject({ name: text, description: text })) })) }),
+    z.strictObject({ extension: z.strictObject({ id: text, package: text, label: extensionLabel.optional(), name: text, description: text, content: text }) }),
   ]);
   const packageName = 'dsh-whalewing/skills';
   const descriptor = {

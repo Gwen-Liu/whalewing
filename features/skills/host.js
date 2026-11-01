@@ -28,13 +28,15 @@ export default class Skills extends Service {
     try {
       const input = contract.input.parse(raw);
       signal = AbortSignal.any([this.closing.signal, AbortSignal.timeout(this.host.vault.limits.operationMs), ...(signal ? [signal] : [])]);
-      const operation = ['list', 'read', 'create', 'update', 'remove', 'reset'].includes(input.action)
+      const operation = input.action === 'extensions' ? this.host.extensionSkills(signal)
+        : input.action === 'extension_read' ? this.host.extensionSkill(input.feature, input.name, signal)
+        : ['list', 'read', 'create', 'update', 'remove', 'reset'].includes(input.action)
         ? this.host.skills.manage(input, signal)
         : this.host.execute({ ...input, domain: 'skill' }, { kind: 'human', signal });
       this.pending.add(operation);
       try {
         const result = await operation;
-        if (!['list', 'read'].includes(input.action)) this.ctx.emit('whalewing/changed');
+        if (!['list', 'read', 'extensions', 'extension_read'].includes(input.action)) this.ctx.emit('whalewing/changed');
         return contract.result.parse(result);
       } finally { this.pending.delete(operation); }
     } catch (error) { throw new RemoteError(error.code || error.name || 'ERROR', error.message, {}); }

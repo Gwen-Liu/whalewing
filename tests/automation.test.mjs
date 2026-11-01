@@ -5,7 +5,7 @@ import test from 'node:test';
 import { isDeepStrictEqual } from 'node:util';
 import assert from 'node:assert/strict';
 import { z } from 'zod';
-import { Automation, legacySchedulePrefix, knowledgeTaskPrompt, automationPresentation } from '../features/automation/automation.js';
+import { Automation, legacySchedulePrefix, knowledgeTaskPrompt, thinkingTaskPrompt, previousKnowledgeTitle, builtInTask, automationPresentation } from '../features/automation/automation.js';
 import { automationProjection } from '../src/identity.js';
 import { automationContract } from '../features/automation/contract.js';
 import { Context } from '@deepseek-ai/cordis';
@@ -19,7 +19,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 function fixture() {
-  const records = [], purposes = new Map([['auto', 'custom'], ['knowledge', 'knowledge'], ['news', 'news']]);
+  const records = [], purposes = new Map([['auto', 'custom'], ['knowledge', 'knowledge'], ['thinking', 'thinking'], ['news', 'news']]);
   const calls = [];
   const schedule = {
     async catalog() { calls.push('catalog'); return structuredClone(records); },
@@ -52,6 +52,10 @@ test('自动任务用途只接受成功人工回执，fork不继承父自动身�
   for (const events of [[done], [{ ...run, data: { ...run.data, name: 'wrong' } }, done], [run, { ...done, data: { ...done.data, kind: 'error' } }]]) assert.equal(fold(events).purpose, null);
   assert.equal(fold([run, done], 2).purpose, null);
   assert.equal(fold([run, done, { ...done, seq: 3, data: { ...done.data, text: '{}' } }]).purpose, 'knowledge');
+  // 每周思考是第四种用途，同样只从成功回执得到。
+  const thinking = { ...done, data: { ...done.data, text: JSON.stringify({ action: 'automation_claim', purpose: 'thinking' }) } };
+  assert.equal(fold([run, thinking]).purpose, 'thinking');
+  assert.ok(automationProjection.wire.viewSchema.parse('thinking'));
 });
 
 test('关闭模板与缺Schedule只读零模型零写入，身份冷读失败可诊断', async () => {
@@ -144,6 +148,55 @@ test('知识模板固定流程，单例与旧工作台计划明确迁移；不�
   const listing = await h.owner.catalog(); assert.equal(listing.legacyTasks.length, 0); assert.equal(listing.issues.length, 1);
 });
 
+// 2026-11-01 照第二大脑改版：每天整理会话的任务改名“每日记忆”，新增只读知识库的“每周思考”。
+test('每日记忆和每周思考：名称和指令由插件给，每周思考不带处理范围，同类只能有一个', async () => {
+  const h = fixture();
+  h.dependencies.listWorkspaces = async () => [{ workspaceId: 'a', path: '/a', sessionIds: ['s-a'] }];
+  const daily = await h.owner.manage({ action: 'create', sessionId: 'knowledge', purpose: 'knowledge', workspaceScope: { mode: 'all', excludedWorkspaceIds: [] }, spec: { daily: { time: '01:00:00', time_zone: 'Asia/Shanghai' } } });
+  assert.equal(daily.task.title, '每日记忆');
+  assert.ok(daily.task.prompt.startsWith(knowledgeTaskPrompt) && knowledgeTaskPrompt.startsWith('每日记忆\n'));
+  await assert.rejects(h.owner.manage({ action: 'create', sessionId: 'thinking', purpose: 'thinking', workspaceScope: { mode: 'all', excludedWorkspaceIds: [] }, spec: { weekly: { time: '07:00:00', time_zone: 'Asia/Shanghai', weekdays: [1] } } }), { code: 'WORKSPACE_SCOPE' });
+  const weekly = await h.owner.manage({ action: 'create', sessionId: 'thinking', purpose: 'thinking', spec: { title: '员工改的名', prompt: '员工的指令', weekly: { time: '07:00:00', time_zone: 'Asia/Shanghai', weekdays: [1] } } });
+  assert.deepEqual({ title: weekly.task.title, prompt: weekly.task.prompt }, builtInTask('thinking'), '员工传来的名称和指令不算数');
+  assert.ok(thinkingTaskPrompt.startsWith('每周思考\n'));
+  for (const phrase of ['待你决定', '本周思考', '重要决定', '又解释了一遍', 'AI 对我的观察', 'validate', '不读 DSH 会话']) assert.ok(thinkingTaskPrompt.includes(phrase), phrase);
+  assert.equal(automationPresentation(weekly.task.prompt).workspaceScope, undefined, '每周思考没有处理范围');
+  h.purposes.set('thinking-2', 'thinking');
+  await assert.rejects(h.owner.manage({ action: 'create', sessionId: 'thinking-2', purpose: 'thinking', spec: { weekly: { time: '07:00:00', time_zone: 'Asia/Shanghai', weekdays: [1] } } }), { code: 'SCHEDULE_EXISTS' });
+  const listing = await h.owner.catalog();
+  assert.deepEqual(listing.tasks.map(task => [task.purpose, task.title, task.outdated]), [['knowledge', '每日记忆', undefined], ['thinking', '每周思考', undefined]], '当前版本不提示换新');
+  const read = await h.owner.manage({ action: 'read', sessionId: 'thinking', id: weekly.task.id });
+  await assert.rejects(h.owner.manage({ action: 'update', sessionId: 'thinking', id: weekly.task.id, expected: read.task, expectedStatus: 'active', prompt: '新指令' }), { code: 'AUTOMATION_PROMPT' });
+  await assert.rejects(h.owner.manage({ action: 'update', sessionId: 'thinking', id: weekly.task.id, expected: read.task, expectedStatus: 'active', workspaceScope: { mode: 'all', excludedWorkspaceIds: [] } }), { code: 'WORKSPACE_SCOPE' });
+});
+
+test('升级前的“DSH 工作知识整理”：目录标出可换新版，保存一次换成每日记忆，处理范围和时间照旧；员工改过的名字不动', async () => {
+  const h = fixture(), scope = { mode: 'all', excludedWorkspaceIds: ['b'] };
+  h.dependencies.listWorkspaces = async () => [{ workspaceId: 'a', path: '/a', sessionIds: ['s-a'] }, { workspaceId: 'b', path: '/b', sessionIds: ['s-b'] }];
+  const { task } = await h.owner.manage({ action: 'create', sessionId: 'knowledge', purpose: 'knowledge', workspaceScope: scope, spec: { daily: { time: '00:15:00', time_zone: 'Asia/Shanghai' } } });
+  // 模拟升级前建的任务：旧名字、旧指令，范围后缀格式不变。
+  const oldPrompt = 'DSH 工作知识整理\n加载 whalewing-knowledge。旧版的整理指令。\n当前整理时区：Asia/Shanghai。';
+  Object.assign(h.records[0], { title: previousKnowledgeTitle, prompt: oldPrompt + task.prompt.slice(task.prompt.indexOf('\n\n工作区处理范围')) });
+  const before = await h.owner.catalog();
+  assert.equal(before.tasks[0].outdated, true);
+  assert.deepEqual(before.tasks[0].workspaceScope, scope);
+  const read = await h.owner.manage({ action: 'read', sessionId: 'knowledge', id: task.id });
+  assert.equal(read.outdated, undefined, '读取结果不带页面提示，不进入 expected');
+  const saved = await h.owner.manage({ action: 'update', sessionId: 'knowledge', id: task.id, expected: read.task, expectedStatus: 'active' });
+  assert.equal(saved.updated, true);
+  assert.equal(h.records[0].title, '每日记忆');
+  assert.ok(h.records[0].prompt.startsWith(builtInTask('knowledge').prompt));
+  assert.deepEqual(automationPresentation(h.records[0].prompt).workspaceScope, scope, '处理范围照旧');
+  assert.equal(h.records[0].time, '00:15:00', '时间照旧');
+  assert.equal((await h.owner.catalog()).tasks[0].outdated, undefined);
+  // 员工给旧任务改过名字：换新版只换指令，名字留着。
+  Object.assign(h.records[0], { title: '我的夜间整理', prompt: oldPrompt });
+  const renamed = await h.owner.manage({ action: 'read', sessionId: 'knowledge', id: task.id });
+  await h.owner.manage({ action: 'update', sessionId: 'knowledge', id: task.id, expected: renamed.task, expectedStatus: 'active' });
+  assert.equal(h.records[0].title, '我的夜间整理');
+  assert.ok(h.records[0].prompt.startsWith(knowledgeTaskPrompt));
+});
+
 test('资讯创建只消费资讯owner指令，客户端不修改内置指令', async () => {
   const h = fixture();
   await assert.rejects(h.create('news'), { code: 'NEWS_UNAVAILABLE' });
@@ -175,6 +228,10 @@ test('自动任务严格契约覆盖六选一规则，拒绝多规则与任意�
   assert.throws(() => contract.input.parse({ action: 'catalog', body: true }));
   assert.throws(() => contract.input.parse({ ...base, purpose: 'other', spec: { ...base.spec, after_seconds: 60 } }));
   assert.ok(contract.input.parse({ action: 'create', sessionId: 'knowledge', purpose: 'knowledge', spec: { daily: { time: '00:15:00', time_zone: 'Asia/Shanghai' } } }));
+  const thinking = { action: 'create', sessionId: 'thinking', purpose: 'thinking', spec: { weekly: { time: '07:00:00', time_zone: 'Asia/Shanghai', weekdays: [1] } } };
+  assert.ok(contract.input.parse(thinking));
+  assert.throws(() => contract.input.parse({ ...thinking, workspaceScope: { mode: 'all', excludedWorkspaceIds: [] } }), '每周思考不收处理范围');
+  assert.throws(() => contract.input.parse({ ...thinking, spec: { ...thinking.spec, title: '改名', prompt: '指令' } }), '每周思考不收名称和指令');
   assert.ok(newsContract(z).scheduleInput.parse({ action: 'create', sessionId: 'news', purpose: 'news' }));
   assert.throws(() => contract.input.parse({ action: 'create', sessionId: 'news', purpose: 'news' }));
   assert.throws(() => contract.input.parse({ ...base, purpose: 'news' }));

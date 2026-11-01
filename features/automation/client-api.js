@@ -1,4 +1,4 @@
-import { automationContract, runStatuses } from './contract.js';
+import { automationContract, automationPurposes, runStatuses } from './contract.js';
 import { requireExactProjection, assertCreatedSession } from '../../src/session-projection.js';
 
 // 送达比计划时间晚这么多，多半是 DSH 当时没开、开机后补上的那一次。
@@ -38,7 +38,7 @@ export function createAutomationClient(bridge, t, z) {
     let pendingAutomation = null, automationCacheIssue = '', automationWriting = false;
     try {
       const saved = window.localStorage.getItem(automationKey);
-      if (saved) pendingAutomation = z.strictObject({ sessionId: z.string().regex(/^[\w-]{1,100}$/), purpose: z.enum(['knowledge', 'custom', 'news']) }).parse(JSON.parse(saved));
+      if (saved) pendingAutomation = z.strictObject({ sessionId: z.string().regex(/^[\w-]{1,100}$/), purpose: z.enum(automationPurposes) }).parse(JSON.parse(saved));
     } catch { automationCacheIssue = t('taskCacheError'); }
     const cacheAutomation = value => {
       try {

@@ -76,7 +76,7 @@ test('官方filesystem发现器隔离坏个人Skill，基础Skills持续可用�
   const candidates = Array.isArray(observed) ? observed : observed.candidates;
   assert.deepEqual(candidates.map(s => s.name).sort(), bundledSkills);
   const knowledge = await provider.get(candidates.find(s => s.name === 'whalewing-knowledge'), { signal: new AbortController().signal });
-  assert.match(knowledge.content, /知识使用与沉淀/);
+  assert.match(knowledge.content, /个人知识：员工的第二大脑/);
   await provider.dispose();
 });
 

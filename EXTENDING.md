@@ -36,7 +36,7 @@ export function apply(ctx) {
 | `id` | 必填，字母开头的小写短横线标识，最长 80 字符；所有扩展之间唯一。内置 id 即使功能关闭也保留，不能占用 |
 | `api` | 必填整数，当前为 `1` |
 | `package` | 必填，当前扩展的完整包名，最长 214 字符 |
-| `skills` | 可选，最多 100 个随包技能目录的绝对路径；可用 `fileURLToPath(new URL('./skills/example/', import.meta.url))` 构造。关闭扩展后退出技能来源，文件不删 |
+| `skills` | 可选，最多 100 个技能目录的绝对路径；可用 `fileURLToPath(new URL('./skills/example/', import.meta.url))` 构造。目录可以是一项技能（里面有 `SKILL.md`），也可以是放多项技能的上一级目录（`<目录>/<技能名>/SKILL.md`）；DSH 会监听目录变化，扩展往里增删技能不用重新登记。目录写成短文件名、经过联接或符号链接都行，鲸翼按真实路径比较。这些技能在鲸翼技能库的“扩展”一组里只读显示。关闭扩展后退出技能来源，文件不删 |
 | `tab` | 可选，仅含 `placement: 'end'`、`keepAlive: true`、`icon`。不需要的字段省略，不传 `false` 或其他扩展字段 |
 | `tab.icon` | 可选，最多 65536 字符的单色 SVG 字符串，按 16px 蒙版显示并随文字颜色变化，不作为页面 HTML 插入 |
 
@@ -60,6 +60,66 @@ if (result.notes.length) {
 - 调用记录带扩展包名和功能 id；未登记报 `FEATURE_CALLER`，卸载后的调用报 `FEATURE_CLOSED`。不要捕获服务对象供其他插件绕过登记使用。
 - 这两个接口只读。写知识应让模型通过 `whalewing_knowledge` 工具，遵守知识库原有规则；不公开知识库或配置写入接口。
 - 外部插件与其他 DSH 插件处于同一运行环境，这不是权限沙箱。扩展自行声明和管理自己的文件、服务与外部调用，不把内部对象访问当作 v1 能力。
+
+## Host：专家来源与知识来源
+
+扩展可以把自己的专家放进“专家团队”、把自己的笔记放进知识搜索，和员工自己的专家、个人知识一起用，界面上标来源名。两个方法都要在 `features.register` 之后、用同一个 `ctx`（或其子插件）调用；每个功能各至多登记一个专家来源、一个知识来源。来源内容只在内存里，鲸翼不另存一份；扩展关闭、卸载、或鲸翼总开关关闭时自动撤销，扩展重开后重新登记即可。没有任何扩展登记来源时，鲸翼的专家列表、知识搜索和阅读结果与没有这两个接口时完全一样。
+
+`label` 是来源名，两种语言都要给：`{ zh, en }`，中文最长 24 字、英文最长 40 字，界面按 DSH 当前语言取一份。
+
+### 专家来源
+
+```js
+const source = ctx.whalewing.experts.registerSource(ctx, {
+  label: { zh: '团队', en: 'Team' },
+  save: async ({ id, expectedRevision, expert }, { signal }) => savedItem, // 可选
+});
+source.set([{ id: 'lead', revision: 1, name: '组长', description: '带团队干活', prompt: '……', skills: ['some-skill'] }]);
+source.dispose(); // 可选：提前撤销；扩展卸载时会自动撤销
+```
+
+- **扩展主动推送**：`set(items)` 整体替换这个来源的专家列表，内容变了就再调一次。鲸翼每轮对话直接从内存取，不在对话时等扩展。
+- **字段**（严格校验，多一个字段也拒收）：
+
+  | 字段 | 要求 |
+  | --- | --- |
+  | `id` | 必填，小写字母、数字和夹在中间的单个连字符，最长 76；同一列表里不能重复。鲸翼里的完整 id 是 `<功能 id>--<id>`，合起来最长 80 |
+  | `revision` | 必填，非负整数；内容变了要变大，鲸翼用它判断会话里的专家有没有变 |
+  | `name`、`description`、`prompt` | 必填，去掉首尾空白后分别 1–40、1–240、1–32000 字 |
+  | `avatar` | 可选，`data:image/png\|jpeg\|webp;base64,…` 的规范图像数据，不超过 512 KiB；省略或 `null` 用默认头像 |
+  | `skills` | 可选，最多 40 个技能名；绑定的技能员工本机没有时那一轮跳过 |
+  | `readOnly` | 可选，`true` 时员工只能查看 |
+
+  一个列表最多 200 位。来源专家不绑定模型和 MCP（那是员工本机的配置），选它开会话时跟随系统默认模型。
+- **员工看到的**：卡片上标来源名，排在员工自己的专家后面；能被选来开会话、被小鲸转交任务，模型工具 `whalewing_experts` 也读得到。“…”菜单里：可改的是“编辑专家”，只读的（`readOnly` 或没给 `save`）是“查看专家”；都有“复制为我的专家”，复制出来的是员工自己的普通专家。删除和恢复原版不在鲸翼里做。
+- **保存**：员工在编辑抽屉点“保存修改”，鲸翼校验后调 `save({ id, expectedRevision, expert: { name, description, avatar, prompt, skills } }, { signal })`。`id` 是扩展自己的 id；`avatar` 已按鲸翼头像规则规范成 PNG。扩展要自己保存（比如交给服务端），成功后返回保存后的那一条（字段同上，`id` 不变、`revision` 比 `expectedRevision` 大），鲸翼立即用它替换列表里的这一条；之后扩展照常可以再 `set`。保存失败就抛错，带 `code`（大写字母、数字、下划线）时原样交给界面，比如版本对不上抛 `CONFLICT`；没有 `code` 时报 `EXPERT_SOURCE_SAVE`。员工取消或超时时 `signal` 会中止。
+- **撤销和变化**：来源撤销后它的专家从列表消失；已经选了它的会话再发消息时报 `EXPERT_SOURCE_CLOSED`（来源已关闭），来源还在但列表里没有这一位时报 `EXPERT_DELETED`，和员工删掉专家走同一条提示，不自动换专家。撤销后再调 `set` 报 `FEATURE_CLOSED`；保存途中扩展被关掉，这次结果不采用，报 `EXPERT_SOURCE_CLOSED`。
+
+### 知识来源
+
+```js
+const dispose = ctx.whalewing.knowledge.registerSource(ctx, {
+  label: { zh: '团队', en: 'Team' },
+  search: async (query, { signal }) => ({ notes: [{ path, title, excerpt, hash }], total, truncated }),
+  read: async (path, { signal }) => ({ path, content, hash, absolutePath }), // absolutePath 可选
+});
+```
+
+- **路径**：扩展用自己的相对路径（正斜杠分隔、以 `.md` 结尾、不带盘符和 `..`，最长 230）。鲸翼里显示和传递的是 `@<功能 id>/<路径>`，个人知识库的路径不会这样开头。
+- **搜索**：员工在知识页搜索、模型用 `whalewing_knowledge` 搜索时，鲸翼先搜个人知识，再按同一查询问每个知识来源，结果跟在个人结果后面，标来源名、只读。空查询只列个人笔记，不问来源。`search` 返回最多 500 条，`title` 最长 200 字，`excerpt` 最长 2000 字（显示前 240 字），`hash` 最长 128 字；每个来源最多采用知识库“单次结果上限”那么多条。每个来源限时 8 秒；出错、超时或格式不对只在结果里加一条说明（`sourceIssues`，界面右上角提示），个人结果和其它来源照常。
+- **阅读**：打开来源笔记时调 `read(path)`，返回的 `path` 必须和请求的一样，`content` 不超过单篇笔记大小上限。阅读区显示正文和属性，标只读；链接不在个人知识的关系里，不解析，也没有反链；来源笔记不进目录树和关系图谱。写入、删除、恢复一律拒收（`EXTENSION_NOTE_READ_ONLY`），按来源笔记打开图谱报 `EXTENSION_NOTE_GRAPH`。`read` 抛错时带 `code` 原样交给界面，否则报 `EXTENSION_NOTE_READ`。
+- **引用给小鲸助手**：员工可以勾选来源笔记提问。来源要在 `read` 里给出本机文件的绝对路径 `absolutePath`（比如扩展的本地缓存），小鲸才能打开原文核对；没有时这篇报 `EXTENSION_NOTE_LOCAL`，请员工取消选择。
+- **范围**：扩展自己调用的 `ctx.whalewing.knowledge.search/read` 仍然只碰个人知识，读来源笔记报 `EXTENSION_NOTE_PLUGIN`。
+- **撤销**：来源撤销后搜索不再问它，打开它的笔记报 `EXTENSION_SOURCE_CLOSED`；搜索等它回结果时被撤销，结果不采用并加一条说明。
+
+### 登记的错误
+
+| 错误码 | 什么时候 |
+| --- | --- |
+| `FEATURE_CALLER` | 还没用这个 `ctx` 登记功能就登记来源 |
+| `EXTENSION_SOURCE_CONFLICT` | 同一功能重复登记同一种来源（先撤销旧的才能再登记） |
+| `EXTENSION_SOURCE_INPUT` | 登记参数、专家列表、搜索或阅读结果不符合上面的字段要求 |
+| `FEATURE_CLOSED` | 来源撤销后还调 `set` |
 
 ## 浏览器：登记页签
 

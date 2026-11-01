@@ -60,14 +60,14 @@ export class FeatureRegistry {
     return { revision: this.revision, features };
   }
 
-  caller(ctx) {
+  caller(ctx, purpose = '读取个人知识') {
     if (this.closed || ctx.fiber.uid === null) fail('FEATURE_CLOSED', '调用功能已经卸载');
     for (let fiber = ctx.fiber; ; fiber = fiber.parent.fiber) {
       const entry = [...this.entries.values()].find(entry => entry.fiber === fiber);
       if (entry && fiber.uid !== null && ![3, 4, 5].includes(fiber.state)) return entry;
       if (fiber === fiber.parent.fiber) break;
     }
-    fail('FEATURE_CALLER', '请先登记扩展功能，再读取个人知识');
+    fail('FEATURE_CALLER', `请先登记扩展功能，再${purpose}`);
   }
 
   loadBase(part, create) {

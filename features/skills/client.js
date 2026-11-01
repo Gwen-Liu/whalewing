@@ -5,6 +5,9 @@ import { registerFeature, useFeature } from '../../src/shell/feature.js';
 export function createView(kit) {
   const { React, ConfirmDialog, useDiscard } = kit;
   const { createElement: h, useState, useRef, useEffect, useLayoutEffect, useSyncExternalStore } = React;
+  // 扩展登记的来源名是 { zh, en }；没有登记来源的扩展按包名显示。
+  const labelText = extension => extension.label ? (kit.resolveText ? kit.resolveText(extension.label) : extension.label.zh) : extension.package;
+  const noFrame = () => null;
   function SkillEditor({ api, entry, t, onClose, onSaved, notify }) {
     const [name, setName] = useState('');
     const [content, setContent] = useState(entry?.content ?? '---\nname: my-skill\ndescription: 描述适用场景与完成目标\n---\n\n# 操作步骤\n\n');
@@ -90,6 +93,12 @@ export function createView(kit) {
     const [skill, setSkill] = useState(null);
     const [skillQuery, setSkillQuery] = useState(''), [skillFilter, setSkillFilter] = useState('all');
     const skillCommand = (action, extra = {}) => api.skillRequest({ action, ...extra }, operation.current?.controller.signal);
+    // 带技能目录的扩展在活动登记里才读“扩展”一组；没有这样的扩展时不多发请求。
+    const core = workbench.internal;
+    const frame = useSyncExternalStore(core.subscribe ?? (() => () => {}), core.featureSnapshot ?? noFrame, core.featureSnapshot ?? noFrame);
+    const extensionKey = (frame?.features || []).filter(feature => feature.kind === 'extension' && feature.skills.length).map(feature => `${feature.id}:${feature.instance}`).join(',');
+    const [extensions, setExtensions] = useState([]);
+    const readExtensions = async () => extensionKey ? (await skillCommand('extensions')).extensions : [];
     const adoptSkills = value => { setSkills(value.entries); setSkillPage({ offset: value.offset, total: value.total, truncated: value.truncated }); };
     const pageSkills = (offset, direction) => run(async () => { const value = await skillCommand('list', { offset }); return () => { if (direction === 'next') skillPages.current.push(skillPage.offset); if (direction === 'previous') skillPages.current.pop(); adoptSkills(value); }; });
     const readEvolution = async (name, state) => {
@@ -105,28 +114,44 @@ export function createView(kit) {
       } while (true);
       throw new Error(t('skillMissing'));
     };
-    const refreshTab = () => run(async () => { const value = await skillCommand('list'); return () => { adoptSkills(value); skillPages.current = []; }; });
+    const refreshTab = () => run(async () => { const value = await skillCommand('list'); const extra = await readExtensions(); return () => { adoptSkills(value); setExtensions(extra); skillPages.current = []; }; });
+    // 扩展开关或换代时只重读“扩展”一组；读不到时保留上次的结果并说明。
+    useEffect(() => {
+      if (!extensionKey) { setExtensions([]); return; }
+      let live = true;
+      skillCommand('extensions').then(value => { if (live) setExtensions(value.extensions); }, reason => { if (live) setError(reason.message || t('requestFailed')); });
+      return () => { live = false; };
+    }, [extensionKey]);
     bind({ refresh: refreshTab, onError: reason => { if (reason.sessionId) return false; setError(reason.message || t('requestFailed')); return true; } });
 
     let body;
     // 页头一句现状；列表上方一行查找和筛选（在当前这一页里筛），列表按“我的、从知识提炼、系统内置”分组。
     const groupOf = item => item.origin === 'builtin' ? 'builtin' : item.origin === 'evolution' ? 'evolution' : 'mine';
     const matches = (item, filter) => filter === 'all' || (filter === 'updated' ? Boolean(item.baseUpdated) : filter === 'review' ? Boolean(item.review) : groupOf(item) === filter);
-    const count = filter => skills.filter(item => matches(item, filter)).length;
     const keyword = skillQuery.trim().toLowerCase();
-    const shown = skills.filter(item => matches(item, skillFilter) && (!keyword || `${item.name} ${item.description}`.toLowerCase().includes(keyword)));
+    const extensionRows = extensions.flatMap(extension => extension.skills.map(item => ({ ...item, extension })));
+    const extensionShown = skillFilter === 'all' || skillFilter === 'extension' ? extensionRows.filter(item => !keyword || `${item.name} ${item.description}`.toLowerCase().includes(keyword)) : [];
+    const count = filter => filter === 'extension' ? extensionRows.length : filter === 'all' ? skills.length + extensionRows.length : skills.filter(item => matches(item, filter)).length;
+    const shown = skillFilter === 'extension' ? [] : skills.filter(item => matches(item, skillFilter) && (!keyword || `${item.name} ${item.description}`.toLowerCase().includes(keyword)));
     const chip = (filter, label) => h('button', { type: 'button', key: filter, className: 'ww-chip', 'aria-pressed': skillFilter === filter, onClick: () => setSkillFilter(filter) }, label, h('small', null, String(count(filter))));
-    const summary = [`${skillPage.total} 项`, count('mine') > 0 && `我的 ${count('mine')}`, count('updated') > 0 && `${count('updated')} 项原件有更新`, count('review') > 0 && `${count('review')} 项待复核`].filter(Boolean).join(' · ');
+    const summary = [`${skillPage.total} 项`, count('mine') > 0 && `我的 ${count('mine')}`, extensionRows.length > 0 && `扩展 ${extensionRows.length}`, count('updated') > 0 && `${count('updated')} 项原件有更新`, count('review') > 0 && `${count('review')} 项待复核`].filter(Boolean).join(' · ');
     const skillRow = item => h('button', { type: 'button', className: `ww-skill-row${skill?.id === item.id ? ' ww-current' : ''}`, key: item.id, disabled: busy || !item.actions.includes('read'), onClick: () => run(async () => { const value = await skillCommand('read', { id: item.id }); if (!value.entry) throw new Error(t('skillMissing')); return () => { setSkill(value.entry); setConfirm(null); }; }) }, item.name, h('small', { title: item.discovery === 'catalogued' ? t('skillHelp') : undefined }, t(item.origin), item.state && ` · ${t(item.state)}`, ` · ${t(item.discovery)}`), h('small', { className: 'ww-clamp', title: item.description }, item.description),
       (item.baseUpdated || item.review) && h('span', { className: 'ww-skill-tags' }, item.baseUpdated && h('span', { className: 'ww-tag ww-tag-warn' }, t('skillBaseUpdatedShort')), item.review && h('span', { className: 'ww-tag ww-tag-warn' }, '待复核')), item.issue && h('span', { className: 'ww-error' }, `${t('skillIssue')}: ${item.issue}`));
     const groups = [['mine', '我的'], ['evolution', '从知识提炼'], ['builtin', '系统内置']].map(([group, label]) => { const list = shown.filter(item => groupOf(item) === group); return list.length > 0 && h(React.Fragment, { key: group }, h('p', { className: 'ww-skill-group' }, label), ...list.map(skillRow)); });
+    // 扩展带的技能按扩展分开，只读；正文由 DSH 实际加载的那份读出。
+    const extensionRow = item => { const id = `extension:${item.extension.id}:${item.name}`; return h('button', { type: 'button', className: `ww-skill-row${skill?.id === id ? ' ww-current' : ''}`, key: id, disabled: busy, onClick: () => run(async () => { const value = await skillCommand('extension_read', { feature: item.extension.id, name: item.name }); return () => { setSkill({ ...value.extension, id, origin: 'extension', actions: [] }); setConfirm(null); }; }) }, item.name, h('small', null, `${t('skillExtension')} · ${t('skillReadOnly')}`), h('small', { className: 'ww-clamp', title: item.description }, item.description)); };
+    for (const extension of extensions) {
+      const list = extensionShown.filter(item => item.extension === extension);
+      if (list.length) groups.push(h(React.Fragment, { key: `extension:${extension.id}` }, h('p', { className: 'ww-skill-group' }, `${t('skillExtension')} · ${labelText(extension)}`), ...list.map(extensionRow)));
+    }
     // 来源笔记变了的提炼技能照常可用，只提示复核。
     const reviewText = review => [review.changed.length > 0 && `来源笔记有改动：${review.changed.join('、')}。`, review.missing.length > 0 && `来源笔记找不到（可能移动或删除了）：${review.missing.join('、')}。`, review.otherVault && '来源在另一个知识库，暂时没法核对。', '技能照常可用；可以和小鲸核对后重新提炼。'].filter(Boolean).join('');
     body = h('section', { className: 'ww-skill-library' },
       h('header', { className: 'ww-pagehead' }, h('div', null, h('h2', null, t('skillLibrary')), h('p', null, summary)), h('div', { className: 'ww-pagehead-actions' }, button('refine', () => openAssistant(t('refinePrompt')), dirty), button('newSkill', () => setSkillEditor(null), false, { className: 'ww-primary' }))),
-      h('div', { className: 'ww-skill-filters' }, h('label', { className: 'ww-search' }, h('input', { type: 'search', value: skillQuery, placeholder: '名字或用途', 'aria-label': '查找技能', onChange: event => setSkillQuery(event.target.value) })), chip('all', '全部'), chip('mine', '我的'), chip('evolution', '提炼'), chip('builtin', '系统'), chip('updated', '有更新'), chip('review', '待复核')),
-      h('div', { className: 'ww-split ww-skill-split' }, h('div', { className: 'ww-list ww-skill-list' }, skills.length ? (shown.length ? groups : h('p', { className: 'ww-muted', role: 'status' }, '没有匹配的技能，换个词或筛选试试')) : help('emptySkills'), row(button('previous', () => pageSkills(skillPages.current.at(-1), 'previous'), !skillPages.current.length), button('next', () => pageSkills(skillPage.offset + skills.length, 'next'), !skillPage.truncated || !skills.length))),
+      h('div', { className: 'ww-skill-filters' }, h('label', { className: 'ww-search' }, h('input', { type: 'search', value: skillQuery, placeholder: '名字或用途', 'aria-label': '查找技能', onChange: event => setSkillQuery(event.target.value) })), chip('all', '全部'), chip('mine', '我的'), chip('evolution', '提炼'), chip('builtin', '系统'), chip('updated', '有更新'), chip('review', '待复核'), extensionRows.length > 0 && chip('extension', t('skillExtension'))),
+      h('div', { className: 'ww-split ww-skill-split' }, h('div', { className: 'ww-list ww-skill-list' }, skills.length || extensionRows.length ? (shown.length || extensionShown.length ? groups : h('p', { className: 'ww-muted', role: 'status' }, '没有匹配的技能，换个词或筛选试试')) : help('emptySkills'), row(button('previous', () => pageSkills(skillPages.current.at(-1), 'previous'), !skillPages.current.length), button('next', () => pageSkills(skillPage.offset + skills.length, 'next'), !skillPage.truncated || !skills.length))),
         skill ? h('article', { className: 'ww-card ww-skill-detail ww-meander' }, h('h3', null, skill.name), row(skill.actions.includes('update') && button('editSkill', () => run(async () => { const current = await api.resolveSkillEdit(skill, operation.current.controller.signal); if (!current) throw new Error(t('skillMissing')); return () => setSkillEditor(current); })), ...['remove', 'reset'].filter(action => skill.actions.includes(action)).map(action => button(action === 'remove' ? 'removeSkill' : 'resetSkill', () => setConfirm({ kind: `skill-${action}`, id: skill.id })))),
+          skill.origin === 'extension' && h('div', { className: 'ww-notice', role: 'status' }, t('skillExtensionHelp', { name: labelText(skill) })),
           skill.origin === 'evolution' && button('skillEdit', () => openAssistant(t('skillEditPrompt', { reference: JSON.stringify({ name: skill.name, state: skill.state, hash: skill.hash }) }))), skill.issue && h('div', { className: 'ww-notice ww-error', role: 'status' }, `${t('skillIssue')}: ${skill.issue}`), skill.baseUpdated && h('div', { className: 'ww-notice', role: 'status' }, t('skillBaseUpdated')), skill.review && h('div', { className: 'ww-notice', role: 'status' }, h('span', { className: 'ww-tag ww-tag-warn' }, '待复核'), ' ', reviewText(skill.review)), h('pre', null, skill.content), skill.sourcePaths && h('h3', null, t('sourcePaths')), h('ul', null, ...(skill.sourcePaths || []).map((source) => h('li', { key: source }, source))),
           ['remove', 'reset'].map(action => confirm?.kind === `skill-${action}` && confirm.id === skill.id && h(ConfirmDialog, { key: action, title: t(action === 'remove' ? 'skillRemoveTitle' : 'skillResetTitle'), message: t(action === 'remove' ? 'skillConfirmRemove' : 'skillConfirmReset'), confirmLabel: t(action === 'remove' ? 'removeSkill' : 'resetSkill'), cancelLabel: t('cancel'), danger: action === 'remove', busy, onCancel: () => setConfirm(null), onConfirm: () => run(async () => { const result = await skillCommand(action, { id: skill.id, expectedHash: skill.hash, ...(skill.baseHash === undefined ? {} : { expectedBaseHash: skill.baseHash }) }); if ((await skillCommand('read', { id: skill.id })).entry !== null) throw new Error(t('skillReadback')); const base = action === 'reset' ? (await skillCommand('read', { id: result.baseId })).entry : null; const value = await skillCommand('list'); return () => { adoptSkills(value); setSkill(base); setConfirm(null); }; }, action === 'remove' ? 'skillRemoved' : 'skillResetDone') })),
           skill.origin === 'evolution' && skill.state !== 'candidate' && row(

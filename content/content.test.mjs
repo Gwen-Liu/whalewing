@@ -13,6 +13,7 @@ const root = fileURLToPath(new URL('.', import.meta.url));
 // 角色名单从同目录的 experts/*.md 读提示词，按文件地址加载；不加载 Host 或员工数据。
 const { roles, commonPrompt, expertTemplates, retiredBuiltinIds } = await import(pathToFileURL(join(root, 'roles.js')).href);
 const { parseExpertTemplate } = await import(pathToFileURL(join(root, '../features/experts/template.js')).href);
+const { styleWords, styleHits } = await import(pathToFileURL(join(root, '../src/vault.js')).href);
 // 内置专家和随包模板库是同一种写法，提示词结构和技能对照规则一起检查。
 const allExperts = [...roles, ...expertTemplates];
 const rulePath = join(root, 'vault/00-系统/规则/知识库规则.md');
@@ -85,11 +86,25 @@ test('专家模板文件：内置与模板库逐个往返一致，格式不对�
   for (const [reason, text] of Object.entries(bad)) assert.throws(() => parseExpertTemplate(text), { code: 'EXPERT_TEMPLATE', message: /^专家模板格式不对：/u }, reason);
 });
 
-test('固定规则保留十区、九类型、属性和修订覆盖语义', () => {
+// 2026-11-01 照第二大脑的改版重写：四层分工、关于自己的三篇、任务记录放进时间线、人话在上证据在下、唯一一份用词表。
+test('固定规则：十区、九类型、属性照旧，写法和分工按第二大脑改版后的做法', () => {
   for (const dir of ['00-系统', '10-收件箱', '20-项目', '30-领域', '40-知识', '50-来源', '60-时间线', '70-作品', '80-外部索引', '90-归档']) assert.ok(rules.includes(dir), dir);
   for (const type of ['capture', 'timeline', 'project', 'area', 'source', 'atomic', 'moc', 'output', 'asset-index']) assert.ok(rules.includes('`' + type + '`'), type);
-  for (const token of ['created', 'updated', 'aliases', 'superseded', 'current', 'on_hit', 'on_miss', 'on_wrong', '唯一', '不删除原件', '检查记录', '成功覆盖', '未读完', '七天', '不强制逐个经过']) assert.ok(rules.includes(token), token);
+  for (const token of ['created', 'updated', 'aliases', '唯一', '不删除原件', '检查记录', '不强制逐个经过', '人话在上，证据在下', '随手记录', '值得提炼', '待你决定', '又解释了一遍', '每日记忆', '每周思考', '关于我', '发展目标与待办', '重要决定', '60-时间线/任务/YYYY-MM/', '00-系统/索引/任务', '用词对照', '没读完、读失败或写失败的部分不提交']) assert.ok(rules.includes(token), token);
   assert.match(rules, /归档是状态/u);
+  // 改版前的那一套记账说法不再出现在规则里。
+  for (const old of ['on_hit', 'on_miss', '覆盖账本', '成功覆盖']) assert.ok(!rules.includes(old), old);
+  // 规则自己也守用词表：表以外的正文不出现表里的词。
+  const words = styleWords(rules);
+  assert.ok(words.length >= 20);
+  const tableStart = rules.indexOf('用词对照'), tableEnd = rules.indexOf('\n## ', tableStart);
+  assert.deepEqual(styleHits(rules.slice(0, tableStart) + rules.slice(tableEnd), words), {});
+});
+
+test('文风检查：按用词表数，不算原话、代码、引用和员工自己的随手记录', () => {
+  const words = styleWords(rules);
+  const body = '# 2026-11-01\n\n今天回读了一遍口径。\n\n## 随手记录\n\n口径不对\n\n## 做了什么\n\n「回读」是原话，`口径` 在代码里，Owner 也算。\n\n> 引用里的产物不算\n\n见[[产物清单]]。';
+  assert.deepEqual(styleHits(body, words), { 回读: 1, 口径: 1, owner: 1 });
 });
 
 test('三基础技能与独立资讯技能的分发、路由与生命周期完整', async () => {
@@ -103,7 +118,7 @@ test('三基础技能与独立资讯技能的分发、路由与生命周期完�
     assert.ok(body.length < 8192);
   }
   const knowledge = await readFile(join(root, 'skills/whalewing-knowledge/SKILL.md'), 'utf8');
-  for (const s of ['expectedHash', 'source_read', 'coverage', 'complete', '未完成', '实际工具描述']) assert.ok(knowledge.includes(s), s);
+  for (const s of ['expectedHash', 'source_read', 'coverage', 'complete', '实际工具描述', '关于我', '重要决定', '发展目标与待办', '又解释了一遍', '每日记忆', '每周思考', '随手记录']) assert.ok(knowledge.includes(s), s);
   const evolution = await readFile(join(root, 'skills/whalewing-skill-evolution/SKILL.md'), 'utf8');
   for (const s of ['sourcePaths', '活动扫描根之外', '未参与', '重新加载', '同名遮蔽', '停用', '固定知识规则']) assert.ok(evolution.includes(s), s);
   const check = await readFile(join(root, 'skills/whalewing-check/SKILL.md'), 'utf8');
@@ -189,10 +204,10 @@ test('分类反例：已确认保留的未消化外部材料不进收件箱', as
   assert.match(rules, /已经确认要保留、尚未消化的外部材料，通过 `80-外部索引` 登记待整理原件/u);
   assert.match(rules, /原件继续留在库外受控位置/u);
   assert.match(rules, /归属或保留价值仍不明确的输入进入 `10-收件箱`/u);
-  assert.match(rules, /明确属于项目的记录直接进入项目/u);
+  assert.match(rules, /明确属于某个项目的记录直接进项目/u);
   assert.doesNotMatch(rules, /先判断是否尚未消化或归属不明/u);
   const knowledge = await readFile(join(root, 'skills/whalewing-knowledge/SKILL.md'), 'utf8');
-  assert.match(knowledge, /回读固定规则的“十区职责与分类”/u);
+  assert.match(knowledge, /按规则的“十个分区”选位置/u);
   assert.match(knowledge, /不将“尚未消化”单独当作收件箱条件/u);
   assert.doesNotMatch(knowledge, /未消化或未确定归属的资料进入收件箱/u);
 });
@@ -218,9 +233,9 @@ test('来源反例：提炼来源变动与会话投影省略不能伪装成验�
   const knowledge = await readFile(join(root, 'skills/whalewing-knowledge/SKILL.md'), 'utf8');
   assert.match(knowledge, /同一批保持工具给定的冻结 `cutoff`/u);
   assert.match(knowledge, /检查 `omittedEvents`/u);
-  assert.match(knowledge, /用户\/助手有界投影，不是完整会话/u);
+  assert.match(knowledge, /用户和助手的有界投影，不是完整会话/u);
   assert.match(knowledge, /回原会话或对应工程核对原件/u);
-  assert.match(knowledge, /不提交空产物逃过检查/u);
+  assert.match(knowledge, /不拿空结果交差/u);
   assert.match(knowledge, /仅全省略页允许 `outputs: \[\]`/u);
   assert.match(knowledge, /不表示被省略的原件已验收或当天没有工作/u);
 });
@@ -229,11 +244,15 @@ test('初始化文件仅含自包含规则导航和模板，链接有效', async
   const vaultRoot = join(root, 'vault');
   const paths = await files(vaultRoot);
   const notes = paths.filter(path => path.endsWith('.md'));
-  assert.equal(notes.length, 18);
+  // 根入口 1、首页 1、规则 3、模板 14，加 30-领域/个人管理 的三篇起步笔记（关于我、发展目标与待办、重要决定）。
+  assert.equal(notes.length, 22);
   assert.deepEqual(paths.filter(path => !path.endsWith('.md')).map(path => relative(vaultRoot, path).replaceAll('\\', '/')).sort(), ['00-系统/Bases/任务记录.base', '00-系统/Bases/幼苗知识.base', '00-系统/Bases/收件箱.base', '00-系统/Bases/活动项目.base', '00-系统/Bases/草稿作品.base']);
   for (const path of notes) {
     const text = await readFile(path, 'utf8');
-    assert.match(text, /^---\ntype: (output|moc)\nstatus: (published|active)\ncreated: __DATE__\nupdated: __DATE__\naliases: \[\]\n---\n/u);
+    const name = relative(vaultRoot, path).replaceAll('\\', '/');
+    // 起步笔记是员工自己的领域笔记，带别名；随包文件是插件维护的成果和导航。
+    if (name.startsWith('30-领域/个人管理/')) assert.match(text, /^---\ntype: area\nstatus: active\ncreated: __DATE__\nupdated: __DATE__\naliases:\n(  - [^\n]+\n)+---\n/u, name);
+    else assert.match(text, /^---\ntype: (output|moc)\nstatus: (published|active)\ncreated: __DATE__\nupdated: __DATE__\naliases: \[\]\n---\n/u, name);
     for (const match of text.matchAll(/\[[^\]]+\]\(([^)]+)\)/g)) {
       assert.ok(!/^[a-z]+:/i.test(match[1]), '初始化模板不能依赖外部运行规则');
       await readFile(fileURLToPath(new URL(match[1], new URL(`file:///${path.replaceAll('\\', '/')}`))));

@@ -123,13 +123,15 @@ async function fixture(t) {
 }
 
 const bundledNotes = ['00-系统/Bases', '00-系统/模板', '00-系统/规则'];
-const templates = ['MOC模板', '书籍来源模板', '任务日记模板', '作品模板', '原子笔记模板', '周回顾模板', '外部文件索引模板', '日记模板', '月回顾模板', '正式笔记模板', '网页剪藏模板', '项目模板', '领域模板'];
+const templates = ['MOC模板', '书籍来源模板', '任务记录模板', '作品模板', '原子笔记模板', '周回顾模板', '外部文件索引模板', '待定模板', '日记模板', '月回顾模板', '正式笔记模板', '网页剪藏模板', '项目模板', '领域模板'];
+// 起步笔记：第一次建库时建好，之后归员工所有。
+const seeds = ['关于我', '发展目标与待办', '重要决定'].map(name => `30-领域/个人管理/${name}.md`);
 
 test('空库初始化建齐目录骨架、规则、模板与视图，重复初始化幂等且结构校验通过', async t => {
   const { vault } = await fixture(t);
   const files = await vault.files();
-  assert.deepEqual(files, ['00-系统/知识库首页.md', ...templates.map(name => `00-系统/模板/${name}.md`), ...['作品写作规范', '知识库使用说明', '知识库规则'].map(name => `00-系统/规则/${name}.md`), 'AGENTS.md'].sort());
-  assert.deepEqual(await vault.validate(), { valid: true, issues: [], notes: files.length });
+  assert.deepEqual(files, ['00-系统/知识库首页.md', ...templates.map(name => `00-系统/模板/${name}.md`), ...['作品写作规范', '知识库使用说明', '知识库规则'].map(name => `00-系统/规则/${name}.md`), ...seeds, 'AGENTS.md'].sort());
+  assert.deepEqual(await vault.validate(), { valid: true, issues: [], notes: files.length, style: { words: 22, total: 0, notes: [] } });
   for (const folder of [...layout, ...bundledNotes]) assert.ok((await fs.stat(path.join(vault.root, ...folder.split('/')))).isDirectory(), folder);
   for (const folder of ['40-知识/人生思考', '70-作品/简历', '80-外部索引/学业文件']) await assert.rejects(fs.stat(path.join(vault.root, ...folder.split('/'))), { code: 'ENOENT' });
   assert.deepEqual((await fs.readdir(path.join(vault.root, '00-系统', 'Bases'))).sort(), ['任务记录.base', '幼苗知识.base', '收件箱.base', '活动项目.base', '草稿作品.base']);
@@ -137,7 +139,7 @@ test('空库初始化建齐目录骨架、规则、模板与视图，重复初�
   assert.equal((await vault.read('00-系统/模板/项目模板.md')).readOnly, true);
   await assert.rejects(vault.write('00-系统/Bases/收件箱.base', note('收件箱'), ''), { code: 'NOTE_PATH' });
   assert.equal((await vault.initialize()).initialized, true);
-  assert.deepEqual(await vault.upgrade(), { upgraded: false, added: [], updated: [], kept: [] });
+  assert.deepEqual(await vault.upgrade(), { upgraded: false, added: [], updated: [], kept: [], retired: [] });
   assert.deepEqual((await vault.settings()).sources, []);
 });
 
@@ -154,7 +156,8 @@ test('模板代码块里的骨架替换占位后即是合规笔记', async t => 
       count++;
     }
   }
-  assert.equal(count, 12);
+  // 任务日记模板换成任务记录模板，另加待定模板：13 个骨架。
+  assert.equal(count, 13);
 });
 
 test('随包骨架升级补齐缺失、更新未改动文件，员工改过的文件与笔记保持原样', async t => {
@@ -174,20 +177,55 @@ test('随包骨架升级补齐缺失、更新未改动文件，员工改过的�
   const ownBefore = await fs.readFile(file(own), 'utf8');
   await fs.writeFile(file('.whalewing/bundle.json'), JSON.stringify({ schema: 1, version: 'previous', files: { ...manifest.files, [rule]: digest(oldRule) } }));
   const result = await vault.upgrade();
-  assert.deepEqual(result, { upgraded: true, added: [added], updated: [rule], kept: [home] });
+  assert.deepEqual(result, { upgraded: true, added: [added], updated: [rule], kept: [home], retired: [] });
   const upgraded = await fs.readFile(file(rule), 'utf8');
   assert.match(upgraded, /^---\ntype: output\nstatus: published\ncreated: 2026-01-02\n/u);
-  assert.match(upgraded, /## 十区职责与分类/u);
+  assert.match(upgraded, /## 十个分区/u);
   assert.equal(await fs.readFile(file(home), 'utf8'), edited);
   assert.equal(await fs.readFile(file(own), 'utf8'), ownBefore);
   assert.ok((await fs.stat(file('60-时间线/周记'))).isDirectory());
   assert.equal(JSON.parse(await fs.readFile(file('.whalewing/bundle.json'), 'utf8')).version, manifest.version);
-  assert.deepEqual(await vault.upgrade(), { upgraded: false, added: [], updated: [], kept: [] });
+  assert.deepEqual(await vault.upgrade(), { upgraded: false, added: [], updated: [], kept: [], retired: [] });
   // 无清单的首版库只认首版原文；不认识的内容一律保留。
   await fs.rm(file('.whalewing/bundle.json'));
   await fs.writeFile(file(rule), oldRule);
   assert.deepEqual((await vault.upgrade()).kept, [home, rule]);
   assert.equal(await fs.readFile(file(rule), 'utf8'), oldRule);
+});
+
+// 2026-11-01 照第二大脑改版：老库升级时补建关于自己的三篇；改名掉的旧模板，员工没改过就收走。
+test('老库升级：补建关于自己的三篇，员工删了不再补；不再随包的旧模板没改过才收走', async t => {
+  const { vault } = await fixture(t);
+  const file = name => path.join(vault.root, ...name.split('/'));
+  const manifest = JSON.parse(await fs.readFile(file('.whalewing/bundle.json'), 'utf8'));
+  assert.deepEqual(manifest.seeded, [...seeds].sort(), '新库记下已经建过的起步笔记');
+  // 模拟改版前的库：没有三篇起步笔记，也没有 seeded 清单；还有两份已经不随包的旧模板，一份没改过、一份员工改过。
+  for (const name of seeds) await fs.rm(file(name));
+  const pristine = '00-系统/模板/任务日记模板.md', changed = '00-系统/模板/旧模板.md';
+  const oldTemplate = note('任务日记模板', '旧版的整理模板。');
+  await fs.writeFile(file(pristine), oldTemplate);
+  await fs.writeFile(file(changed), note('旧模板', '员工在旧模板里补了自己的说明。'));
+  const files = { ...manifest.files, [pristine]: digest(oldTemplate), [changed]: digest(note('旧模板', '随包时的原文。')) };
+  await fs.writeFile(file('.whalewing/bundle.json'), JSON.stringify({ schema: 1, version: 'previous', files }));
+  const result = await vault.upgrade();
+  assert.deepEqual(result.added, seeds, '三篇起步笔记补建');
+  assert.deepEqual(result.retired, [pristine], '没改过的旧模板收走');
+  await assert.rejects(fs.stat(file(pristine)), { code: 'ENOENT' });
+  assert.match(await fs.readFile(file(changed), 'utf8'), /员工在旧模板里补了自己的说明/, '员工改过的旧模板留着');
+  const recovery = await fs.readdir(file('.whalewing/recovery'));
+  assert.ok(recovery.length >= 1, '收走前留了备份');
+  assert.match(await fs.readFile(file(seeds[0]), 'utf8'), /^---\ntype: area\nstatus: active\n/u);
+  // 员工删了“关于我”，下次升级不再补；他写过的另两篇也不被改动。
+  await fs.rm(file(seeds[0]));
+  await vault.write(seeds[1], (await vault.read(seeds[1])).content.replace('为什么想做：', '为什么想做：想多陪家人。'), (await vault.read(seeds[1])).hash);
+  const own = await fs.readFile(file(seeds[1]), 'utf8');
+  const after = JSON.parse(await fs.readFile(file('.whalewing/bundle.json'), 'utf8'));
+  await fs.writeFile(file('.whalewing/bundle.json'), JSON.stringify({ ...after, version: 'previous' }));
+  const again = await vault.upgrade();
+  assert.deepEqual(again.added, []);
+  await assert.rejects(fs.stat(file(seeds[0])), { code: 'ENOENT' });
+  assert.equal(await fs.readFile(file(seeds[1]), 'utf8'), own);
+  assert.ok(!(await vault.editedBundle()).some(name => seeds.includes(name)), '起步笔记不算“改过的随包文件”');
 });
 
 test('已有目录不覆盖，初始化中断留下恢复入口且可以续建', async t => {

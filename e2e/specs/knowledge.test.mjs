@@ -237,36 +237,42 @@ test('第一次打开个人知识自动建库：页头写明知识库位置，�
   });
 });
 
-// 需求§个人知识·初始化得到什么（十区、常用二级目录、3 份规则、13 个模板、首页与入口、5 个视图；库里不预装任何人的知识）
-test('建库得到需求列出的内容：十区和常用二级目录、3 份规则、13 个模板、首页、AGENTS 和 5 个视图，目录里看到的和磁盘一致', async t => {
+// 需求§个人知识·初始化得到什么（十区、常用二级目录、3 份规则、14 个模板、3 篇关于自己的笔记、首页与入口、5 个视图；库里不预装任何人的知识）
+// 2026-11-01 照第二大脑改版：模板 13 → 14（加任务记录、待定事项，去掉任务日记模板），任务记录改放 60-时间线/任务，
+// 不再建 00-系统/索引/任务；领域下多了个人管理，里面是关于我、发展目标与待办、重要决定三篇空骨架；归档下多了收件箱结案。
+test('建库得到需求列出的内容：十区和常用二级目录、3 份规则、14 个模板、3 篇关于自己的笔记、首页、AGENTS 和 5 个视图，目录里看到的和磁盘一致', async t => {
   await prepare(t);
-  const layout = ['00-系统/索引/任务', '20-项目/工作', '20-项目/学习', '30-领域/职业发展', '40-知识/产品与业务', '40-知识/工作方法', '40-知识/工程与工具', '40-知识/人工智能', '40-知识/学习与成长', '50-来源/书籍', '50-来源/网页', '50-来源/课程与视频', '50-来源/对话与会议', '60-时间线/日记', '60-时间线/周记', '60-时间线/月记', '60-时间线/人生事件', '70-作品/报告', '70-作品/文章', '70-作品/PPT', '80-外部索引/代码项目', '80-外部索引/工作文件', '80-外部索引/数字资产', '90-归档/已完成项目'];
+  const layout = ['20-项目/工作', '20-项目/学习', '30-领域/个人管理', '30-领域/职业发展', '40-知识/产品与业务', '40-知识/工作方法', '40-知识/工程与工具', '40-知识/人工智能', '40-知识/学习与成长', '50-来源/书籍', '50-来源/网页', '50-来源/课程与视频', '50-来源/对话与会议', '60-时间线/日记', '60-时间线/周记', '60-时间线/月记', '60-时间线/任务', '60-时间线/人生事件', '70-作品/报告', '70-作品/文章', '70-作品/PPT', '80-外部索引/代码项目', '80-外部索引/工作文件', '80-外部索引/数字资产', '90-归档/已完成项目', '90-归档/收件箱结案'];
   const rules = ['作品写作规范', '知识库使用说明', '知识库规则'];
-  const namedTemplates = ['项目', '领域', '原子笔记', 'MOC', '书籍来源', '网页剪藏', '作品', '外部文件索引', '日记', '周回顾', '月回顾'].map(name => `${name}模板`);
+  const namedTemplates = ['项目', '领域', '原子笔记', 'MOC', '书籍来源', '网页剪藏', '作品', '外部文件索引', '日记', '周回顾', '月回顾', '任务记录', '待定'].map(name => `${name}模板`);
+  const aboutMe = ['关于我', '发展目标与待办', '重要决定'];
   const bases = ['任务记录', '幼苗知识', '收件箱', '活动项目', '草稿作品'];
   const list = dir => fs.readdirSync(vaultFile(dir)).sort();
   for (const dir of [...zones, ...layout]) assert.ok(fs.statSync(vaultFile(dir)).isDirectory(), `磁盘上有 ${dir}`);
   assert.deepEqual(list('00-系统/规则'), rules.map(name => `${name}.md`).sort());
   const templates = list('00-系统/模板');
-  assert.equal(templates.filter(name => name.endsWith('.md')).length, 13, `13 个模板：${templates.join('、')}`);
+  assert.equal(templates.filter(name => name.endsWith('.md')).length, 14, `14 个模板：${templates.join('、')}`);
   for (const name of namedTemplates) assert.ok(templates.includes(`${name}.md`), `有${name}`);
   assert.deepEqual(list('00-系统/Bases'), bases.map(name => `${name}.base`).sort());
   assert.ok(fs.statSync(vaultFile('00-系统/知识库首页.md')).isFile());
   assert.ok(fs.statSync(vaultFile('AGENTS.md')).isFile());
-  assert.deepEqual(vaultNotes(dsh.vault).filter(name => !name.startsWith('00-系统/') && name !== 'AGENTS.md' && !titleOf(name).startsWith('鲸翼测试-')), [], '十区里没有预装任何笔记');
+  assert.ok(!fs.existsSync(vaultFile('00-系统/索引')), '不再建 00-系统/索引');
+  assert.deepEqual(list('30-领域/个人管理'), aboutMe.map(name => `${name}.md`).sort());
+  for (const name of aboutMe) assert.match(fs.readFileSync(vaultFile(`30-领域/个人管理/${name}.md`), 'utf8'), /^---\ntype: area\n/u, `${name}是领域笔记`);
+  assert.deepEqual(vaultNotes(dsh.vault).filter(name => !name.startsWith('00-系统/') && !name.startsWith('30-领域/个人管理/') && name !== 'AGENTS.md' && !titleOf(name).startsWith('鲸翼测试-')), [], '除了三篇关于自己的空骨架，十区里没有预装任何笔记');
 
   await withPage(browser, t, async ({ page, errors }) => {
     await openKnowledge(page);
     await expand(page, '00-系统');
     const system = await listing(page, '00-系统');
-    assert.deepEqual([...system.folders].sort(), ['Bases', '索引', '模板', '规则'].sort());
+    assert.deepEqual([...system.folders].sort(), ['Bases', '模板', '规则'].sort());
     assert.deepEqual(system.notes, ['知识库首页']);
     await expand(page, '00-系统', '规则');
     assert.deepEqual([...(await listing(page, '00-系统/规则')).notes].sort(), [...rules].sort());
     await expand(page, '00-系统', '模板');
     assert.deepEqual([...(await listing(page, '00-系统/模板')).notes].sort(), templates.filter(name => name.endsWith('.md')).map(titleOf).sort());
-    await expand(page, '00-系统', '索引');
-    assert.deepEqual(await listing(page, '00-系统/索引'), { folders: ['任务'], notes: [] });
+    await expand(page, '30-领域', '个人管理');
+    assert.deepEqual([...(await listing(page, '30-领域/个人管理')).notes].sort(), [...aboutMe].sort());
     assert.deepEqual(errors, []);
   });
 });

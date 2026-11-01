@@ -31,11 +31,15 @@ const sorted = value => Object.fromEntries(Object.entries(value).sort(([a], [b])
 // 同日修功能测试列出的已知问题：知识卡片页头加现状摘要（7 个词条）、导入 0 字节文件的提示、技能标识规则的说明；
 // 资讯页头改成和其他页头一样的标题加摘要（去掉垂直居中）。
 // 同日用户定“工具台”改名“办公工坊”（DSH 的“工具”指给模型调用的工具）：只改了 toolbox 一个词条（英文没有单独译名，沿用中文），中英文都把它换回“工具台”后指纹与上一版逐字相同。
+// 2026-11-01 为扩展来源加 9 个词条（专家查看/复制和来源说明 5 个、扩展笔记只读说明 1 个、技能库“扩展”一组 3 个）和一条只读专家表单的样式；没装扩展时这些都不出现。
+// 同日照第二大脑改版升级个人知识：检查弹窗加文风结果 2 个词条（没有用到不推荐的词、几篇用了），样式不变。
+// 同日定时任务跟着改版：“DSH 工作知识整理”改名“每日记忆”，新增“每周思考”和旧任务“换成新版”共 9 个词条
+// （每周思考名称和说明 2 个、可换新版的提示和按钮 6 个、换好后的提示 1 个），处理范围、旧计划说明里的“知识整理”改成“每日记忆”，样式不变。
 test('全栏改版后的双语词条与样式快照', () => {
-  assert.equal(Object.keys(zh).length, 659); assert.equal(Object.keys(en).length, 659);
-  assert.equal(hash(sorted(zh)), 'f7821d58deaba65b9b1e1f7387be1747abdd7df0186fdc80bc6664cf2bb956cd');
-  assert.equal(hash(sorted(en)), '70249dbb562b13b1971011266e0174ed915f234028bb5772603452ccbe99e56a');
-  assert.equal(hash(css), '06260ea6b8cd1197203fd33ae9a4f15159914a35db83f50cbc2a1ed18fdbc130');
+  assert.equal(Object.keys(zh).length, 679); assert.equal(Object.keys(en).length, 679);
+  assert.equal(hash(sorted(zh)), '5aa1bee9004073a1e4480578a665ec3df2eafd2ca86a972a6154e673915585bc');
+  assert.equal(hash(sorted(en)), '970f4ece8ebe845f2e87144cf4587ced578182cbe93be7f5bde438537dd6b1a3');
+  assert.equal(hash(css), '90b80d2fb180fe86230cb3de368702de556638a3a80cb7d0956133acd96fccf7');
   assert.ok(css.includes('.ww-book-scroll{--dsh-scrollbar-width:14px;--dsh-scrollbar-thumb-border:4px;'), '正文滚动条够宽好拖');
   assert.equal(zh.newsHeadline, '来源标题'); assert.equal(en.newsHeadline, 'Source headline'); assert.equal(zh.newsViewSource, '查看来源');
   assert.equal(zh.library, '书架'); assert.equal(zh.learningTip, 'AI 使用技巧'); assert.equal(zh.libraryAll, '全部'); assert.equal(zh.libraryDailyBadge, '常看');
@@ -169,8 +173,10 @@ const codes = [
   "session/writer-held"
 ];
 // 2026-10-25 审查过的变化只有两项：LEGACY_SCHEDULE 改说“旧版留下的知识整理计划”，AUTOMATION_IDENTITY 不再当作填写错误。
+// 2026-11-01 只改了 LEGACY_SCHEDULE 的说法：新的每天整理任务叫“每日记忆”，“不能和每日记忆同时启用”“再启用每日记忆”。
 test('领域错误归位保留原122项错误及未知码的显示与优先级', () => {
-  assert.equal(hash(codes.map(code => [code, explainError(code, '测试原文')])), 'ffe6707db298b063be1e614d1604c793e9511efc322a74213277255e84c09872');
+  assert.equal(explainError('LEGACY_SCHEDULE', '测试原文').text.includes('每日记忆'), true);
+  assert.equal(hash(codes.map(code => [code, explainError(code, '测试原文')])), 'a4dda1c73ac44abb7e9e2ee6ee94c3b11863fe2e50c5c9a0c8d4912cd2762aa0');
 });
 
 
