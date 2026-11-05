@@ -111,6 +111,9 @@ export const css = [
   knowledge.styles[17],
   experts.styles[4],
   automation.styles[5],
+  // 2026-11-02 补齐设计稿的点缀：技能页没选技能时的空卡、定时任务分栏的水印。
+  skills.styles[2],
+  automation.styles[6],
   theme.shell
 ].join('');
 export const explainError = (code, message) => explainCommonError(code, message, domains);

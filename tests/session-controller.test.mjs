@@ -321,6 +321,27 @@ test('资讯Host原ID恢复使用真实resolveAgent、目录与认领读回，�
   assert.ok(h.ctx.workspaceRegistry.archivedSessionIds.includes('news-pending'));
 });
 
+test('完整 DSH 里默认打开每日记忆和每周思考：会话在“鲸翼定时任务”工作区、认领和计划都读得回；再跑不重复建，删掉不复活', async t => {
+  const h = await controllerFixture(t);
+  const profile = path.join(h.root, 'profile'); await mkdir(profile, { recursive: true });
+  // 测试环境原本没有 profile，自动开启不会跑；补上后和真实 DSH 一样在服务齐全时自动建。
+  h.ctx.provide('profileContext', { dir: profile });
+  await h.automationHost.openBuiltIns(h.signal());
+  await h.automationHost.openBuiltIns(h.signal());
+  const tasks = (await h.ctx.schedule.catalog()).sort((a, b) => a.title.localeCompare(b.title, 'zh'));
+  assert.deepEqual(tasks.map(task => [task.title, task.kind, task.time, task.weekdays]).sort(), [['每周思考', 'weekly', '07:00:00.000', [1]], ['每日记忆', 'daily', '01:00:00.000', undefined]].sort());
+  const workspace = await h.automationHost.taskWorkspace(h.signal());
+  for (const task of tasks) {
+    const purpose = task.title === '每日记忆' ? 'knowledge' : 'thinking';
+    assert.equal((await h.projection(task.sessionId)).values.whalewingAutomation, purpose);
+    assert.ok(workspace.sessionIds.includes(task.sessionId), `${task.title} 的会话在鲸翼定时任务工作区`);
+  }
+  const thinking = tasks.find(task => task.title === '每周思考');
+  await h.ctx.schedule.delete({ sessionId: thinking.sessionId, id: thinking.id });
+  assert.deepEqual((await h.automationHost.openBuiltIns(h.signal())).created, []);
+  assert.deepEqual((await h.ctx.schedule.catalog()).map(task => task.title), ['每日记忆'], '员工删掉的不再建回来');
+});
+
 test('资讯Host子代理错误保留请求原ID与可打开动作，不接管写入', async t => {
   const h = await controllerFixture(t); await h.ctx.plugin(Cards);
   await h.create('news-parent');

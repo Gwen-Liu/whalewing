@@ -145,7 +145,8 @@ async function selectGraphNode(page, title) {
 async function locateNodes(page, wanted) {
   const spots = await canvasOf(page).evaluate(canvas => {
     const w = canvas.width, h = canvas.height, data = canvas.getContext('2d').getImageData(0, 0, w, h).data;
-    const dark = (x, y) => { const i = (y * w + x) * 4; return data[i + 3] > 220 && data[i] < 80 && data[i + 1] < 80 && data[i + 2] < 80; };
+    // 节点按层上色（2026-11-02），不再都是深色：找不透明、又不是浅色描边底的实心像素；连线半透明、文字笔画细，都凑不成 3×3 实心。
+    const dark = (x, y) => { const i = (y * w + x) * 4; return data[i + 3] > 220 && !(data[i] > 200 && data[i + 1] > 200 && data[i + 2] > 200); };
     const clusters = [];
     for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
       let solid = true;
@@ -670,7 +671,7 @@ function expectedGraphTitles() {
 }
 
 // 需求§个人知识·阅读、Wiki 与图谱（关系图谱以笔记为节点、链接为边，可看全库；平移缩放；新图约 0.7 秒淡入）
-test('关系图谱：打开时淡入，画出全部笔记（含缺失节点），滚轮缩放、拖动平移后点“重置视图”回到原样', async t => {
+test('关系图谱：打开时淡入，按层上色、不画归档模板和没有连线的笔记（缺失节点照画），滚轮缩放、拖动平移后点“重置视图”回到原样', async t => {
   await prepare(t, fixtures.link, fixtures.refer);
   await withPage(browser, t, async ({ page, errors }) => {
     await openWhaleWing(page, dsh.url);
@@ -708,7 +709,16 @@ test('关系图谱：打开时淡入，画出全部笔记（含缺失节点）�
     await page.locator('.ww-graph-canvas').getByRole('button', { name: '重置视图' }).click();
     assert.equal((await settled(page)).hash, initial.hash, '重置后和打开时一模一样');
 
-    assert.deepEqual((await graphTitles(page)).sort(), expectedGraphTitles(), '全库每篇笔记和缺失节点都在图上');
+    // 2026-11-02 照第二大脑的 Obsidian 图谱：全库图不画归档、模板和没有连线的笔记，左上角图例写明按层上色和没画哪些。
+    const titles = await graphTitles(page), all = expectedGraphTitles();
+    const templates = vaultNotes(dsh.vault).filter(name => name.startsWith('00-系统/模板/')).map(titleOf);
+    assert.ok(titles.every(title => all.includes(title)), `图上只有库里的笔记和缺失节点：${titles.join('、')}`);
+    assert.ok(!titles.some(title => templates.includes(title)), '模板不在图上');
+    for (const title of [fixtures.link.title, fixtures.refer.title, '鲸翼测试-不存在', '知识库规则', '知识库首页', '关于我']) assert.ok(titles.includes(title), `图上有“${title}”`);
+    const legend = page.locator('.ww-graph-legend');
+    await legend.waitFor();
+    const legendText = await legend.innerText();
+    for (const text of ['关于自己', '知识', '时间线和收件箱', '系统和外部索引', `模板 ${templates.length} 篇`]) assert.ok(legendText.includes(text), `图例里有“${text}”：${legendText}`);
     assert.deepEqual(errors, []);
   });
 });

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { mosaic, inpaint, qrMatrix, qrSvg, encodeWav, encodeMp3, extraTask } from '../src/utilities/extras.js';
+import { mosaic, inpaint, qrMatrix, qrSvg, encodeWav, extraTask } from '../src/utilities/extras.js';
 import { frameTimes } from '../src/utilities/media-prep.js';
 import { LIMITS } from '../src/utilities/core.js';
 
@@ -74,21 +74,20 @@ test('识别二维码：个别图片读不了只记入明细，其余照常识�
   } finally { for (const [key, descriptor] of saved) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key]; } }
 });
 
-test('音频编码：WAV 头部字段正确，MP3 输出为合法帧', () => {
+test('音频编码：WAV 头部字段正确', () => {
   const sampleRate = 44100, tone = new Float32Array(sampleRate / 2).map((_, i) => Math.sin(i / 10) * 0.5);
   const wav = encodeWav([tone, tone], sampleRate), view = new DataView(wav.buffer);
   assert.equal(new TextDecoder().decode(wav.slice(0, 4)), 'RIFF'); assert.equal(new TextDecoder().decode(wav.slice(8, 12)), 'WAVE');
   assert.equal(view.getUint16(22, true), 2); assert.equal(view.getUint32(24, true), sampleRate); assert.equal(wav.length, 44 + tone.length * 4);
-  const mp3 = encodeMp3([tone], sampleRate, 128);
-  assert.ok(mp3.length > 1000);
-  const sync = mp3.findIndex((byte, i) => byte === 0xff && (mp3[i + 1] & 0xe0) === 0xe0);
-  assert.ok(sync >= 0, '含 MPEG 帧同步字');
 });
 
-test('音频任务校验解码结果，并按所选格式输出', async () => {
+test('音频任务校验解码结果，只导出 WAV（旧页面传 MP3 也一样）', async () => {
   const pcm = { sampleRate: 8000, channels: [new Float32Array(8000)] };
-  const wav = await extraTask('audio-encode', [], { pcm, format: 'wav', name: '会议录音.mp4' });
-  assert.equal(wav.files[0].name, '会议录音.wav'); assert.equal(wav.files[0].mime, 'audio/wav'); assert.match(wav.summary, /单声道/);
+  const wav = await extraTask('audio-encode', [], { pcm, name: '会议录音.mp4' });
+  assert.equal(wav.files[0].name, '会议录音.wav'); assert.equal(wav.files[0].mime, 'audio/wav'); assert.match(wav.summary, /^WAV · .*单声道/);
+  const old = await extraTask('audio-encode', [], { pcm, format: 'mp3', bitrate: 320, name: '会议录音.mp4' });
+  assert.equal(old.files[0].name, '会议录音.wav'); assert.equal(old.files[0].mime, 'audio/wav');
+  assert.equal(new TextDecoder().decode(old.files[0].bytes.slice(8, 12)), 'WAVE');
   await assert.rejects(extraTask('audio-encode', [], { pcm: { sampleRate: 8000, channels: [] }, format: 'mp3' }), /解码结果无效/);
   await assert.rejects(extraTask('audio-encode', [], { pcm: { sampleRate: 8000, channels: [new Float32Array(0)] }, format: 'mp3' }), /没有音频/);
 });

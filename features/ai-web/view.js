@@ -197,13 +197,14 @@ export function createAiWebView(React, { useDiscard = ({ onClose }) => [onClose,
     const tile = entry => h('article', { key: entry.id, className: `ww-ai-tile${entry.id === selected ? ' ww-ai-current' : ''}` },
       h('button', { type: 'button', className: 'ww-ai-open', disabled: busy || !active, onClick: () => open(entry), 'aria-label': `打开 ${entry.name}`, title: entry.description || undefined },
         avatar(entry), h('span', { className: 'ww-ai-name' }, h('strong', null, entry.name), h('small', null, entry.id === selected ? '正在用' : entry.provider || '自定义'))),
-      !entry.builtin && entryMenu(entry), entry.id === selected && h('i', { className: 'ww-orn-wave', 'aria-hidden': true }));
+      // 每张入口卡底边一道水纹，和专家卡同一种点缀（2026-11-02 补齐设计稿）。
+      !entry.builtin && entryMenu(entry), h('i', { className: 'ww-orn-wave', 'aria-hidden': true }));
     // 添加入口与“添加专家”同一种加号卡片，放在“我的入口”末尾；搜索时收起。
     const addCard = !query.trim() && h('button', { type: 'button', className: 'ww-card ww-add-card', disabled: !active || !manageAiWeb || loading, onClick: () => setEditor({ entry: null }), 'aria-haspopup': 'dialog' }, h('span', { className: 'ww-add-mark', 'aria-hidden': true }, '+'), h('h2', null, '添加 AI'));
     const groups = [['cn', '国内'], ['global', '海外 · 需海外网络'], ['mine', '我的入口']].map(([group, label]) => {
       const list = entries.filter(entry => aiWebGroup(entry) === group), add = group === 'mine' && addCard;
       return (list.length > 0 || add) && h('section', { key: group, className: 'ww-ai-group', 'aria-label': label },
-        h('p', { className: 'ww-ai-group-label' }, label, group === 'cn' && h('i', { className: 'ww-cloud', 'aria-hidden': true })),
+        h('p', { className: 'ww-ai-group-label' }, label, h('i', { className: 'ww-cloud', 'aria-hidden': true })),
         h('div', { className: 'ww-ai-grid' }, ...list.map(tile), add));
     });
     return h('section', { hidden: !active, 'aria-label': 'AI 网页', className: 'ww-ai-web' },

@@ -5,7 +5,7 @@ import test from 'node:test';
 import { isDeepStrictEqual } from 'node:util';
 import assert from 'node:assert/strict';
 import { z } from 'zod';
-import { Automation, legacySchedulePrefix, knowledgeTaskPrompt, thinkingTaskPrompt, previousKnowledgeTitle, builtInTask, automationPresentation } from '../features/automation/automation.js';
+import { Automation, legacySchedulePrefix, knowledgeTaskPrompt, thinkingTaskPrompt, previousKnowledgeTitle, builtInTask, automationPresentation, initializeBuiltIns, builtInDefaults } from '../features/automation/automation.js';
 import { automationProjection } from '../src/identity.js';
 import { automationContract } from '../features/automation/contract.js';
 import { Context } from '@deepseek-ai/cordis';
@@ -195,6 +195,103 @@ test('升级前的“DSH 工作知识整理”：目录标出可换新版，保�
   await h.owner.manage({ action: 'update', sessionId: 'knowledge', id: task.id, expected: renamed.task, expectedStatus: 'active' });
   assert.equal(h.records[0].title, '我的夜间整理');
   assert.ok(h.records[0].prompt.startsWith(knowledgeTaskPrompt));
+});
+
+// 2026-11-02 用户定：每日记忆和每周思考默认打开。
+function builtInHarness({ claimFails = 0 } = {}) {
+  const h = fixture(), values = new Map(), claims = [], specs = [];
+  h.dependencies.listWorkspaces = async () => [{ workspaceId: 'a', path: '/a', sessionIds: ['s-a'] }];
+  const create = h.schedule.create.bind(h.schedule);
+  h.schedule.create = async (sessionId, spec, signal) => { specs.push(structuredClone(spec)); return create(sessionId, spec, signal); };
+  const state = { get: key => values.get(key), put: async (key, value) => values.set(key, value) };
+  let ready = true, serial = 0, failing = claimFails;
+  const run = () => initializeBuiltIns({
+    automation: h.owner, state, modelReady: () => ready, newSessionId: purpose => `default-${purpose}-${++serial}`,
+    claimSession: async (sessionId, purpose, _signal, fresh) => {
+      claims.push([sessionId, purpose, fresh]);
+      if (failing > 0) { failing--; throw new Error('会话接受未知'); }
+      h.purposes.set(sessionId, purpose);
+    },
+  });
+  return { h, values, claims, specs, run, setReady: value => { ready = value; } };
+}
+
+test('每日记忆和每周思考默认打开：没配模型先不建；有模型时按建议时间建好并记下，员工删掉后不再建回来', async () => {
+  const s = builtInHarness();
+  s.setReady(false);
+  assert.deepEqual(await s.run(), { waiting: 'model', created: [] });
+  assert.deepEqual(s.claims, []); assert.equal(s.values.size, 0); assert.equal(s.h.records.length, 0); assert.equal(s.h.calls.includes('model'), false);
+  s.setReady(true);
+  assert.deepEqual(await s.run(), { created: ['knowledge', 'thinking'] });
+  assert.deepEqual(s.h.records.map(task => task.title), ['每日记忆', '每周思考']);
+  assert.deepEqual(s.specs.map(({ title: _t, prompt: _p, ...timing }) => timing), [builtInDefaults.knowledge.spec, builtInDefaults.thinking.spec]);
+  assert.deepEqual(builtInDefaults.knowledge.spec, { daily: { time: '01:00:00', time_zone: 'Asia/Shanghai' } });
+  assert.deepEqual(builtInDefaults.thinking.spec, { weekly: { time: '07:00:00', time_zone: 'Asia/Shanghai', weekdays: [1] } });
+  assert.deepEqual(automationPresentation(s.h.records[0].prompt).workspaceScope, { mode: 'all', excludedWorkspaceIds: [] }, '每日记忆处理全部工作区');
+  assert.equal(automationPresentation(s.h.records[1].prompt).workspaceScope, undefined, '每周思考没有处理范围');
+  assert.deepEqual(s.claims.map(([, purpose, fresh]) => [purpose, fresh]), [['knowledge', true], ['thinking', true]]);
+  assert.equal(s.h.calls.filter(call => call === 'model').length, 2, '两个任务都先准备模型');
+  assert.deepEqual([s.values.get('default-knowledge'), s.values.get('default-thinking')], [{ accepted: true }, { accepted: true }]);
+  s.h.records.length = 0;
+  assert.deepEqual(await s.run(), { created: [] });
+  assert.equal(s.h.records.length, 0, '删掉后不再建回来'); assert.equal(s.claims.length, 2);
+});
+
+test('默认打开时已有每日记忆（包括升级前的“DSH 工作知识整理”、已暂停的）只记下已建过；有旧版知识计划时先不建每日记忆', async () => {
+  const s = builtInHarness();
+  s.h.records.push({ id: 'old', sessionId: 'knowledge', status: 'paused', kind: 'daily', scheduledAt: '2026-10-13T00:00:00.000Z', title: previousKnowledgeTitle, prompt: 'DSH 工作知识整理\n旧版的整理指令。', time: '00:15:00', timeZone: 'Asia/Shanghai' });
+  assert.deepEqual(await s.run(), { created: ['thinking'] });
+  assert.deepEqual(s.h.records.map(task => task.title), [previousKnowledgeTitle, '每周思考']);
+  assert.deepEqual(s.values.get('default-knowledge'), { accepted: true });
+  const legacy = builtInHarness();
+  legacy.h.records.push({ id: 'legacy-plan', sessionId: 'legacy', status: 'active', kind: 'daily', scheduledAt: '2026-10-13T00:00:00.000Z', title: '旧知识计划', prompt: `${legacySchedulePrefix}旧指令`, time: '00:15', timeZone: 'Asia/Shanghai' });
+  assert.deepEqual(await legacy.run(), { created: ['thinking'] });
+  assert.equal(legacy.values.has('default-knowledge'), false, '旧计划处理完以后还会再试');
+  assert.equal(legacy.h.records.some(task => task.title === '每日记忆'), false);
+});
+
+test('默认打开结果不明时只用同一个会话重试，不另建；目录有没核实的任务或没有定时服务时什么都不建', async () => {
+  const s = builtInHarness({ claimFails: 1 });
+  await assert.rejects(s.run(), /会话接受未知/);
+  const pending = s.values.get('default-knowledge');
+  assert.deepEqual(Object.keys(pending), ['sessionId']);
+  assert.deepEqual(await s.run(), { created: ['knowledge', 'thinking'] });
+  assert.deepEqual(s.claims.slice(0, 2).map(([id, purpose, fresh]) => [id, purpose, fresh]), [[pending.sessionId, 'knowledge', true], [pending.sessionId, 'knowledge', false]]);
+  assert.equal(s.h.records[0].sessionId, pending.sessionId);
+  // 计划已建好但回执丢了：下次从目录认出来，不再建第二条。
+  const lost = builtInHarness(), create = lost.h.schedule.create;
+  let once = true;
+  lost.h.schedule.create = async (...args) => { const task = await create(...args); if (once) { once = false; throw new Error('计划接受未知'); } return task; };
+  await assert.rejects(lost.run(), /计划接受未知/);
+  assert.deepEqual(await lost.run(), { created: ['thinking'] });
+  assert.deepEqual(lost.h.records.map(task => task.title), ['每日记忆', '每周思考']);
+  assert.deepEqual(lost.values.get('default-knowledge'), { accepted: true });
+  const broken = builtInHarness();
+  broken.h.records.push({ id: 'broken', sessionId: 'broken', status: 'active', kind: 'daily', title: '坏的', prompt: '坏的' });
+  const projections = broken.h.dependencies.projections;
+  broken.h.dependencies.projections = async (id, signal) => { if (id === 'broken') throw new Error('身份读不出'); return projections(id, signal); };
+  await assert.rejects(broken.run(), { code: 'AUTOMATION_IDENTITY' });
+  assert.equal(broken.h.records.length, 1); assert.deepEqual(broken.claims, []);
+  const none = builtInHarness(); none.h.dependencies.schedule = () => undefined;
+  assert.deepEqual(await none.run(), { available: false, created: [] }); assert.equal(none.values.size, 0);
+});
+
+test('启动时资讯默认任务和每日记忆、每周思考同时提交：排队一个个建，三个都建成；员工的提交遇到正在提交仍报 BUSY', async () => {
+  const s = builtInHarness(), h = s.h, values = new Map();
+  h.news.lifecycleTable = { get: key => values.get(key), put: async (key, value) => values.set(key, value) };
+  h.cards.createNewsSession = async id => { h.purposes.set(id, 'news'); };
+  h.news.withScheduleSpec = async (_, submit) => submit({ title: '每日资讯', prompt: '资讯指令', daily: { time: '08:00:00', time_zone: 'Asia/Shanghai' } });
+  const create = h.schedule.create;
+  let busy;
+  h.schedule.create = async (...args) => {
+    await new Promise(resolve => setTimeout(resolve, 20));
+    busy ??= h.owner.manage({ action: 'create', sessionId: 'auto', purpose: 'custom', spec: { title: '员工的任务', prompt: '员工指令', daily: { time: '09:00:00', time_zone: 'Asia/Shanghai' } } }).then(() => 'ok', error => error.code);
+    return create(...args);
+  };
+  await Promise.all([s.run(), h.cards.initializeNews()]);
+  assert.deepEqual(h.records.map(task => task.title).sort(), ['每周思考', '每日记忆', '每日资讯'].sort());
+  assert.equal(await busy, 'BUSY', '页面上的提交不排队');
+  assert.deepEqual(values.get('default-news'), { accepted: true });
 });
 
 test('资讯创建只消费资讯owner指令，客户端不修改内置指令', async () => {

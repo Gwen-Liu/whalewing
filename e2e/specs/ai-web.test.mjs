@@ -524,23 +524,23 @@ test('打开入口后回到 AI 网页页签：这个入口标“正在用”，�
   });
 });
 
-// AIW-10 需求§AI 网页第 4 条（“继续使用”回到那个标签；员工把标签关掉后，下次才新开）；决策 2026-10-15
-test('正在用的 AI 的标签被员工关掉后，点“继续使用”新开一个标签重新载入这个网址', async t => {
+// AIW-10 需求§AI 网页第 4 条（员工把标签关掉后，下次才新开）；需求§AI 网页“原版 DSH 上离开和回到鲸翼”
+// 2026-11-02 用户反馈：关掉了标签还一直标“正在用”、关掉后停在空会话里。改为：关掉最后一个 AI 标签自动回到鲸翼的 AI 网页页签，不再标“正在用”。
+test('正在用的 AI 的标签被员工关掉后，自动回到鲸翼的 AI 网页页签、不再标“正在用”；再点这个入口新开标签重新载入', async t => {
   await withPage(browser, t, async ({ page, errors, external }) => {
     const name = `鲸翼测试-AIW10-关-${suffix()}`, url = site.url('aiw10-closed.html');
     await openAiWeb(page);
     await addEntry(page, name, url);
     await openEntry(page, name, url);
     const first = await selectedTab(page).getAttribute('data-dockkit-tab');
+    await page.getByRole('button', { name: '返回鲸翼', exact: true }).waitFor();
     await selectedTab(page).getByRole('button', { name: '关闭' }).click();
     await settled(() => browserTabs(page).count(), 0, '标签关掉了');
     const loads = site.hits('aiw10-closed.html');
-    await backToAiWeb(page);
-    await settled(() => currentNames(page), [name], '关掉标签不影响“正在用”');
-    await resumeButton(page).click();
-    await page.waitForFunction(() => document.title.startsWith('AI 网页'), null, { timeout: 30_000 });
-    const frame = page.frameLocator(`iframe[src="${url}"]`);
-    await frame.locator('#marker').waitFor({ timeout: 30_000 });
+    await aiView(page).waitFor({ state: 'visible', timeout: 15_000 });
+    await settled(() => currentNames(page), [], '关掉标签后不再标“正在用”');
+    assert.equal(await resumeButton(page).count(), 0, '没有“继续使用”');
+    await openEntry(page, name, url);
     assert.equal(await browserTabs(page).count(), 1, '新开了一个标签');
     assert.notEqual(await selectedTab(page).getAttribute('data-dockkit-tab'), first, '不是原来那个标签');
     assert.equal(await addressBar(page).inputValue(), url);

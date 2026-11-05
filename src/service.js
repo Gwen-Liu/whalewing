@@ -103,7 +103,7 @@ export class WhalewingCore {
       try {
         this.bundle = await this.vault.upgrade(signal);
         this.bundleIssue = undefined;
-        if (this.bundle.added.length || this.bundle.updated.length) this.dependencies.changed?.();
+        if (this.bundle.added.length || this.bundle.updated.length || this.bundle.replaced.length) this.dependencies.changed?.();
       } catch (error) {
         abort(signal);
         this.bundleIssue = error.message;
@@ -113,13 +113,18 @@ export class WhalewingCore {
     finally { if (this.ready === ready) this.ready = undefined; }
   }
 
-  /** 员工改过的随包文件每次现查，重启后也能列出；随包更新失败时旧版原文也会和新版不同，只报原因，不冒充员工改动。 */
+  /**
+   * edited：规则、模板、视图、根目录入口里和新版不一样或不属于插件的文件，每次现查，下次升级会换成新版；
+   * replaced：这次启动升级时换掉的文件和另存的位置（重启后不再提示）。
+   * 随包更新失败时旧版原文也会和新版不同，只报原因，不冒充员工改动。
+   */
   async bundleStatus(signal) {
-    if (this.bundleIssue) return { bundle: { kept: [], issue: this.bundleIssue } };
-    let kept = this.bundle?.kept ?? [];
-    // 现查失败时退回本次升级记下的结果，不让整个状态读不出来。
-    try { kept = await this.vault.editedBundle(signal); } catch { abort(signal); }
-    return kept.length ? { bundle: { kept } } : {};
+    if (this.bundleIssue) return { bundle: { edited: [], issue: this.bundleIssue } };
+    let edited = [];
+    // 现查失败时不列，不让整个状态读不出来。
+    try { edited = await this.vault.editedBundle(signal); } catch { abort(signal); }
+    const replaced = this.bundle?.replaced?.length ? { replaced: { folder: this.bundle.replacedTo, files: this.bundle.replaced } } : {};
+    return edited.length || replaced.replaced ? { bundle: { edited, ...replaced } } : {};
   }
 
   async dispatch(args, caller) {

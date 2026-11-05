@@ -427,6 +427,75 @@ test('原版记下的会话已换掉、不在会话列表里或已归档时不�
   f.unmount();
 });
 
+/** rc.5 的右栏还有一份“已开标签”实时列表：标签按会话记，开关一个就通知订阅者。 */
+function trackedSidebar() {
+  const state = { mounted: undefined, records: [], opened: [], focused: [], listeners: new Set(), snapshot: [] };
+  const publish = () => { state.snapshot = state.records.map(record => ({ ...record })); for (const listener of state.listeners) listener(); };
+  state.service = {
+    mounted: { getSnapshot: () => state.mounted },
+    openTab: (kind, options) => { state.opened.push([kind, options]); state.records.push({ sessionId: state.mounted, tabId: `tab-${state.opened.length}`, kind, contentId: '' }); publish(); },
+    tabsIn: id => state.records.filter(record => record.sessionId === id).map(record => ({ id: record.tabId, kind: record.kind })),
+    focus: id => state.focused.push(id), isExpanded: () => true,
+    openTabs: { getSnapshot: () => state.snapshot, subscribe: listener => { state.listeners.add(listener); return () => state.listeners.delete(listener); } },
+  };
+  state.close = tabId => { state.records = state.records.filter(record => record.tabId !== tabId); publish(); };
+  return state;
+}
+async function trackedShell() {
+  const sidebar = trackedSidebar(), f = await shellFixture({ sidebarRight: sidebar.service }), panels = [];
+  f.ctx.uiWorkspace.openSession = id => { sidebar.mounted = id; f.calls.push(['open', id]); };
+  f.ctx.layout = { selectPanel: id => { panels.push(id); sidebar.mounted = undefined; } };
+  return { f, sidebar, panels, api: f.clients['ai-web'] };
+}
+
+// 2026-11-02 用户反馈：在右侧栏把 Kimi 的标签关了，AI 网页还一直标着“正在用”；关掉网页后停在空会话里，不回鲸翼。
+test('原版关掉 AI 的标签后不再标“正在用”，还有别的 AI 标签开着就标那一个；关掉最后一个时回到鲸翼的 AI 网页页签', async () => {
+  const { f, sidebar, panels, api } = await trackedShell();
+  f.render();
+  await api.openAiInConversation('https://www.kimi.com/', 'kimi');
+  await api.openAiInConversation('https://chat.deepseek.com/', 'deepseek');
+  assert.equal(api.currentAiInConversation(), 'deepseek');
+  sidebar.close('tab-2');
+  assert.equal(api.currentAiInConversation(), 'kimi', '还开着的 Kimi 标出来');
+  assert.deepEqual(panels, [], '还有 AI 标签开着，不离开会话');
+  sidebar.close('tab-1');
+  assert.equal(api.currentAiInConversation(), '', '标签都关了，不再标“正在用”');
+  assert.deepEqual(panels, ['whalewing'], '关掉最后一个回到鲸翼');
+  // 页面切回来之后再切页签：跑一下外壳里排着的零延时任务。
+  for (const [id, timer] of [...f.timers]) if (!timer.delay) { f.timers.delete(id); timer.fn(); }
+  assert.equal(f.ctx.whalewingWorkbench.internal.snapshot().tab, 'ai-web', '落在 AI 网页页签');
+  f.unmount();
+});
+
+test('原版员工没在看「AI 网页」会话时关掉标签不跳转；页面跟着标签列表重算“正在用”', async () => {
+  const { f, sidebar, panels, api } = await trackedShell();
+  await api.openAiInConversation('https://www.kimi.com/', 'kimi');
+  await tabButton(f.render(), 'AI 网页').props.onClick(); await settle(f);
+  assert.equal(aiWebProps(f).remembered, 'kimi');
+  sidebar.mounted = 'some-other-session';
+  sidebar.close('tab-1');
+  assert.deepEqual(panels, [], '没在看那个会话，不打断员工');
+  await settle(f);
+  assert.equal(aiWebProps(f).remembered, '', '页面上的“正在用”随即去掉');
+  f.unmount();
+});
+
+test('「AI 网页」会话的开始页有“返回鲸翼”，别的会话没有；点了回到鲸翼的 AI 网页页签', async () => {
+  const { f, panels, api } = await trackedShell();
+  const { createBackToWorkbench } = await import('../features/ai-web/client.js');
+  const react = { createElement: (type, props, ...children) => ({ type, props: { ...props, children } }) };
+  const Back = createBackToWorkbench(react, api);
+  assert.equal(Back({ sessionId: 'any' }), null, '还没有「AI 网页」会话');
+  await api.openAiInConversation('https://www.kimi.com/', 'kimi');
+  const session = f.storage.get(aiWebKey);
+  assert.equal(Back({ sessionId: 'another' }), null);
+  const button = Back({ sessionId: session });
+  assert.equal(button.type, 'button'); assert.deepEqual(button.props.children, ['返回鲸翼']);
+  button.props.onClick();
+  assert.deepEqual(panels, ['whalewing']);
+  f.unmount();
+});
+
 test('原版打开没成功不改记下的入口；记不住时照常打开', async () => {
   const { f, sidebar, api } = await nativeShell();
   await api.openAiInConversation('https://www.kimi.com/', 'kimi');

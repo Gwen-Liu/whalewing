@@ -1,4 +1,3 @@
-import { requireExactProjection, assertCreatedSession, sessionIssue } from '../../src/session-projection.js';
 import { Service } from '@deepseek-ai/cordis';
 import { z } from 'zod';
 import { bindTypertRemote, RemoteError } from '@deepseek-ai/dsh-typert-protocol';
@@ -122,7 +121,8 @@ export default class Cards extends Service {
         await state.put('default-news', pending);
       }
       await this.createNewsSession(pending.sessionId, signal, fresh);
-      await this.manageSchedules({ action: 'create', sessionId: pending.sessionId, purpose: 'news' }, signal);
+      // 启动时和每日记忆、每周思考的默认任务同时提交，排队等前一个提交结束，不因 BUSY 落空。
+      await this.manageSchedules({ action: 'create', sessionId: pending.sessionId, purpose: 'news' }, signal, { waitForWrites: true });
       await state.put('default-news', { accepted: true });
       return this.ctx.whalewingAutomation.automation.catalog(signal);
     })();
@@ -130,54 +130,16 @@ export default class Cards extends Service {
     try { return await operation; } finally { this.initializing = undefined; }
   }
 
-  async createNewsSession(sessionId, signal, fresh = false) {
-        const controller = this.ctx.get('sessionController');
-        // 资讯会话直接建在“鲸翼定时任务”工作区里；宿主没有工作区服务时退回只给目录。
-        const workspace = await this.ctx.whalewingAutomation.taskWorkspace(signal);
-        const location = workspace ? { workspaceId: workspace.id } : { cwd: await this.ctx.whalewingAutomation.taskDirectory(signal) };
-        abort(signal);
-        let agent;
-        if (fresh) {
-          const created = await controller.create({ sessionId, ...location, agentPreset: 'standard' });
-          assertCreatedSession(created, sessionId);
-          if (created.agentPreset !== 'standard') fail('AUTOMATION_IDENTITY', '资讯会话身份尚未确认');
-        } else {
-          requireExactProjection(await controller.projections({ sessionId }, signal), sessionId, ['whalewingAutomation']);
-          const registry = this.ctx.get('workspaceRegistry');
-          if (!registry || !Array.isArray(registry.archivedSessionIds)) throw sessionIssue('SESSION_UNCONFIRMED', '会话归档状态还没确认，请等待工作区加载后重新检查', sessionId);
-          if (registry.archivedSessionIds.includes(sessionId)) throw sessionIssue('SESSION_ARCHIVED', '这个会话已归档，请在 DSH 里取消归档后重试', sessionId, 'open');
-          const resolved = await controller.resolveAgent(sessionId);
-          if (resolved.error) {
-            // 原生归属错误可能不带身份；只使用本次恢复请求的原ID。
-            const reasons = { 'session/writer-held': '原会话写入权正被其它窗口或进程占用，请关闭占用后重试', 'session/agent-busy': '原会话属于子代理，请打开原会话处理', 'session/conflict': '原会话工作目录不同，请打开原会话核对' };
-            if (reasons[resolved.error.code]) throw sessionIssue(resolved.error.code, reasons[resolved.error.code], sessionId, 'open');
-            throw resolved.error;
-          }
-          agent = resolved.agent;
-          const expectedCwd = workspace?.path || await this.ctx.whalewingAutomation.taskDirectory(signal);
-          if (agent.session.header.cwd !== expectedCwd) throw sessionIssue('session/conflict', '原会话工作目录与定时任务目录不同，请打开原会话核对', sessionId, 'open');
-          if (workspace) {
-            await workspace.attachSession(sessionId);
-            if (!workspace.sessionIds.includes(sessionId)) throw sessionIssue('SESSION_UNCONFIRMED', '原会话工作区关联还没确认，请重新检查', sessionId);
-          }
-        }
-        abort(signal);
-        if (await this.host.automationIdentity(sessionId, signal) !== 'news') {
-          agent ||= this.ctx.get('agents')?.get(sessionId);
-          if (!agent) fail('AUTOMATION_UNAVAILABLE', '资讯会话尚未就绪，请按原身份重试');
-          const execution = await this.ctx.commands.execute(agent, '/whalewing {"action":"automation_claim","purpose":"news"}', [], signal);
-          if (execution?.result?.kind !== 'success') fail('AUTOMATION_IDENTITY', '资讯会话用途认领失败，请按原身份重试');
-        }
-        await this.ctx.whalewingAutomation.automation.dependencies.confirmClaim(sessionId, signal);
-        if (await this.host.automationIdentity(sessionId, signal) !== 'news') fail('AUTOMATION_IDENTITY', '资讯会话用途尚未回读确认');
-      }
-  async manageSchedules(raw, signal) {
+  /** 资讯会话和每日记忆、每周思考的会话同一套做法，由定时任务功能负责。 */
+  createNewsSession(sessionId, signal, fresh = false) { return this.ctx.whalewingAutomation.claimTaskSession(sessionId, 'news', signal, fresh); }
+  async manageSchedules(raw, signal, { waitForWrites = false } = {}) {
     const input = contract.scheduleInput.parse(raw);
     signal = AbortSignal.any([this.resource.signal, AbortSignal.timeout(newsLimits.deadlineMs), ...(signal ? [signal] : [])]);
     const operation = this.resource.run(async () => {
       if (input.action === 'initializeNews') return this.initializeNews(signal);
       const owner = await this.newsOwner(signal);
-      return owner.withScheduleSpec(input.sessionId, spec => this.ctx.whalewingAutomation.automation.manage({ ...input, spec }, signal), signal);
+      const automation = this.ctx.whalewingAutomation.automation;
+      return owner.withScheduleSpec(input.sessionId, spec => waitForWrites ? automation.manageWhenIdle({ ...input, spec }, signal) : automation.manage({ ...input, spec }, signal), signal);
     });
     try { const result = contract.scheduleResult.parse(await operation); this.defaultNewsError = undefined; return result; } catch (error) { throw new RemoteError(error.code || error.name || 'ERROR', error.message, error.recovery ? { sessionId: error.sessionId, recovery: error.recovery } : {}); }
   }

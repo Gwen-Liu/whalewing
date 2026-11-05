@@ -608,6 +608,22 @@ test('头像完整解码、持久失败和取消保留原配置', async t => {
   assert.deepEqual(h.ctx.whalewingExperts.get(created.id), created);
 });
 
+// 2026-11-02 用户反馈：小鲸做插件管理时用第三方 dsh-ego-browser 的浏览器工具去开 DSH 自己的网页“亲自看一眼”，弹出空窗口。
+test('小鲸不带 ego_* 浏览器工具，宿主列不出 MCP 时也藏；其他专家照常可用', async t => {
+  for (const catalog of [() => [], undefined]) {
+    const h = await harness(t);
+    h.ctx.provide('mcpResources', catalog ? { catalog } : {});
+    for (const name of ['ego_navigate', 'plain_fixture']) h.ctx.tools.register(defineContentToolFixture({ name, description: name, parameters: {}, async execute() { return [{ type: 'text', text: 'ok' }]; } }));
+    await h.run({ expertId: 'manager' });
+    await turn(h.ctx, h.agent);
+    assert.ok(!h.adapter.requests.at(-1).tools.some(tool => tool.name === 'ego_navigate'), '小鲸的请求里没有 ego 工具');
+    assert.ok(h.adapter.requests.at(-1).tools.some(tool => tool.name === 'plain_fixture'), '别的工具照常带上');
+    await h.run({ expertId: 'research' });
+    await turn(h.ctx, h.agent);
+    assert.ok(h.adapter.requests.at(-1).tools.some(tool => tool.name === 'ego_navigate'), '研究专家照常可用');
+  }
+});
+
 test('MCP 资源守卫按 server 判断、断线阻断并在卸载时清理', async t => {
   const h = await harness(t);
   const servers = [{ name: 'bound', connected: true, tools: ['mcp__bound_read'] }, { name: 'other', connected: true, tools: [] }];

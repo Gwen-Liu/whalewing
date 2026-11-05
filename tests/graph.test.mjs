@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Vault } from '../src/vault.js';
 import { knowledgeContract } from '../features/knowledge/contract.js';
-import { createGraphCanvas, createGraphLayout } from '../src/graph-canvas.js';
+import { createGraphCanvas, createGraphLayout, graphLayer, graphLayers } from '../src/graph-canvas.js';
 import { z } from 'zod';
 import { forceSimulation, forceLink as nativeLink, forceManyBody as nativeManyBody, forceCollide as nativeCollide } from 'd3-force';
 
@@ -20,11 +20,65 @@ test('连接度由完整索引去重邻居计算，双向、自环、分页和�
   assert.equal((await vault.graph({ query: '一' })).nodes[0].degree, 2);
   assert.equal((await vault.graph({ path: '40-知识/二.md', query: '一' })).nodes[0].degree, 2);
   assert.equal((await vault.graph({ offset: 1 })).nodes[0].degree, 1);
-  assert.equal((await vault.graph({ offset: 3 })).nodes[0].degree, 0);
+  // 全库图不画没有连线的笔记，只记数；当前笔记关系图照样画出零度的中心。
+  assert.equal((await vault.graph({ offset: 3 })).nodes.length, 0);
+  assert.deepEqual(first.hidden, { archive: 0, templates: 0, orphans: 1 });
+  assert.equal(first.total, 3);
+  const lone = await vault.graph({ path: '40-知识/孤立.md' });
+  assert.equal(lone.nodes[0].degree, 0); assert.equal(lone.hidden, undefined);
   assert.ok(first.omittedEdges > 0);
   knowledgeContract(z).result.parse(first);
   assert.equal(knowledgeContract(z).result.safeParse({ ...first, nodes: [{ path: 'x', title: 'x' }] }).success, false);
   await assert.rejects(vault.graph({}, AbortSignal.abort()), { name: 'AbortError' });
+});
+
+test('全库图照第二大脑：不画归档、模板和图上没有连线的笔记，各记几篇；当前笔记关系图不藏', async () => {
+  const vault = new Vault(process.cwd(), { maxGraphNodes: 100 });
+  const note = (path, targets = []) => ({ path, title: path.split('/').at(-1).replace('.md', ''), aliases: [], readOnly: false, links: targets.map(target => ({ status: 'resolved', path: target })) });
+  vault.index = async () => [
+    note('30-领域/个人管理/关于我.md', ['00-系统/知识库首页.md']),
+    note('00-系统/知识库首页.md', ['30-领域/个人管理/关于我.md', '00-系统/模板/日记模板.md']),
+    note('00-系统/模板/日记模板.md', ['00-系统/规则/知识库规则.md']),
+    note('00-系统/规则/知识库规则.md'),
+    note('90-归档/旧项目.md', ['30-领域/个人管理/关于我.md']),
+    note('40-知识/只连归档.md', ['90-归档/旧项目.md']),
+    note('40-知识/只连自己.md', ['40-知识/只连自己.md']),
+    { ...note('40-知识/连缺失.md'), links: [{ status: 'missing', missingId: 'missing:name:没写的', missingTitle: '没写的', line: 3 }] },
+    { ...note('00-系统/模板/项目模板.md'), links: [{ status: 'missing', missingId: 'missing:name:模板占位', missingTitle: '模板占位', line: 1 }] },
+  ];
+  const all = await vault.graph({});
+  const paths = all.nodes.map(node => node.path).sort();
+  // 规则只被模板链接，模板不画，规则也就没有连线；缺失节点跟着引用它的笔记走。
+  assert.deepEqual(paths, ['00-系统/知识库首页.md', '30-领域/个人管理/关于我.md', '40-知识/连缺失.md', 'missing:name:没写的'].sort());
+  assert.deepEqual(all.hidden, { archive: 1, templates: 2, orphans: 3 });
+  assert.equal(all.total, 4);
+  assert.ok(all.edges.every(edge => paths.includes(edge.source) && paths.includes(edge.target)));
+  // 连接度仍按完整索引：关于我也被归档链接，算 2 个邻居。
+  assert.equal(all.nodes.find(node => node.path === '30-领域/个人管理/关于我.md').degree, 2);
+  knowledgeContract(z).result.parse(all);
+  const local = await vault.graph({ path: '30-领域/个人管理/关于我.md' });
+  assert.deepEqual(local.nodes.map(node => node.path).sort(), ['00-系统/知识库首页.md', '30-领域/个人管理/关于我.md', '90-归档/旧项目.md'].sort());
+  assert.equal(local.hidden, undefined);
+  assert.equal(knowledgeContract(z).graphResult.safeParse({ ...all, hidden: { archive: 1 } }).success, false);
+});
+
+test('图谱按层上色：照第二大脑的分组从上往下取第一组，关于自己优先于领域；缺失和根目录不上色', () => {
+  const layer = path => graphLayer({ kind: 'note', path })?.id ?? null;
+  assert.equal(layer('30-领域/个人管理/重要决定.md'), 'self');
+  assert.equal(layer('30-领域/职业发展/方向.md'), 'work');
+  assert.equal(layer('20-项目/工作/项目 - 甲.md'), 'work');
+  assert.equal(layer('40-知识/工作方法/一条认识.md'), 'knowledge');
+  assert.equal(layer('50-来源/书籍/书籍 - 甲.md'), 'sources');
+  assert.equal(layer('70-作品/报告/报告.md'), 'sources');
+  assert.equal(layer('60-时间线/日记/2026/2026-11-02.md'), 'timeline');
+  assert.equal(layer('10-收件箱/待定 - 甲？.md'), 'timeline');
+  assert.equal(layer('00-系统/规则/知识库规则.md'), 'system');
+  assert.equal(layer('80-外部索引/代码项目/资产 - 甲.md'), 'system');
+  assert.equal(layer('AGENTS.md'), null);
+  assert.equal(layer('90-归档/旧.md'), null);
+  assert.equal(graphLayer({ kind: 'missing', path: 'missing:path:30-领域/个人管理/x.md' }), null);
+  assert.deepEqual(graphLayers.map(item => item.color), ['#e5484d', '#f5a524', '#30a46c', '#3e63dd', '#a0a0a0', '#8e4ec6']);
+  assert.ok(Object.isFrozen(graphLayers) && graphLayers.every(item => Object.isFrozen(item) && Object.isFrozen(item.prefixes)));
 });
 
 function eventTarget() {
@@ -279,6 +333,31 @@ test('隐藏中的未完成布局不提前验收，恢复后与连续完整布�
   const expectedRatio = distance(expected[0], expected[1]) / distance(expected[0], expected[159]);
   assert.ok(Math.abs(actualRatio - expectedRatio) < 1e-8);
   h.unmount(); assert.equal(h.frames.size, 0); assert.equal(h.timers.size, 0);
+});
+
+test('节点按层填色、悬停仍用强调色；图例只列图上有的层并写明没画哪些，不挡点击，准备中不显示', t => {
+  const graph = topology(3, [[0, 1], [1, 2]]);
+  const paths = ['30-领域/个人管理/关于我.md', '40-知识/一条认识.md', 'AGENTS.md'];
+  graph.nodes.forEach((node, i) => { node.path = paths[i]; });
+  graph.edges = [{ source: paths[0], target: paths[1] }, { source: paths[1], target: paths[2] }];
+  const legend = { self: '关于自己', work: '项目和领域', knowledge: '知识', sources: '来源和作品', timeline: '时间线和收件箱', system: '系统和外部索引' };
+  const textOf = node => node == null || node === false ? '' : typeof node === 'string' ? node : Array.isArray(node) ? node.map(textOf).join(' ') : textOf(node.props?.children);
+  const legendOf = tree => { const node = tree.props.children.find(child => child?.type?.name === 'GraphLegend'); return node && node.type(node.props); };
+  const h = harness(t, graph, { reduced: true, props: { legend, legendLabel: '图例', hiddenNote: '图上没画：模板 14 篇' } });
+  assert.equal(legendOf(h.render()), undefined, '准备图谱时让位给进度');
+  h.flush();
+  assert.deepEqual(h.geometry().fills.map(fill => fill.color), ['#e5484d', '#30a46c', '#333']);
+  const at = h.geometry().arcs[0];
+  h.element.fire('pointermove', { clientX: at.x, clientY: at.y }); h.flush();
+  assert.equal(h.geometry().fills[0].color, '#d80');
+  assert.equal(h.geometry().fills[1].color, '#30a46c');
+  const shown = legendOf(h.render());
+  assert.equal(shown.props.role, 'note'); assert.equal(shown.props['aria-label'], '图例');
+  assert.equal(shown.props.style.pointerEvents, 'none');
+  const text = textOf(shown);
+  assert.ok(text.includes('关于自己') && text.includes('知识') && text.includes('图上没画：模板 14 篇'), text);
+  assert.ok(!text.includes('项目和领域') && !text.includes('系统和外部索引'), '图上没有的层不列');
+  assert.equal(legendOf(h.render({ legend: undefined })), undefined, '不给图例就不画');
 });
 
 test('缺失节点空心显示，聚焦与点击交还完整投影节点，不推断真实文件路径', t => {

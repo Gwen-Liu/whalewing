@@ -28,7 +28,7 @@ CC BY-NC-SA 4.0 单独授权，不适用 Apache License 2.0；商用须先取得
 ----------
 随插件分发的第三方代码、数据和内容保留各自的许可：
 
-- 工具台内联的第三方代码（其中 MP3 编码库为 LGPL-3.0）：
+- 办公工坊内联的第三方代码：
   content/utilities/THIRD_PARTY_NOTICES.txt
 - 中文字体 Noto Sans SC（SIL Open Font License 1.1）：
   content/utilities/NotoSansSC-LICENSE.txt

@@ -2,7 +2,6 @@
 import { zipSync } from 'fflate';
 import qrcode from 'qrcode-generator';
 import jsQR from 'jsqr';
-import { Mp3Encoder } from '@breezystack/lamejs';
 import { LIMITS, validateFiles, screenFiles, describeProblems, failureReason } from './core.js';
 import { inspectImage, checkDecoded } from './image.js';
 import { safeBase } from './office-tasks.js';
@@ -181,7 +180,7 @@ async function qrTask(tool, files, options, text) {
   return { summary: `已生成 ${lines.length} 个二维码`, files: [resultFile('批量二维码.zip', 'application/zip', zipSync(entries, { level: 0 }))], listing: lines.map((line, index) => `${qrName(line, index)}.png：${line}`) };
 }
 
-/** 主线程已解码为 PCM；这里只负责编码成 MP3 或 WAV。 */
+/** 主线程已解码为 PCM；这里编码成 16 位 WAV。音频只出 WAV：MP3 编码库是 LGPL-3.0，2026-11-02 起不随包。 */
 export function encodeWav(channels, sampleRate) {
   const frames = channels[0].length, count = channels.length, buffer = new ArrayBuffer(44 + frames * count * 2), view = new DataView(buffer);
   const text = (offset, value) => { for (let i = 0; i < value.length; i++) view.setUint8(offset + i, value.charCodeAt(i)); };
@@ -192,28 +191,14 @@ export function encodeWav(channels, sampleRate) {
   for (let i = 0; i < frames; i++) for (let c = 0; c < count; c++) { view.setInt16(offset, Math.max(-1, Math.min(1, channels[c][i])) * 0x7fff, true); offset += 2; }
   return new Uint8Array(buffer);
 }
-const toInt16 = samples => { const output = new Int16Array(samples.length); for (let i = 0; i < samples.length; i++) output[i] = Math.max(-1, Math.min(1, samples[i])) * 0x7fff; return output; };
-export function encodeMp3(channels, sampleRate, kbps) {
-  const encoder = new Mp3Encoder(channels.length, sampleRate, kbps), pcm = channels.map(toInt16), parts = [];
-  for (let i = 0; i < pcm[0].length; i += 1152) {
-    const chunk = encoder.encodeBuffer(pcm[0].subarray(i, i + 1152), pcm[1]?.subarray(i, i + 1152));
-    if (chunk.length) parts.push(new Uint8Array(chunk));
-  }
-  const tail = encoder.flush(); if (tail.length) parts.push(new Uint8Array(tail));
-  const output = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0)); let offset = 0;
-  for (const part of parts) { output.set(part, offset); offset += part.length; }
-  return output;
-}
 function audioTask(options) {
-  const { pcm, format, name } = options || {};
+  const { pcm, name } = options || {};
   if (!pcm || !Array.isArray(pcm.channels) || !pcm.channels.length || pcm.channels.length > 2 || pcm.channels.some(channel => !(channel instanceof Float32Array) || channel.length !== pcm.channels[0].length) || !Number.isInteger(pcm.sampleRate)) fail('音频解码结果无效，请重新选择文件');
   if (!pcm.channels[0].length) fail('所选时间段内没有音频');
   const seconds = pcm.channels[0].length / pcm.sampleRate;
-  const kbps = [64, 128, 192, 320].includes(Number(options.bitrate)) ? Number(options.bitrate) : 128;
-  const bytes = format === 'wav' ? encodeWav(pcm.channels, pcm.sampleRate) : encodeMp3(pcm.channels, pcm.sampleRate, kbps);
-  if (bytes.length > LIMITS.output) fail('输出超过 100 MiB，请缩短时间段或改用 MP3');
-  const mime = format === 'wav' ? 'audio/wav' : 'audio/mpeg';
-  return { summary: `${format === 'wav' ? 'WAV' : `MP3 ${kbps} kbps`} · ${Math.floor(seconds / 60)} 分 ${Math.round(seconds % 60)} 秒 · ${pcm.channels.length === 2 ? '立体声' : '单声道'}`, files: [resultFile(`${safeBase(name || '音频')}.${format === 'wav' ? 'wav' : 'mp3'}`, mime, bytes)], listing: [] };
+  const bytes = encodeWav(pcm.channels, pcm.sampleRate);
+  if (bytes.length > LIMITS.output) fail('输出超过 100 MiB（WAV 每分钟约 10 MB），请缩短时间段，或用“音频剪切”分段导出');
+  return { summary: `WAV · ${Math.floor(seconds / 60)} 分 ${Math.round(seconds % 60)} 秒 · ${pcm.channels.length === 2 ? '立体声' : '单声道'}`, files: [resultFile(`${safeBase(name || '音频')}.wav`, 'audio/wav', bytes)], listing: [] };
 }
 
 export const extraTools = Object.freeze(['image-mosaic', 'image-inpaint', 'image-grid', 'qr-make', 'qr-batch', 'qr-read', 'audio-encode']);

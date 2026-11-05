@@ -215,9 +215,11 @@ test('目录按分类分组，每个分类列出全部功能项入口；搜索�
 
 test('搜索词序无关、可搜格式与别名，尚未内置的能力单独说明', () => {
   const titles = query => searchUtilities(query).map(hit => hit.item.title);
-  // 原搜索框自带的示例“PDF 合并”“转 MP3”此前搜不到。
+  // 搜索框自带的示例“PDF 合并”“转 WAV”都要搜得到。
   for (const query of ['PDF 合并', '合并 PDF', 'pdf合并']) assert.deepEqual(titles(query), ['合并 PDF']);
-  assert.deepEqual(titles('转 MP3'), ['视频提取音频', '音频转格式']);
+  assert.deepEqual(titles('转 WAV'), ['视频提取音频', '音频转格式']);
+  // 音频只导出 WAV：搜“转 MP3”时说清楚。
+  assert.match(utilityGapsFor('转 MP3')[0], /只导出 WAV/); assert.deepEqual(utilityGapsFor('MP3 转 WAV'), []);
   assert.deepEqual(titles('图片格式'), ['图片转格式', '压缩与转格式']);
   for (const query of ['AVIF', 'jpeg', 'WebP', 'jfif', 'PNG']) assert.deepEqual(titles(query).slice(0, 2), ['图片转格式', '压缩与转格式'], query);
   assert.deepEqual(titles('照片压缩'), ['压缩与转格式']);

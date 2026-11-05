@@ -51,7 +51,21 @@ export function createAiWebClient(bridge, t, z, workbenchSession) {
     function rememberAiInConversation(sessionId, entryId) {
       try { window.localStorage.setItem(aiWebCurrentKey, JSON.stringify({ sessionId, entryId })); } catch { /* 记不住时回来不标“正在用”。 */ }
     }
-    /** 记下的入口 id；记下时的会话已不是现在的「AI 网页」会话、会话已不在 DSH 会话列表里或已归档时返回空。入口还在不在由页面按目录核对。 */
+    // 右侧栏开着的标签（rc.5 起有）。拿不到时当作不知道：照旧按记下的入口显示“正在用”。
+    const noTabs = [];
+    const tabStore = () => bridge.browserTabs?.() ?? null;
+    const subscribeTabs = listener => tabStore()?.subscribe(listener) ?? (() => {});
+    const tabsSnapshot = () => tabStore()?.getSnapshot() ?? noTabs;
+    /** 这个会话里标签还开着的入口 id（按打开时记下的标签 id 认）；拿不到标签列表时返回 null。 */
+    function openEntries(sessionId) {
+      if (!tabStore()) return null;
+      const live = new Set(tabsSnapshot().filter(tab => tab?.sessionId === sessionId).map(tab => tab.tabId));
+      return Object.entries(aiTabs.read()[sessionId] || {}).filter(([, tabId]) => live.has(tabId)).map(([entryId]) => entryId);
+    }
+    /**
+     * “正在用”的入口 id：记下时的会话已不是现在的「AI 网页」会话、会话已不在 DSH 会话列表里或已归档时返回空；
+     * 员工在右侧栏把这个 AI 的标签关掉了也返回空，还有别的 AI 标签开着就标那一个（2026-11-02）。入口还在不在由页面按目录核对。
+     */
     function currentAiInConversation() {
       try {
         const saved = JSON.parse(window.localStorage.getItem(aiWebCurrentKey)), sessionId = window.localStorage.getItem(aiWebKey);
@@ -61,8 +75,32 @@ export function createAiWebClient(bridge, t, z, workbenchSession) {
         if (sessions?.phase === 'ready' && !sessions.byId?.[sessionId]) return '';
         const archived = bridge.workspaces()?.archivedSessionIds;
         if (Array.isArray(archived) && archived.includes(sessionId)) return '';
-        return saved.entryId;
+        const open = openEntries(sessionId);
+        if (open === null || open.includes(saved.entryId)) return saved.entryId;
+        return open[0] ?? '';
       } catch { return ''; }
+    }
+    /** 「AI 网页」会话的 id（没建过时为空串），开始页的“返回鲸翼”按钮据此只在这个会话里出现。 */
+    function aiWebSessionId() { try { return window.localStorage.getItem(aiWebKey) || ''; } catch { return ''; } }
+    /**
+     * 原版 DSH 不能在鲸翼页面上显示右侧浏览器，打开 AI 时会切到「AI 网页」会话。员工把最后一个 AI 标签关掉时，
+     * 如果正看着这个会话，就自动回到鲸翼的 AI 网页页签，不把人留在空会话里（2026-11-02 用户反馈）。
+     * 只在记下的标签从“开着”变成“没了”时动作；打开过程中还没记下标签时不会误判。
+     */
+    let watching = null;
+    function watchAiTabs() {
+      const store = tabStore();
+      if (!store || watching) return;
+      let before = new Set(tabsSnapshot().map(tab => tab.tabId));
+      watching = store.subscribe(() => {
+        const tabs = tabsSnapshot(), now = new Set(tabs.map(tab => tab.tabId));
+        const sessionId = aiWebSessionId(), recorded = Object.values(aiTabs.read()[sessionId] || {});
+        const closed = recorded.some(tabId => before.has(tabId) && !now.has(tabId));
+        before = now;
+        if (!closed || bridge.browserMounted() !== sessionId) return;
+        if (tabs.some(tab => tab.sessionId === sessionId && tab.kind === 'browser')) return;
+        bridge.showWorkbench?.('ai-web');
+      });
     }
     async function ensureAiWebSession(signal) {
       let id;
@@ -97,12 +135,14 @@ export function createAiWebClient(bridge, t, z, workbenchSession) {
           }
         }
         if (url !== undefined && key) rememberAiInConversation(id, key);
+        watchAiTabs();
         if (typeof sidebar.isExpanded === 'function' && !sidebar.isExpanded()) sidebar.toggleExpanded?.();
       } catch (error) { bridge.notify(error.message, { kind: 'error' }); throw error; }
     }
 
   return {
-    aiWebRequest, openBrowser, openAiInConversation, currentAiInConversation, retain: bridge.retain,
+    aiWebRequest, openBrowser, openAiInConversation, currentAiInConversation, subscribeTabs, tabsSnapshot, aiWebSessionId, watchAiTabs,
+    backToWorkbench: () => bridge.showWorkbench?.('ai-web'), retain: bridge.retain,
     supportsInlinePresentation: bridge.canFocusPresentation, browserAvailable: bridge.browserAvailable, browserMounted: bridge.browserMounted,
     ensureWorkbench: workbenchSession.ensureWorkbench,
   };

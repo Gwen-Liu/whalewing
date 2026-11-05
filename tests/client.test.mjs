@@ -989,7 +989,7 @@ test('定时原生会话回执丢失与坏恢复缓存不触发第二身份或�
 
 test('真实模块工厂注册宿主和工作台 slots，纯渲染不创建会话', async () => {
   const f = await fixture();
-  assert.deepEqual([...f.entries.keys()].sort(), ['sidebar.panellist', 'main', 'whalewing.workbench.tab', 'whalewing.workbench.dock', 'browser.toolbar.actions', 'conversation.session.header.actions', 'conversation.input.left', 'conversation.hero.actions', 'whalewing.assistant.conversation', 'tool.call.toolview', 'shell.overlay', 'plugins.detail.section'].sort());
+  assert.deepEqual([...f.entries.keys()].sort(), ['sidebar.panellist', 'main', 'whalewing.workbench.tab', 'whalewing.workbench.dock', 'browser.toolbar.actions', 'conversation.session.header.actions', 'conversation.input.left', 'conversation.hero.actions', 'conversation.hero.options', 'whalewing.assistant.conversation', 'tool.call.toolview', 'shell.overlay', 'plugins.detail.section'].sort());
   assert.equal(f.entries.get('tool.call.toolview').options.key, 'whalewing_handoff');
   assert.equal(typeof f.entries.get('browser.toolbar.actions').Component, 'function');
   assert.equal(f.entries.get('browser.toolbar.actions').options.id, 'whalewing-ai-picker');

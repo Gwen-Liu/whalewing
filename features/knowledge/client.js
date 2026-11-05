@@ -326,8 +326,12 @@ export function createView(kit) {
     let graphView;
     if (graph) {
       const paged = graph.offset > 0 || graph.total > graph.nodes.length;
+      // 全库图没画的归档、模板和没有连线的笔记，写一句告诉员工；当前笔记关系图不藏，没有这句。
+      const hiddenParts = graph.hidden ? [['archive', 'graphHiddenArchive'], ['templates', 'graphHiddenTemplates'], ['orphans', 'graphHiddenOrphans']].filter(([key]) => graph.hidden[key] > 0).map(([key, text]) => t(text, { count: graph.hidden[key] })) : [];
+      const hiddenNote = hiddenParts.length ? t('graphHidden', { list: hiddenParts.join(t('listSeparator')) }) : '';
+      const legend = Object.fromEntries(['self', 'work', 'knowledge', 'sources', 'timeline', 'system'].map(id => [id, t(`graphLayer${id[0].toUpperCase()}${id.slice(1)}`)]));
       graphView = h('section', { className: 'ww-graph-workspace', 'aria-label': t(graphCenter ? 'localGraph' : 'graph') },
-        graph.nodes.length ? h(GraphCanvas, { graph, selectedPath: path, disabled: busy || dirty, onOpenNote: selectNote, label: t(graphCenter ? 'localGraph' : 'graph'), resetLabel: t('resetGraph'), subscribeTheme: api.subscribeTheme, loadingLabel: graphLoadingLabel.current, canvasErrorLabel: t('graphCanvasError'), dataErrorLabel: t('graphDataError') }) : h('div', { className: 'ww-graph-empty' }, help('graphEmpty')),
+        graph.nodes.length ? h(GraphCanvas, { graph, selectedPath: path, disabled: busy || dirty, onOpenNote: selectNote, label: t(graphCenter ? 'localGraph' : 'graph'), resetLabel: t('resetGraph'), subscribeTheme: api.subscribeTheme, loadingLabel: graphLoadingLabel.current, canvasErrorLabel: t('graphCanvasError'), dataErrorLabel: t('graphDataError'), legend, legendLabel: t('graphLegend'), hiddenNote }) : h('div', { className: 'ww-graph-empty' }, help('graphEmpty'), hiddenNote && h('p', { className: 'ww-muted' }, hiddenNote)),
         missingGraph && h('div', { className: 'ww-graph-missing', role: 'status' }, h('h3', null, missingGraph.title), help('missingGraphNote'), h('h4', null, t('missingGraphSources')),
           ...missingGraph.sources.map(source => h('div', { key: `${source.path}:${source.line}` }, h('button', { type: 'button', disabled: busy || dirty, onClick: () => selectNote({ path: source.path, targetLine: source.line }) }, `${source.title} · ${source.line}`))), button('closePanel', () => setMissingGraph(null))),
         // 完整单页只呈现画布；有界响应确有省略时才说明范围，不将局部图冒称全库。
@@ -339,11 +343,13 @@ export function createView(kit) {
     }
 
     let body;
-    // 页头一句现状：知识库在哪；插件更新时员工改过的规则和模板保留原样，也写在这里（每次读状态时现查）。
-    const kept = status?.bundle?.kept || [];
-    const summary = !status ? t('preparing') : !status.initialized ? '' : [`知识库在 ${status.root}`, kept.length > 0 && `你改过 ${kept.length} 个规则或模板，插件更新时保留了你的版本`, status.bundle?.issue && `规则和模板没能更新：${status.bundle.issue}，下次打开会再试`].filter(Boolean).join(' · ');
+    // 页头一句现状：知识库在哪。规则、模板这一层只用新版（2026-11-02）：这次升级换掉了几个、原来的另存在哪；
+    // 还有和新版不一样或不属于插件的，写明下次升级会换掉（每次读状态时现查）。悬停看文件清单。
+    const edited = status?.bundle?.edited || [], replaced = status?.bundle?.replaced;
+    const summary = !status ? t('preparing') : !status.initialized ? '' : [`知识库在 ${status.root}`, replaced && `规则和模板已换成新版，原来的 ${replaced.files.length} 个文件另存在 ${replaced.folder}`, edited.length > 0 && `有 ${edited.length} 个规则或模板和新版不一样，插件下次更新会换成新版，原来的另存`, status.bundle?.issue && `规则和模板没能更新：${status.bundle.issue}，下次打开会再试`].filter(Boolean).join(' · ');
+    const bundleFiles = [...(replaced?.files || []), ...edited];
     body = h('section', { className: 'ww-knowledge' },
-      h('header', { className: 'ww-pagehead ww-knowledge-head' }, h('div', null, h('h2', null, '个人知识'), summary && h('p', { title: kept.length ? kept.join('\n') : undefined }, summary))),
+      h('header', { className: 'ww-pagehead ww-knowledge-head' }, h('div', null, h('h2', null, '个人知识'), summary && h('p', { title: bundleFiles.length ? bundleFiles.join('\n') : undefined }, summary))),
       h('div', { className: 'ww-knowledge-toolbar' },
         h('label', { className: 'ww-search' }, h(Glyph, { name: 'search', size: 16 }), h('input', { 'aria-label': t('query'), placeholder: t('searchPlaceholder'), value: query, disabled: busy, onChange: event => setQuery(event.target.value), onKeyDown: event => { if (event.key === 'Enter') run(async () => { const value = await refreshNotes(); return () => applyNotes(value); }); } })),
         button('search', () => run(async () => { const value = await refreshNotes(); return () => applyNotes(value); }), !status?.initialized, { className: 'ww-ghost' }),

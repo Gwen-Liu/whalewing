@@ -183,6 +183,8 @@ export function createView(kit) {
               selected.legacy && help('taskLegacyHelp'),
               h('details', null, h('summary', null, t('taskDetails')), help('scheduleHelp'), help('taskModelHelp'), help('taskStatusHelp')))
               : h('div', { className: 'ww-task-empty' }, h(Glyph, { name: 'spark', size: 28 }), h('h2', null, t('taskSelect')))),
+            // 右下角淡淡的鲸翼水印，和专家团队里小鲸卡同一种点缀（2026-11-02 补齐设计稿）。
+            h('i', { className: 'ww-whale', 'aria-hidden': true }),
             confirm?.kind === 'automation' && h(ConfirmDialog, { title: t('cancelPlan'), message: t('cancelPlanHelp'), confirmLabel: t('cancelPlan'), cancelLabel: t('cancel'), danger: true, busy, onCancel: () => setConfirm(null), onConfirm: () => cancelTask(confirm.task) }),
             taskHistory && h(Modal, { title: `${t('taskHistory')} · ${taskHistory.task.title || t('schedule')}`, busy, onClose: () => setTaskHistory(null), className: 'ww-confirm ww-task-history' },
               h('section', { className: 'ww-confirm-body', 'aria-label': t('taskHistory') }, help('historyHelp'),

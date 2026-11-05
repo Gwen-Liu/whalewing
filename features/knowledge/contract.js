@@ -23,10 +23,13 @@ export function knowledgeContract(z) {
   const graphResult = z.strictObject({ version: z.literal(2), nodes: z.array(z.discriminatedUnion('kind', [
     z.strictObject({ kind: z.literal('note'), path: text, title: text, degree: count, readOnly: z.boolean() }),
     z.strictObject({ kind: z.literal('missing'), path: text.regex(/^missing:(?:name|path):.+/), title: text, degree: count, sources: z.array(z.strictObject({ path: text, title: text, line: count })).min(1) }),
-  ])), edges: z.array(z.strictObject({ source: text, target: text })), total: count, offset: count, truncated: z.boolean(), omittedEdges: count, unresolved: count });
+  ])), edges: z.array(z.strictObject({ source: text, target: text })), total: count, offset: count, truncated: z.boolean(), omittedEdges: count, unresolved: count,
+    // 只有全库图带：没画的归档、模板和没有连线的笔记各有几篇。
+    hidden: z.strictObject({ archive: count, templates: count, orphans: count }).optional() });
   const result = z.union([
-    // bundle 只在员工改过随包文件或随包更新失败时出现：kept 是保持原样、没换成新版的随包文件。
-    z.strictObject({ version: text, initialized: z.boolean(), root: text, skillsDir: text, limits: z.record(text, z.number()), scheduleAvailable: z.boolean(), locationNotice: text.optional(), bundle: z.strictObject({ kept: z.array(text), issue: text.optional() }).optional() }),
+    // bundle 只在有要提示的事时出现：edited 是规则、模板、视图、根目录入口里和新版不一样或不属于插件的文件（下次升级换成新版），
+    // replaced 是这次升级换掉的文件和另存的位置，issue 是随包更新失败的原因。
+    z.strictObject({ version: text, initialized: z.boolean(), root: text, skillsDir: text, limits: z.record(text, z.number()), scheduleAvailable: z.boolean(), locationNotice: text.optional(), bundle: z.strictObject({ edited: z.array(text), issue: text.optional(), replaced: z.strictObject({ folder: text, files: z.array(text).min(1) }).optional() }).optional() }),
     z.strictObject({ directory: text, folders: z.array(z.strictObject({ path: text, name: text })), notes: z.array(z.strictObject({ path: text, title: text, readOnly: z.boolean() })), total: count, offset: count, truncated: z.boolean() }),
     z.strictObject({ notes: z.array(z.object({ path: text, title: text, type: text, status: text, excerpt: text, hash, readOnly: z.boolean(), issue: text.optional() })), truncated: z.boolean(), total: count, sourceLabels: z.record(text, source.shape.label).optional(), sourceIssues: z.array(text).optional() }),
     note,

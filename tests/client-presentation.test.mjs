@@ -35,11 +35,14 @@ const sorted = value => Object.fromEntries(Object.entries(value).sort(([a], [b])
 // 同日照第二大脑改版升级个人知识：检查弹窗加文风结果 2 个词条（没有用到不推荐的词、几篇用了），样式不变。
 // 同日定时任务跟着改版：“DSH 工作知识整理”改名“每日记忆”，新增“每周思考”和旧任务“换成新版”共 9 个词条
 // （每周思考名称和说明 2 个、可换新版的提示和按钮 6 个、换好后的提示 1 个），处理范围、旧计划说明里的“知识整理”改成“每日记忆”，样式不变。
+// 2026-11-02 关系图谱照第二大脑按层上色：图例 1 个、六层名称 6 个、“图上没画”和三种没画的 4 个、列举用的顿号 1 个，共 12 个词条，样式不变（图例的样式写在画布组件里）。
 test('全栏改版后的双语词条与样式快照', () => {
-  assert.equal(Object.keys(zh).length, 679); assert.equal(Object.keys(en).length, 679);
-  assert.equal(hash(sorted(zh)), '5aa1bee9004073a1e4480578a665ec3df2eafd2ca86a972a6154e673915585bc');
-  assert.equal(hash(sorted(en)), '970f4ece8ebe845f2e87144cf4587ced578182cbe93be7f5bde438537dd6b1a3');
-  assert.equal(hash(css), '90b80d2fb180fe86230cb3de368702de556638a3a80cb7d0956133acd96fccf7');
+  assert.equal(Object.keys(zh).length, 691); assert.equal(Object.keys(en).length, 691);
+  assert.equal(hash(sorted(zh)), '453f9fb4f5731caf68763407fb7f222e27c867ffaed2a835b061694e6071f36a');
+  assert.equal(hash(sorted(en)), 'b79b8ef90132a48f89d97158aabf871e7883790c0c63d23414d3914bfc973990');
+  // 2026-11-02 其余页签按设计稿补点缀：AI 网页每张入口卡底边水纹、办公工坊分类卡水纹和宋体标题、
+  // 技能页空卡（左上回纹、右下鲸尾印）、定时任务分栏右上角鲸尾印、个人知识阅读区左下角回纹（右下角留给小鲸气泡）。
+  assert.equal(hash(css), '001c3dfca904842fef17ee808bc74ad14f742ab14abbf108c8cb2d51b77a13df');
   assert.ok(css.includes('.ww-book-scroll{--dsh-scrollbar-width:14px;--dsh-scrollbar-thumb-border:4px;'), '正文滚动条够宽好拖');
   assert.equal(zh.newsHeadline, '来源标题'); assert.equal(en.newsHeadline, 'Source headline'); assert.equal(zh.newsViewSource, '查看来源');
   assert.equal(zh.library, '书架'); assert.equal(zh.learningTip, 'AI 使用技巧'); assert.equal(zh.libraryAll, '全部'); assert.equal(zh.libraryDailyBadge, '常看');

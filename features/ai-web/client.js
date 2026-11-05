@@ -75,6 +75,9 @@ export function createView({ React, ActionMenu, useDiscard }) {
     // 原版的“继续使用”走打开入口的同一条路：这个 AI 的标签还开着就切回去、不重新导航，被关掉了才新开。
     const focusBrowser = (signal, entry) => api.supportsInlinePresentation() || !entry ? prepareAiBrowser(undefined, signal) : api.openAiInConversation(entry.url, entry.id, signal);
     // 原版打开后工作台会卸载，回来时按本机记下的入口恢复“正在用”；宿主适配版不传，由页面自己记着。
+    // 右侧栏的标签一变就重算：员工把 AI 的标签关掉，“正在用”随即去掉（2026-11-02）。
+    useSyncExternalStore(api.subscribeTabs, api.tabsSnapshot, api.tabsSnapshot);
+    useEffect(() => { if (!api.supportsInlinePresentation()) api.watchAiTabs(); }, []);
     const remembered = api.supportsInlinePresentation() ? undefined : api.currentAiInConversation();
     return h(AiWebView, { key: 'aiWeb', active, sessionId: presentedReference?.sessionId, manageAiWeb: api.aiWebRequest, openBrowser: openAiBrowser, restoreBrowser, focusBrowser, remembered, notify, ActionMenu });
   };
@@ -82,4 +85,21 @@ export function createView({ React, ActionMenu, useDiscard }) {
 
 export const name = 'whalewing-ai-web';
 export const inject = ['slots', 'locale', 'remote', 'whalewingWorkbench'];
-export function apply(ctx) { return registerFeature(ctx, 'ai-web', createView, { contract: aiWebContract, namespace: 'whalewingAiWeb', entries: (scope, kit) => scope.slots.inject('browser.toolbar.actions', () => scope.slots.register({ name: 'browser.toolbar.actions', id: 'whalewing-ai-picker', order: 10 }, createAiWebView(kit.React).Toolbar)) }); }
+/**
+ * 原版打开 AI 时会切到「AI 网页」会话（原版不能在鲸翼页面上显示右侧浏览器）。在这个会话的开始页放一个“返回鲸翼”，
+ * 员工知道自己在哪，一点就回到鲸翼的 AI 网页页签；别的会话里不出现（2026-11-02 用户反馈）。
+ */
+export function createBackToWorkbench(React, api) {
+  const style = { display: 'inline-flex', alignItems: 'center', height: 28, padding: '0 10px', border: '.5px solid var(--dsw-alias-border-l2)', borderRadius: 'var(--dsw-radius-sm, 8px)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-secondary)', font: 'var(--dsw-font-xxs-12)', whiteSpace: 'nowrap', cursor: 'pointer' };
+  return function BackToWorkbench({ sessionId }) {
+    if (!api || api.supportsInlinePresentation() || !sessionId || sessionId !== api.aiWebSessionId()) return null;
+    return React.createElement('button', { type: 'button', style, title: '回到鲸翼的 AI 网页页签；右侧的网页标签照常开着', onClick: () => api.backToWorkbench() }, '返回鲸翼');
+  };
+}
+
+export function apply(ctx) {
+  return registerFeature(ctx, 'ai-web', createView, { contract: aiWebContract, namespace: 'whalewingAiWeb', entries: (scope, kit, api) => {
+    scope.slots.inject('browser.toolbar.actions', () => scope.slots.register({ name: 'browser.toolbar.actions', id: 'whalewing-ai-picker', order: 10 }, createAiWebView(kit.React).Toolbar));
+    scope.slots.inject('conversation.hero.options', () => scope.slots.register({ name: 'conversation.hero.options', id: 'whalewing-ai-web-back', order: 100 }, createBackToWorkbench(kit.React, api)));
+  } });
+}

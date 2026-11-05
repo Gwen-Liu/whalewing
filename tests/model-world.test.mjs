@@ -527,7 +527,8 @@ test('国产人民币价目表：每条都有官方出处，型号 id 不区分�
   // models.dev 把 MiniMax 型号改成大小写混写后，仍对得上官网价。
   assert.equal(worldCnyPrice('minimax/MiniMax-M3').inputPerMTok, 2.1);
   assert.equal(worldPriceText({ vendorId: 'minimax', id: 'minimax/MiniMax-M3' }, 'outputPerMTok'), '¥8.4 起');
-  assert.equal(worldPriceText({ vendorId: 'meituan', id: 'meituan/longcat-2.0' }, 'inputPerMTok'), '¥2（限时价）');
+  assert.equal(worldPriceText({ vendorId: 'meituan', id: 'meituan/longcat-2.5' }, 'inputPerMTok'), '¥2（限时价）');
+  assert.equal(worldPriceText({ vendorId: 'meituan', id: 'meituan/longcat-2.0' }, 'inputPerMTok'), null, '官网不再列出的型号不显示旧价');
   assert.equal(worldPriceText({ vendorId: 'zhipuai', id: 'zhipuai/glm-4.6v-flash' }, 'outputPerMTok'), '免费');
   assert.equal(worldPriceText({ vendorId: 'xiaomi', id: 'xiaomi/mimo-v2.5-pro' }, 'inputPerMTok'), null, '已下线型号不显示旧价');
   assert.equal(worldPriceText({ vendorId: 'openai', id: 'openai/gpt-x', pricing: { inputPerMTok: 1.25 } }, 'inputPerMTok'), '$1.25');

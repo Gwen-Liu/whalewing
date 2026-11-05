@@ -51,9 +51,9 @@ export const utilityTools = Object.freeze([
     fn('text-replace', '批量替换', '按原文查找替换'),
     fn('word-compare', 'Word 版本对照', '找出两个版本增删的段落', '.docx', { multiple: true, description: '比较正文段落和表格文字，不比较格式；输出包含双方原文的对照文档。' }),
   ] },
-  { id: 'media', title: '音视频', brief: '提取音频、转 MP3、剪切、视频截图', icon: 'media', color: '#ea580c', functions: [
-    fn('audio-extract', '视频提取音频', '从视频中导出 MP3 或 WAV', media, { audio: true, keywords: '视频转音频 视频转mp3' }),
-    fn('audio-convert', '音频转格式', '转成 MP3 或 WAV', media, { audio: true }),
+  { id: 'media', title: '音视频', brief: '提取音频、转 WAV、剪切、视频截图', icon: 'media', color: '#ea580c', functions: [
+    fn('audio-extract', '视频提取音频', '从视频中导出 WAV 音频', media, { audio: true, keywords: '视频转音频 视频转wav' }),
+    fn('audio-convert', '音频转格式', 'MP3、M4A 等转成 WAV', media, { audio: true, keywords: '转wav mp3转wav m4a转wav' }),
     fn('audio-trim', '音频剪切', '截取指定时间段', media, { audio: true, trim: true }),
     fn('video-frame', '视频截图', '按时间点导出画面', '.mp4,.mov,.m4v,.webm,.mkv', { video: true }),
   ] },
@@ -76,6 +76,7 @@ export const utilityGaps = Object.freeze([
   { words: ['ppt转pdf', 'pptx', 'excel转pdf', 'xlsx转pdf'], text: 'Excel、PPT 转 PDF 尚未内置' },
   { words: ['视频压缩', '压缩视频', '视频转码', '剪视频', '视频剪切'], text: '视频压缩、转码与剪切尚未内置' },
   { words: ['抠图', '去背景', '背景移除'], text: '去背景尚未内置' },
+  { words: ['转mp3', '导出mp3', '输出mp3', 'mp3编码'], text: '音频只导出 WAV（无损），不导出 MP3' },
 ]);
 
 const tokenPattern = /[a-z0-9+#]+|[^\sa-z0-9+#.]+/g;

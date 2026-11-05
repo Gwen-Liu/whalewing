@@ -3,6 +3,25 @@ import { forceLink, forceManyBody, forceCollide } from './graph-forces.js';
 
 const radius = degree => 3 + Math.min(10, Math.sqrt(degree) * 1.3);
 
+/**
+ * 按层上色，照发起者第二大脑 2026-10-30 的 Obsidian 图谱分组和颜色：从上往下取第一组对上的。
+ * 颜色是图上的小圆点，深浅两种底色都看得清；不属于任何一组的（根目录入口、归档、缺失笔记）用正文色。
+ */
+export const graphLayers = Object.freeze([
+  { id: 'self', prefixes: ['30-领域/个人管理/'], color: '#e5484d' },
+  { id: 'work', prefixes: ['20-项目/', '30-领域/'], color: '#f5a524' },
+  { id: 'knowledge', prefixes: ['40-知识/'], color: '#30a46c' },
+  { id: 'sources', prefixes: ['50-来源/', '70-作品/'], color: '#3e63dd' },
+  { id: 'timeline', prefixes: ['60-时间线/', '10-收件箱/'], color: '#a0a0a0' },
+  { id: 'system', prefixes: ['00-系统/', '80-外部索引/'], color: '#8e4ec6' },
+].map(layer => Object.freeze({ ...layer, prefixes: Object.freeze(layer.prefixes) })));
+
+/** 节点属于哪一层；缺失节点和不在任何一组里的笔记返回 null。 */
+export function graphLayer(node) {
+  if (node.kind === 'missing') return null;
+  return graphLayers.find(layer => layer.prefixes.some(prefix => node.path.startsWith(prefix))) || null;
+}
+
 /** 有向引用仍属于知识服务；几何投影不重复计算双向弹簧，也不修改响应。 */
 export function createGraphLayout(graph) {
   // 物理节点保持固定字段与数值槽位；笔记/缺失节点元数据仍由原响应供画布消费。
@@ -37,7 +56,19 @@ export function createGraphCanvas(React) {
   const { createElement: h, useEffect, useRef, useState } = React;
   const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 
-  return function GraphCanvas({ graph, selectedPath, disabled, onOpenNote, label, resetLabel, loadingLabel, canvasErrorLabel, dataErrorLabel, subscribeTheme }) {
+  /** 左上角一行图例：这张图上有哪几层、各是什么颜色；全库图再写一句没画哪些。不挡点击。 */
+  function GraphLegend({ graph, legend, label, hiddenNote }) {
+    const present = new Set(graph.nodes.map(node => graphLayer(node)?.id).filter(Boolean));
+    const shown = graphLayers.filter(layer => present.has(layer.id) && legend[layer.id]);
+    if (!shown.length && !hiddenNote) return null;
+    return h('div', { className: 'ww-graph-legend', role: 'note', 'aria-label': label, style: { position: 'absolute', left: 10, top: 10, maxWidth: 'calc(100% - 120px)', padding: '4px 8px', borderRadius: 8, background: 'color-mix(in srgb, var(--dsw-alias-bg-layer-1) 82%, transparent)', color: 'var(--dsw-alias-label-secondary)', fontSize: 11, lineHeight: '18px', pointerEvents: 'none' } },
+      shown.length > 0 && h('ul', { style: { display: 'flex', flexWrap: 'wrap', columnGap: 10, margin: 0, padding: 0, listStyle: 'none' } },
+        ...shown.map(layer => h('li', { key: layer.id, style: { display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' } },
+          h('span', { 'aria-hidden': true, style: { width: 8, height: 8, borderRadius: '50%', background: layer.color, flex: 'none' } }), legend[layer.id]))),
+      hiddenNote && h('div', { style: { color: 'var(--dsw-alias-label-tertiary)' } }, hiddenNote));
+  }
+
+  return function GraphCanvas({ graph, selectedPath, disabled, onOpenNote, label, resetLabel, loadingLabel, canvasErrorLabel, dataErrorLabel, subscribeTheme, legend, legendLabel, hiddenNote }) {
     const canvas = useRef(null);
     const controller = useRef(null);
     const latest = useRef(null);
@@ -55,6 +86,7 @@ export function createGraphCanvas(React) {
       const nodes = graph.nodes;
       const n = nodes.length;
       const index = new Map(nodes.map((node, i) => [node.path, i]));
+      const layerColors = nodes.map(node => graphLayer(node)?.color || '');
       let layout;
       try { layout = createGraphLayout(graph); } catch {
         setError(dataErrorLabel); setSettling(false); return;
@@ -242,8 +274,10 @@ export function createGraphCanvas(React) {
           if (sx[i] < -24 || sy[i] < -24 || sx[i] > width + 24 || sy[i] > height + 24) continue;
           context.beginPath(); context.arc(sx[i], sy[i], sizes[i], 0, Math.PI * 2);
           context.globalAlpha = dim(0.18, i) * appear(i);
-          const color = i === chosen || i === hover || i === keyboard ? palette.accent : palette.foreground;
-          context.fillStyle = nodes[i].kind === 'missing' ? palette.background : color;
+          // 当前、悬停和键盘选中的节点仍用强调色（和 Obsidian 一样），其余按层上色。
+          const highlighted = i === chosen || i === hover || i === keyboard;
+          const color = highlighted ? palette.accent : palette.foreground;
+          context.fillStyle = nodes[i].kind === 'missing' ? palette.background : highlighted ? color : layerColors[i] || color;
           context.fill();
           // 缺失身份只用于关系投影；空心节点与实际可读笔记区分，点击仍返回完整节点。
           if (nodes[i].kind === 'missing') { context.lineWidth = 1.3; context.strokeStyle = color; context.stroke(); }
@@ -442,6 +476,8 @@ export function createGraphCanvas(React) {
       h('canvas', { ref: canvas, tabIndex: 0, role: 'group', 'aria-label': label, 'aria-busy': settling, style: { display: 'block', width: '100%', height: '100%', touchAction: 'none', cursor: 'grab', outlineOffset: -3 } }),
       h('button', { type: 'button', onClick: () => controller.current?.reset(), style: { position: 'absolute', right: 8, top: 8 } }, resetLabel),
       settling && h('span', { role: 'status', style: { position: 'absolute', left: 10, top: 10, pointerEvents: 'none', fontSize: 12 } }, loadingLabel(painted, edgeCount)),
+      // 图例只列这张图上有的层；准备图谱时让位给进度。
+      !settling && legend && h(GraphLegend, { graph, legend, label: legendLabel, hiddenNote }),
       focused && h('div', { role: 'status', style: { position: 'absolute', left: 10, bottom: 8, maxWidth: 'calc(100% - 20px)', padding: '5px 8px', borderRadius: 6, background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', pointerEvents: 'none', overflowWrap: 'anywhere', fontSize: 12 } }, focused.title),
       error && h('div', { role: 'alert' }, error));
   };

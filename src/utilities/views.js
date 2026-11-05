@@ -166,8 +166,8 @@ export function createUtilityViews(React, workerSource) {
   // 模态框不承担整页布局：明确固定定位与内容高度，避免四边定位把 auto 高度拉满。
   const css = [
     '.ww-tool-directory{display:grid!important;grid-template-columns:repeat(auto-fill,minmax(300px,1fr))!important;gap:14px;margin-top:16px}',
-    '.ww-tool-card{display:flex!important;flex-direction:column;align-items:stretch;text-align:left;gap:12px;padding:18px!important;border-radius:14px!important;background:var(--ww-surface)!important;border:1px solid var(--ww-line)!important;cursor:pointer;transition:border-color .15s}',
-    '.ww-tool-card:hover{border-color:var(--ww-line-2)!important}.ww-tool-card-head{display:flex;gap:12px;align-items:center}.ww-tool-card-head strong{font-size:15px;font-weight:600;display:block;color:var(--ww-ink)}.ww-tool-card-head small{display:block;color:var(--dsw-alias-label-secondary);font-size:12px;margin-top:3px}',
+    '.ww-tool-card{position:relative;overflow:hidden;display:flex!important;flex-direction:column;align-items:stretch;text-align:left;gap:12px;padding:20px 20px 30px!important;border-radius:16px!important;background:var(--ww-surface)!important;border:1px solid var(--ww-line)!important;box-shadow:var(--dsw-elevation-soft,none);cursor:pointer;transition:border-color .15s}',
+    '.ww-tool-card:hover{border-color:var(--ww-line-2)!important}.ww-tool-card-head{display:flex;gap:12px;align-items:center}.ww-tool-card-head strong{font:600 17px/1.35 var(--ww-serif);letter-spacing:.01em;display:block;color:var(--ww-ink)}.ww-tool-card-head small{display:block;color:var(--dsw-alias-label-secondary);font-size:12px;margin-top:3px}',
     '.ww-tool-icon{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:11px;flex:none;background:var(--ww-surface-2);color:var(--ww-ink-2)}',
     '.ww-tool-chips{display:flex;flex-wrap:wrap;gap:6px}.ww-tool-chip{min-height:0!important;font-size:12.5px!important;padding:3px 10px!important;border-radius:999px!important;border:1px solid var(--ww-line)!important;background:transparent!important;color:var(--ww-ink-2)!important;cursor:pointer}.ww-tool-chip:hover{color:var(--ww-ink)!important;border-color:var(--ww-line-2)!important;background:var(--ww-tint)!important}',
     '.ww-tool-results{display:grid;gap:6px;margin-top:16px}.ww-tool-hit{display:flex!important;align-items:center;gap:12px;text-align:left;padding:10px 14px!important;border-radius:12px!important}.ww-tool-hit .ww-tool-icon{width:32px;height:32px;border-radius:9px}.ww-tool-hit small{color:var(--dsw-alias-label-secondary);margin-left:auto}',
@@ -222,7 +222,7 @@ export function createUtilityViews(React, workerSource) {
   function FunctionPanel({ item, active, runnerRef }) {
     const [files, setFiles] = React.useState([]), [text, setText] = React.useState(''), [sheet, setSheet] = React.useState('');
     // 图片默认保持原尺寸；三种处理方式各有自己的输出格式，切换方式不互相覆盖。
-    const [settings, setSettings] = React.useState({ mode: item.mode || 'convert', convertFormat: 'png', compressFormat: 'jpeg', editFormat: 'keep', quality: 90, maxEdge: '', target: 'quality', targetKB: 500, resizeWidth: '', resizeHeight: '', keepRatio: true, operation: 'dedupe', conversion: 'excel-csv', other: '', angle: 90, flip: 'none', x: 0, y: 0, width: 0, height: 0, direction: 'vertical', watermark: '', fontSize: 24, opacity: 0.5, position: 'bottom-right', pages: '', columns: '', match: 'equals', value: '', sortType: 'text', order: 'asc', find: '', replacement: '', block: 14, rows: 3, gridColumns: 3, size: 512, level: 'M', audioFormat: 'mp3', bitrate: 128, start: 0, end: '', times: '每 5 秒', preset: 'standard', splitOutput: 'files', leftTable: '', rightTable: '', leftKey: '', rightKey: '', joinColumns: [], joinType: 'left', ignoreCase: false, numericKey: false });
+    const [settings, setSettings] = React.useState({ mode: item.mode || 'convert', convertFormat: 'png', compressFormat: 'jpeg', editFormat: 'keep', quality: 90, maxEdge: '', target: 'quality', targetKB: 500, resizeWidth: '', resizeHeight: '', keepRatio: true, operation: 'dedupe', conversion: 'excel-csv', other: '', angle: 90, flip: 'none', x: 0, y: 0, width: 0, height: 0, direction: 'vertical', watermark: '', fontSize: 24, opacity: 0.5, position: 'bottom-right', pages: '', columns: '', match: 'equals', value: '', sortType: 'text', order: 'asc', find: '', replacement: '', block: 14, rows: 3, gridColumns: 3, size: 512, level: 'M', start: 0, end: '', times: '每 5 秒', preset: 'standard', splitOutput: 'files', leftTable: '', rightTable: '', leftKey: '', rightKey: '', joinColumns: [], joinType: 'left', ignoreCase: false, numericKey: false });
     const [state, setState] = React.useState({ busy: false, error: '', notice: '', result: null, sheets: [], tables: [], thumbs: [] });
     // 页面整理的逐页布局：原页码、追加旋转、是否删除；顺序即输出顺序。
     const [layout, setLayout] = React.useState([]), dragging = React.useRef(null);
@@ -263,7 +263,7 @@ export function createUtilityViews(React, workerSource) {
       if (!activeRef.current || state.busy) return;
       const chosenFiles = override.files || files;
       const options = { ...settings, format: imageFormat, quality: settings.quality / 100, sheetName: sheet, columns: item.id === 'image-grid' ? settings.gridColumns : settings.columns, positions: override.positions, layout: item.id === 'pdf-pages' && !chosen ? layout.filter(entry => !entry.removed).map(({ page, rotate }) => ({ page, rotate })) : undefined };
-      if (item.audio) return runner.current.prepare(() => decodeAudio(files[0], item.trim ? { start: settings.start, end: settings.end } : {}), pcm => ({ tool: 'audio-encode', files: [], text: '', options: { pcm: { sampleRate: pcm.sampleRate, channels: pcm.channels }, format: settings.audioFormat, bitrate: settings.bitrate, name: files[0].name } }));
+      if (item.audio) return runner.current.prepare(() => decodeAudio(files[0], item.trim ? { start: settings.start, end: settings.end } : {}), pcm => ({ tool: 'audio-encode', files: [], text: '', options: { pcm: { sampleRate: pcm.sampleRate, channels: pcm.channels }, name: files[0].name } }));
       if (item.video) return runner.current.prepare(() => captureFrames(files[0], settings.times));
       ran.current = { files: chosenFiles, positions: override.positions || chosenFiles.map((_, i) => i) };
       runner.current.run({ tool: chosen || tool, files: chosenFiles, text, options }, { append: !!override.append });
@@ -378,7 +378,7 @@ export function createUtilityViews(React, workerSource) {
       item.id === 'excel-sort' && h('div', { className: 'ww-row' }, select('sortType', '比较方式', [['text', '文本'], ['number', '数值']]), select('order', '顺序', [['asc', '升序'], ['desc', '降序']])),
       item.id === 'text-replace' && h('div', { className: 'ww-row' }, input('find', '查找文字'), input('replacement', '替换为', '可留空')),
       ['qr-make', 'qr-batch'].includes(item.id) && h('div', { className: 'ww-row' }, number('size', '图片尺寸（像素）', 128, 2048), select('level', '容错等级', [['L', '低（7%）'], ['M', '中（15%）'], ['Q', '较高（25%）'], ['H', '高（30%，可加 Logo）']])),
-      item.audio && h('div', { className: 'ww-row' }, select('audioFormat', '输出格式', [['mp3', 'MP3'], ['wav', 'WAV（无损）']]), settings.audioFormat === 'mp3' && field('音质', h('select', { value: settings.bitrate, disabled: state.busy, onChange: event => update('bitrate', Number(event.target.value)) }, [[64, '64 kbps（语音）'], [128, '128 kbps（标准）'], [192, '192 kbps（较好）'], [320, '320 kbps（最佳）']].map(([value, title]) => h('option', { key: value, value }, title))))),
+      item.audio && h('small', { className: 'ww-tool-help' }, '导出为 WAV（无损），每分钟约 10 MB'),
       item.trim && h('div', { className: 'ww-row' }, number('start', '开始（秒）', 0, 1800, 0.1), number('end', '结束（秒，留空到结尾）', 0, 1800, 0.1)),
       item.video && input('times', '截图时间点', '如“1, 5.5, 10”或“每 5 秒”'),
       h('div', { className: 'ww-row' }, h('button', { type: 'button', className: 'ww-primary', disabled: !ready, onClick: () => run() }, '开始处理'), state.busy && h('button', { type: 'button', onClick: () => runner.current.cancel() }, '取消')),
@@ -440,7 +440,7 @@ export function createUtilityViews(React, workerSource) {
     return h('section', { hidden: !active, 'aria-label': copy.title },
       h('style', null, css),
       h('header', { className: 'ww-pagehead' }, h('div', null, h('h2', null, copy.title), h('p', null, `${tools.reduce((sum, tool) => sum + tool.functions.length, 0)} 项本机处理 · 文件不离开这台电脑`)),
-        h('div', { className: 'ww-pagehead-actions' }, h('label', { className: 'ww-field ww-tool-search' }, h('input', { type: 'search', value: query, placeholder: '搜索功能项或格式，如“PDF 合并”“AVIF”“转 MP3”', 'aria-label': copy.search, onChange: event => setQuery(event.target.value) })))),
+        h('div', { className: 'ww-pagehead-actions' }, h('label', { className: 'ww-field ww-tool-search' }, h('input', { type: 'search', value: query, placeholder: '搜索功能项或格式，如“PDF 合并”“AVIF”“转 WAV”', 'aria-label': copy.search, onChange: event => setQuery(event.target.value) })))),
       opened && h(ToolWindow, { key: opened.tool.id, tool: opened.tool, initial: opened.functionId, request: opened.request, active, minimized, onMinimize: setMinimized, onClose: close }),
       keyword ? h('div', null, hits.length ? h('div', { className: 'ww-tool-results' }, hits.map(({ tool, item }) => h('button', { type: 'button', key: item.id, className: 'ww-tool-hit', 'data-tool-id': tool.id, onClick: event => open(tool, item.id, event), 'aria-haspopup': 'dialog' }, h(ToolIcon, { tool, size: 16 }), h('span', null, item.title), h('small', null, `${tool.title} · ${item.brief}`))))
         : h('p', { role: 'status' }, copy.empty),
@@ -448,7 +448,9 @@ export function createUtilityViews(React, workerSource) {
         gaps.length > 0 && h('ul', { className: 'ww-tool-gaps', 'aria-label': '尚未内置' }, gaps.map(text => h('li', { key: text }, text))))
         : h('div', { ref: directory, className: 'ww-grid ww-tool-directory' }, tools.map(tool => h('div', { key: tool.id, className: 'ww-tool-card' },
           h('button', { type: 'button', className: 'ww-tool-card-head', 'data-tool-id': tool.id, onClick: event => open(tool, null, event), 'aria-haspopup': 'dialog', 'aria-label': tool.title, style: { all: 'unset', display: 'flex', gap: '12px', alignItems: 'center', cursor: 'pointer' } }, h(ToolIcon, { tool }), h('span', null, h('strong', null, tool.title), h('small', null, `${tool.brief} · `, h('span', { style: { whiteSpace: 'nowrap' } }, `${tool.functions.length} 个功能项`)))),
-          h('div', { className: 'ww-tool-chips' }, tool.functions.map(item => h('button', { type: 'button', key: item.id, className: 'ww-tool-chip', onClick: event => open(tool, item.id, event), 'aria-label': `${tool.title}：${item.title}` }, item.title)))))));
+          h('div', { className: 'ww-tool-chips' }, tool.functions.map(item => h('button', { type: 'button', key: item.id, className: 'ww-tool-chip', onClick: event => open(tool, item.id, event), 'aria-label': `${tool.title}：${item.title}` }, item.title))),
+          // 分类卡底边一道水纹，和专家卡同一种点缀（2026-11-02 补齐设计稿）。
+          h('i', { className: 'ww-orn-wave', 'aria-hidden': true })))));
   }
   return { ToolboxView };
 }

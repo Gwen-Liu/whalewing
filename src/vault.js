@@ -21,10 +21,20 @@ let bundleSource;
 
 /**
  * 随包内容分两种：
- * - 随包文件：00-系统 下的规则、首页、模板、视图和根目录入口，插件维护，升级时更新员工没改过的；
+ * - 随包文件：00-系统 下的规则、首页、模板、视图和根目录入口，插件维护，升级时更新（首页员工改过就保留，其余一律换新版，见 maintained）；
  * - 起步笔记：其他分区里的骨架（如 30-领域/个人管理 的关于我），只在第一次建一次，之后归员工，插件不再改，删了也不再补。
  */
 const isSeed = name => name.includes('/') && !name.startsWith('00-系统/');
+
+/**
+ * 插件维护的地方：规则、模板、视图和根目录入口。2026-11-02 用户定“只用新版”：升级时这里一律换成新版，
+ * 员工改过的和从别处带进来的（比如整套复制进来的旧第二大脑规则）先挪到 .whalewing/replaced/ 另存。
+ * 首页不算：员工本来就会往首页加入口，改过就保留。
+ */
+const maintained = name => !name.includes('/') || ['00-系统/规则/', '00-系统/模板/', '00-系统/Bases/'].some(prefix => name.startsWith(prefix));
+/** 只放插件文件的文件夹：里面别的文件升级时挪走。视图文件夹不扫，员工在 Obsidian 里常自己加视图。 */
+const pluginFolders = ['00-系统/规则', '00-系统/模板'];
+const timeStamp = (now = new Date()) => `${localDate(now)}-${[now.getHours(), now.getMinutes(), now.getSeconds()].map(value => String(value).padStart(2, '0')).join('')}`;
 
 /** 随包规则、模板、根级入口与 Obsidian 视图；.base 只接受 00-系统/Bases 下的文件。 */
 async function bundleFiles(date) {
@@ -320,23 +330,25 @@ export class Vault {
     }
   }
 
-  /** 已初始化的库随插件补齐骨架：缺失的目录和随包文件补建，员工未改过的随包文件更新，改过的保持原样；员工笔记不触碰。 */
+  /** 已初始化的库随插件补齐骨架：缺失的目录和随包文件补建，未改过的更新；规则、模板、视图、根入口改过的和不属于插件的另存后换新版，首页改过的保持原样；员工笔记不触碰。 */
   async upgrade(signal) {
     abort(signal);
     await this.requireReady();
     const date = localDate(), bundle = await bundleFiles(date);
     const recorded = await this.readInternal('.whalewing/bundle.json');
-    if (recorded && JSON.parse(recorded.content).version === bundle.version) return { upgraded: false, added: [], updated: [], kept: [], retired: [] };
+    if (recorded && JSON.parse(recorded.content).version === bundle.version) return { upgraded: false, added: [], updated: [], kept: [], retired: [], replaced: [] };
     return this.locked(async () => {
       const previous = (await this.readInternal('.whalewing/bundle.json'))?.content;
       const previousManifest = previous ? JSON.parse(previous) : null;
       const shipped = previousManifest ? previousManifest.files || {} : null;
       const seeded = new Set(previousManifest?.seeded ?? []);
       for (const folder of [...zones, ...layout]) await fs.mkdir(await this.resolve(folder, true), { recursive: true });
-      const hashes = {}, added = [], updated = [], kept = [], retired = [];
+      const hashes = {}, added = [], updated = [], kept = [], retired = [], replaced = [];
+      const aside = `.whalewing/replaced/${timeStamp()}`;
       for (const { name, content } of bundle.files) {
         abort(signal);
-        const current = await this.readInternal(name);
+        // 员工另存成别的编码或写得过大，读不出来也照样换成新版。
+        const current = await this.readInternal(name).catch(error => { if (maintained(name) && ['ENCODING', 'SIZE'].includes(error.code)) return { content: '', hash: '' }; throw error; });
         if (!current) {
           await this.atomic(name, content, signal);
           hashes[name] = digest(content); added.push(name);
@@ -345,6 +357,12 @@ export class Vault {
         // 只差日期的视为同一版本，不为刷新 updated 改写文件。
         if (undated(current.content) === undated(content)) { hashes[name] = current.hash; continue; }
         const pristine = shipped ? shipped[name] === current.hash : legacyBundle.has(digest(undated(current.content)));
+        if (!pristine && maintained(name)) {
+          await this.setAside(name, aside, signal);
+          await this.atomic(name, content, signal);
+          hashes[name] = digest(content); replaced.push(name);
+          continue;
+        }
         if (!pristine) {
           if (shipped?.[name]) hashes[name] = shipped[name];
           kept.push(name);
@@ -355,7 +373,7 @@ export class Vault {
         await this.atomic(name, next, signal);
         hashes[name] = digest(next); updated.push(name);
       }
-      // 新版不再随包的文件（改名或删掉的模板）：员工没改过就收走（先留备份），改过的原样留给员工。
+      // 新版不再随包的文件（改名或删掉的模板）：员工没改过就收走（先留备份）；改过的由下面挪走另存。
       const stillShipped = new Set(bundle.files.map(file => file.name));
       for (const [name, hash] of Object.entries(shipped ?? {})) {
         abort(signal);
@@ -366,6 +384,11 @@ export class Vault {
         await fs.unlink(await this.resolve(name, true));
         retired.push(name);
       }
+      // 规则、模板文件夹和根目录里不属于插件的文件（员工改过的旧模板、带进来的别的规则）挪走另存。
+      for (const name of await this.strays(stillShipped, signal)) {
+        await this.setAside(name, aside, signal);
+        replaced.push(name);
+      }
       // 起步笔记只建一次：没建过、库里也没有同名文件时才建，员工后来删了不再补。
       for (const { name, content } of bundle.seeds) {
         abort(signal);
@@ -374,24 +397,56 @@ export class Vault {
         seeded.add(name);
       }
       await this.atomic('.whalewing/bundle.json', manifest(bundle.version, hashes, seeded), signal);
-      return { upgraded: true, added, updated, kept, retired };
+      return { upgraded: true, added, updated, kept, retired, replaced, ...(replaced.length ? { replacedTo: aside } : {}) };
     }, signal);
   }
 
-  /** 与当前随包原文（不计日期）不同的随包文件就是员工改过的；只读，重启后也能列出，不依赖升级那一次的结果。 */
+  /** 规则、模板文件夹里和根目录 Markdown 中不是随包的文件，按路径排序；名字不合规的不碰。 */
+  async strays(shipped, signal) {
+    const found = [];
+    const walk = async relative => {
+      let entries;
+      try { entries = await fs.readdir(await this.resolve(relative, true), { withFileTypes: true }); }
+      catch (error) { if (error.code === 'ENOENT') return; throw error; }
+      for (const entry of entries) {
+        abort(signal);
+        const name = `${relative}/${entry.name}`;
+        if (entry.isDirectory()) await walk(name);
+        else if (entry.isFile() && !shipped.has(name)) found.push(name);
+      }
+    };
+    for (const folder of pluginFolders) await walk(folder);
+    for (const entry of await fs.readdir(this.root, { withFileTypes: true })) if (entry.isFile() && /\.md$/i.test(entry.name) && !shipped.has(entry.name)) found.push(entry.name);
+    return found.filter(name => { try { relativeName(name, true); return name.length <= 180; } catch { return false; } }).sort();
+  }
+
+  /** 原样挪进另存文件夹（同一个盘，直接改名），保留原来的路径层级。 */
+  async setAside(name, folder, signal) {
+    abort(signal);
+    const from = await this.resolve(name, true), to = await this.resolve(`${folder}/${name}`, true);
+    await fs.mkdir(path.dirname(to), { recursive: true });
+    await fs.rename(from, to);
+  }
+
+  /**
+   * 插件维护的地方（规则、模板、视图、根目录入口）现在和新版不一样的文件，加上那里不属于插件的文件：
+   * 下次升级会换成新版、原来的另存。只读，重启后也能列出。首页员工本来就会改，不列。
+   */
   async editedBundle(signal) {
     abort(signal);
     await this.requireReady();
-    const edited = [];
-    for (const { name, content } of (await bundleFiles(localDate())).files) {
+    const edited = [], files = (await bundleFiles(localDate())).files;
+    edited.push(...await this.strays(new Set(files.map(file => file.name)), signal));
+    for (const { name, content } of files) {
       abort(signal);
+      if (!maintained(name)) continue;
       let current;
       // 员工用别的编码另存或写得过大，同样算改过。
       try { current = await this.readInternal(name); }
       catch (error) { if (!['ENCODING', 'SIZE'].includes(error.code)) throw error; edited.push(name); continue; }
       if (current && undated(current.content) !== undated(content)) edited.push(name);
     }
-    return edited;
+    return edited.sort();
   }
 
   async locked(operation, signal) {
@@ -705,12 +760,24 @@ export class Vault {
       neighbors.get(edge.source).add(edge.target);
       neighbors.get(edge.target).add(edge.source);
     }
-    let selected = new Set(allNodes.map(record => record.path));
+    let selected = new Set(allNodes.map(record => record.path)), hidden;
     if (args.path) {
       const center = notePath(() => readableName(args.path), readRule);
       if (!selected.has(center)) fail('NOT_FOUND', '当前笔记已不存在，请回读后继续');
       selected = new Set([center]);
       for (const edge of pairs.values()) if (edge.source === center || edge.target === center) { selected.add(edge.source); selected.add(edge.target); }
+    } else {
+      // 全库图照第二大脑的 Obsidian 图谱（2026-10-30）：不画归档和模板，也不画在图上没有连线的笔记；
+      // 当前笔记关系图不藏。藏了多少篇写进结果，界面和模型都不会把这张图当成全部。
+      hidden = { archive: 0, templates: 0, orphans: 0 };
+      for (const node of allNodes) {
+        if (node.kind !== 'note') continue;
+        const group = node.path.startsWith('90-归档/') ? 'archive' : node.path.startsWith('00-系统/模板/') ? 'templates' : '';
+        if (group) { selected.delete(node.path); hidden[group]++; }
+      }
+      const linked = new Set();
+      for (const edge of pairs.values()) if (edge.source !== edge.target && selected.has(edge.source) && selected.has(edge.target)) { linked.add(edge.source); linked.add(edge.target); }
+      for (const node of allNodes) if (selected.has(node.path) && !linked.has(node.path)) { selected.delete(node.path); if (node.kind === 'note') hidden.orphans++; }
     }
     const query = (args.query || '').trim().toLocaleLowerCase();
     const filtered = allNodes.filter(record => selected.has(record.path) && (!query || `${record.path} ${record.title} ${(record.aliases || []).join(' ')}`.toLocaleLowerCase().includes(query)));
@@ -720,7 +787,7 @@ export class Vault {
     const visible = new Set(nodes.map(node => node.path));
     const allEdges = [...pairs.values()].filter(edge => selected.has(edge.source) && selected.has(edge.target));
     const edges = allEdges.filter(edge => visible.has(edge.source) && visible.has(edge.target));
-    return { version: 2, nodes, edges, total: filtered.length, offset, truncated: nodes.length < filtered.length, omittedEdges: allEdges.length - edges.length, unresolved: records.reduce((sum, record) => sum + record.links.filter(link => !['resolved', 'attachment'].includes(link.status)).length, 0) };
+    return { version: 2, nodes, edges, total: filtered.length, offset, truncated: nodes.length < filtered.length, omittedEdges: allEdges.length - edges.length, unresolved: records.reduce((sum, record) => sum + record.links.filter(link => !['resolved', 'attachment'].includes(link.status)).length, 0), ...(hidden ? { hidden } : {}) };
   }
 
   async validate(signal) {

@@ -164,7 +164,7 @@ export function createView(kit) {
             if (saved.hash !== restored.hash) throw Object.assign(new Error(t('conflict')), { code: 'conflict' });
             const value = await skillCommand('list');
             return () => { adoptSkills(value); setSkill(restored); setConfirm(null); };
-          }, 'skillRolledBack') })) : help('selectSkill')));
+          }, 'skillRolledBack') })) : h('div', { className: 'ww-card ww-skill-empty ww-meander' }, help('selectSkill'), h('i', { className: 'ww-whale', 'aria-hidden': true }))));
 
     body = h(React.Fragment, null, body, skillEditor !== undefined && h(SkillEditor, { key: skillEditor?.id || 'new-skill', api, entry: skillEditor, t, notify, onClose: () => setSkillEditor(undefined), onSaved: async entry => { const value = await api.skillRequest({ action: 'list' }); adoptSkills(value); setSkill(entry); setSkillEditor(undefined); notify(t('skillSaved')); } }));
     return active ? body : null;

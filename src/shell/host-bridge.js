@@ -130,6 +130,13 @@ export function createHostBridge(ctx, t, explainError) {
     inputBinding: reference => ctx.get('uiSession')?.bindingSource(reference).getSnapshot(),
     insertInputReference: (id, value) => { const binding = ctx.sessions.binding(id); return binding ? { bound: true, accepted: binding.ctx.bail(binding.ctx, 'slash/input-insert-reference', value) === true } : { bound: false };  },
     browserMounted: () => ctx.get('sidebarRight')?.mounted?.getSnapshot(), browserAvailable: requireBrowser,
+    // 右侧栏所有会话里开着的标签（rc.5 起有，含没在屏幕上的会话，重启后从本机记录恢复）；拿不到时返回空。
+    browserTabs: () => { const store = ctx.get('sidebarRight')?.openTabs; return typeof store?.getSnapshot === 'function' && typeof store?.subscribe === 'function' ? store : null; },
+    // 回到鲸翼页面并切到指定页签：左侧栏“鲸翼”那一行就是选中同名的主区面板。
+    showWorkbench: tab => {
+      (ctx.get('layout') || ctx.layout)?.selectPanel('whalewing');
+      if (tab) setTimeout(() => ctx.get('whalewingWorkbench')?.openTab(tab), 0);
+    },
     focusBrowser: sessionId => { const sidebar = requireBrowser(); if (typeof sidebar.focusPresentation !== 'function' || sidebar.mounted?.getSnapshot() !== sessionId) throw new Error(t('browserMissing')); return sidebar.focusPresentation(sessionId); },
     canFocusPresentation, notifySessionIssue, bindNotify: fn => { notifyGlobal = fn; }, notify: (...args) => notifyGlobal(...args),
     subscribeTheme: callback => ctx.on('theme/change', callback), retain: id => ctx.sessions.retain(id, { source: 'whalewingAssistant' }),

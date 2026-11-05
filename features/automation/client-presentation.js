@@ -128,7 +128,10 @@ export const styles = [
 `.ww-task-split{border-color:var(--ww-line)}.ww-task-list{background:var(--ww-surface-2)}.ww-task-select>span:first-child{display:inline-flex;align-items:center;gap:8px}.ww-task-select .ww-dot{width:16px;height:16px;font-size:10px}
 .ww-page .ww-task-detail .ww-team-heading h2,.ww-page .ww-task-editor>h2{font:600 22px/1.35 var(--ww-serif);letter-spacing:.01em}.ww-task-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:4px 0 16px}.ww-task-fact{display:flex;flex-direction:column;gap:4px;padding:14px 16px;border-radius:12px;background:var(--ww-surface-2)}.ww-task-fact small{font-size:12px;letter-spacing:.06em;color:var(--ww-ink-3)}.ww-task-fact strong{display:inline-flex;align-items:center;gap:8px;font-size:17px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--ww-ink)}.ww-task-fact span{font-size:12.5px;color:var(--ww-ink-2)}.ww-task-fact-err{background:color-mix(in srgb,var(--ww-err) 10%,transparent)}.ww-task-fact-err strong{color:var(--ww-err)}
 .ww-task-preview{margin:4px 0 8px;padding:10px 12px;border-radius:10px;background:var(--ww-tint);font-size:13.5px;color:var(--ww-ink);font-variant-numeric:tabular-nums}
-.ww-task-runs{display:flex;flex-direction:column;gap:2px;margin:12px 0 0;padding:0;list-style:none}.ww-task-runs li{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--ww-line)}.ww-task-runs li:first-child{border-top:0}.ww-task-runs .ww-task-run{margin:0;font-variant-numeric:tabular-nums}`
+.ww-task-runs{display:flex;flex-direction:column;gap:2px;margin:12px 0 0;padding:0;list-style:none}.ww-task-runs li{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--ww-line)}.ww-task-runs li:first-child{border-top:0}.ww-task-runs .ww-task-run{margin:0;font-variant-numeric:tabular-nums}`,
+// 2026-11-02 补齐设计稿的点缀：整块分栏右上角一枚淡鲸尾印（设计稿的位置；右下角会被小鲸气泡挡住）。
+// 水印定位在分栏上，不随右侧滚动、不撑出滚动条；分栏自成一层，水印垫在右侧文字下面，不盖字。
+`.ww-task-split{position:relative;z-index:0;border-radius:16px;box-shadow:var(--dsw-elevation-soft,none)}.ww-task-split .ww-whale{z-index:-1;top:-44px;bottom:auto;width:160px;height:160px}`
 ];
 
 // 专属错误只解释本领域；输入原文与公共运输错误由共用呈现机制处理。

@@ -274,6 +274,13 @@ export async function apply(ctx, config) {
     return next();
   }, { prepend: true });
 
+  /**
+   * 小鲸不带第三方浏览器插件 dsh-ego-browser 的 ego_* 工具（2026-11-02 用户反馈）：小鲸做插件管理时会拿它弹出一个独立浏览器
+   * 去开 DSH 自己的网页界面“亲自看一眼”，被登录验证拦住，员工只看到一个莫名弹出的空窗口。要上网查资料交给研究专家。
+   * 只按前缀认，没装那个插件时什么都不藏；和 MCP 归属无关，宿主列不出 MCP 时也照样藏。
+   */
+  const hiddenTools = { manager: ['ego_'] };
+  const hiddenFor = (name, role) => (hiddenTools[role.id] || []).some(prefix => name.startsWith(prefix));
   function facts(agent, role) {
     const servers = registry.mcp(agent);
     // 宿主列不出 MCP 归属时不做绑定过滤，专家照常使用 DSH 里启用的 MCP。
@@ -287,6 +294,7 @@ export async function apply(ctx, config) {
     return { servers, owner };
   }
   function allowed(name, role, current) {
+    if (hiddenFor(name, role)) return false;
     if (resources.has(name)) return role.mcpServers.length > 0;
     const owner = current.owner.get(name);
     if (owner) return owner.connected && role.mcpServers.includes(owner.name);
@@ -311,10 +319,12 @@ export async function apply(ctx, config) {
       if (!selected) { policy.approved.clear(); policy.servers.clear(); policy.restrict?.(); policy.restrict = undefined; policy.key = undefined; return; }
       const role = registry.get(selected);
       const current = facts(agent, role);
-      if (!current) { policy.approved.clear(); policy.servers.clear(); policy.restrict?.(); policy.restrict = undefined; policy.key = undefined; return; }
-      policy.approved = new Set(current.servers.filter(server => server.connected && role.mcpServers.includes(server.name)).flatMap(server => server.tools));
-      policy.servers = new Set(role.mcpServers);
-      const deny = ctx.tools.schemas().map(tool => tool.name).filter(name => !allowed(name, role, current));
+      if (current) {
+        policy.approved = new Set(current.servers.filter(server => server.connected && role.mcpServers.includes(server.name)).flatMap(server => server.tools));
+        policy.servers = new Set(role.mcpServers);
+      } else { policy.approved.clear(); policy.servers.clear(); }
+      // 列不出 MCP 归属时不做 MCP 过滤，只藏这位专家不带的工具。
+      const deny = ctx.tools.schemas().map(tool => tool.name).filter(name => current ? !allowed(name, role, current) : hiddenFor(name, role));
       const key = JSON.stringify(deny.sort());
       if (key !== policy.key) {
         policy.restrict?.(); policy.restrict = undefined;
@@ -322,7 +332,7 @@ export async function apply(ctx, config) {
         if (deny.length) policy.restrict = agent.ctx.tools.restrict({ deny });
         policy.key = key;
       }
-      if (ctx.tools.schemas(agent).some(tool => !allowed(tool.name, role, current))) throw expertError('MCP_MODE_CONFLICT', '当前模式包含不可隐藏的未绑定 MCP 工具，请调整模式、连接或专家绑定后重试');
+      if (current && ctx.tools.schemas(agent).some(tool => !hiddenFor(tool.name, role) && !allowed(tool.name, role, current))) throw expertError('MCP_MODE_CONFLICT', '当前模式包含不可隐藏的未绑定 MCP 工具，请调整模式、连接或专家绑定后重试');
     } catch (error) { policy.error = error; policy.approved.clear(); }
     finally { policy.refreshing = false; }
   }
@@ -335,7 +345,9 @@ export async function apply(ctx, config) {
         const id = read(agent.session)?.view.expertId;
         if (!id) return;
         try {
-          const role = registry.get(id), current = facts(agent, role);
+          const role = registry.get(id);
+          if (hiddenFor(exec.name, role)) return '小鲸不用浏览器工具：要上网查资料请交给研究专家；要看鲸翼或 DSH 的界面，请员工自己在 DSH 里看一眼';
+          const current = facts(agent, role);
           if (!current) return;
           if (policy.error) return policy.error.message;
           if (!allowed(exec.name, role, current)) return '当前专家未绑定此 MCP 连接';

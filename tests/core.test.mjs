@@ -131,7 +131,8 @@ test('空库初始化建齐目录骨架、规则、模板与视图，重复初�
   const { vault } = await fixture(t);
   const files = await vault.files();
   assert.deepEqual(files, ['00-系统/知识库首页.md', ...templates.map(name => `00-系统/模板/${name}.md`), ...['作品写作规范', '知识库使用说明', '知识库规则'].map(name => `00-系统/规则/${name}.md`), ...seeds, 'AGENTS.md'].sort());
-  assert.deepEqual(await vault.validate(), { valid: true, issues: [], notes: files.length, style: { words: 22, total: 0, notes: [] } });
+  // 用词表 24 个词：2026-11-02 照第二大脑的“用词对照”补上“未验”“Route Replay”。
+  assert.deepEqual(await vault.validate(), { valid: true, issues: [], notes: files.length, style: { words: 24, total: 0, notes: [] } });
   for (const folder of [...layout, ...bundledNotes]) assert.ok((await fs.stat(path.join(vault.root, ...folder.split('/')))).isDirectory(), folder);
   for (const folder of ['40-知识/人生思考', '70-作品/简历', '80-外部索引/学业文件']) await assert.rejects(fs.stat(path.join(vault.root, ...folder.split('/'))), { code: 'ENOENT' });
   assert.deepEqual((await fs.readdir(path.join(vault.root, '00-系统', 'Bases'))).sort(), ['任务记录.base', '幼苗知识.base', '收件箱.base', '活动项目.base', '草稿作品.base']);
@@ -139,7 +140,7 @@ test('空库初始化建齐目录骨架、规则、模板与视图，重复初�
   assert.equal((await vault.read('00-系统/模板/项目模板.md')).readOnly, true);
   await assert.rejects(vault.write('00-系统/Bases/收件箱.base', note('收件箱'), ''), { code: 'NOTE_PATH' });
   assert.equal((await vault.initialize()).initialized, true);
-  assert.deepEqual(await vault.upgrade(), { upgraded: false, added: [], updated: [], kept: [], retired: [] });
+  assert.deepEqual(await vault.upgrade(), { upgraded: false, added: [], updated: [], kept: [], retired: [], replaced: [] });
   assert.deepEqual((await vault.settings()).sources, []);
 });
 
@@ -160,37 +161,63 @@ test('模板代码块里的骨架替换占位后即是合规笔记', async t => 
   assert.equal(count, 13);
 });
 
-test('随包骨架升级补齐缺失、更新未改动文件，员工改过的文件与笔记保持原样', async t => {
+// 2026-11-02 用户定规则、模板这一层“只用新版”：员工改过的、从别处带进来的都换成新版，原来的挪到 .whalewing/replaced/ 另存。
+test('随包骨架升级补齐缺失、更新未改动文件；规则模板视图和根入口一律换成新版另存原件，首页和员工笔记保持原样', async t => {
   const { vault } = await fixture(t);
   const file = name => path.join(vault.root, ...name.split('/'));
   const manifest = JSON.parse(await fs.readFile(file('.whalewing/bundle.json'), 'utf8'));
-  // 模拟上一版：规则停在旧内容、首页被员工改过、一个模板和二级目录尚未随包。
+  // 模拟上一版：规则停在旧内容、首页被员工改过、一个模板和二级目录尚未随包；
+  // 另有员工改过的模板和根入口、规则文件夹里带进来的旧规则（含子文件夹）、根目录多出的说明、员工自己加的视图。
   const rule = '00-系统/规则/知识库规则.md', home = '00-系统/知识库首页.md', added = '00-系统/模板/项目模板.md';
+  const template = '00-系统/模板/日记模板.md', agents = 'AGENTS.md', strayRule = '00-系统/规则/第二大脑使用说明.md', nested = '00-系统/模板/旧/会议模板.md', strayRoot = 'SOURCE_OF_TRUTH.md', ownView = '00-系统/Bases/我的视图.base';
   const oldRule = note('知识库规则', '旧版规则。').replace('created: 2026-10-08', 'created: 2026-01-02');
   await fs.writeFile(file(rule), oldRule);
   const edited = (await fs.readFile(file(home), 'utf8')) + '\n员工自己补的入口。\n';
   await fs.writeFile(file(home), edited);
+  const editedTemplate = (await fs.readFile(file(template), 'utf8')) + '\n员工改的模板。\n';
+  await fs.writeFile(file(template), editedTemplate);
+  await fs.writeFile(file(agents), '# 别处带来的入口\n');
+  await fs.writeFile(file(strayRule), note('第二大脑使用说明', '旧第二大脑的规则。'));
+  await fs.mkdir(path.dirname(file(nested)), { recursive: true });
+  await fs.writeFile(file(nested), '会议模板');
+  await fs.writeFile(file(strayRoot), '# 旧导航\n');
+  await fs.writeFile(file(ownView), 'views: []\n');
   await fs.rm(file(added));
   await fs.rm(file('60-时间线/周记'), { recursive: true });
   const own = '40-知识/工作方法/示例.md';
   await vault.write(own, note('示例'), '');
   const ownBefore = await fs.readFile(file(own), 'utf8');
   await fs.writeFile(file('.whalewing/bundle.json'), JSON.stringify({ schema: 1, version: 'previous', files: { ...manifest.files, [rule]: digest(oldRule) } }));
+  assert.deepEqual(await vault.editedBundle(), [agents, strayRoot, strayRule, rule, nested, template].sort(), '升级前列出下次会换掉的，首页和员工的视图不列');
   const result = await vault.upgrade();
-  assert.deepEqual(result, { upgraded: true, added: [added], updated: [rule], kept: [home], retired: [] });
+  const { replacedTo, ...rest } = result;
+  assert.deepEqual(rest, { upgraded: true, added: [added], updated: [rule], kept: [home], retired: [], replaced: [template, agents, nested, strayRule, strayRoot] }, '先按随包顺序换掉改过的，再挪走不属于插件的');
+  assert.match(replacedTo, /^\.whalewing\/replaced\/\d{4}-\d{2}-\d{2}-\d{6}$/);
   const upgraded = await fs.readFile(file(rule), 'utf8');
   assert.match(upgraded, /^---\ntype: output\nstatus: published\ncreated: 2026-01-02\n/u);
   assert.match(upgraded, /## 十个分区/u);
+  // 换下来的原样另存，保留原来的路径层级；规则、模板文件夹和根目录只剩插件的文件。
+  assert.equal(await fs.readFile(file(`${replacedTo}/${template}`), 'utf8'), editedTemplate);
+  assert.equal(await fs.readFile(file(`${replacedTo}/${agents}`), 'utf8'), '# 别处带来的入口\n');
+  assert.equal(await fs.readFile(file(`${replacedTo}/${nested}`), 'utf8'), '会议模板');
+  assert.doesNotMatch(await fs.readFile(file(template), 'utf8'), /员工改的模板/);
+  assert.match(await fs.readFile(file(agents), 'utf8'), /# 知识库 Agent 入口/);
+  for (const name of [strayRule, nested, strayRoot]) await assert.rejects(fs.stat(file(name)), { code: 'ENOENT' });
+  assert.equal(await fs.readFile(file(ownView), 'utf8'), 'views: []\n', '员工自己加的视图不动');
   assert.equal(await fs.readFile(file(home), 'utf8'), edited);
   assert.equal(await fs.readFile(file(own), 'utf8'), ownBefore);
   assert.ok((await fs.stat(file('60-时间线/周记'))).isDirectory());
   assert.equal(JSON.parse(await fs.readFile(file('.whalewing/bundle.json'), 'utf8')).version, manifest.version);
-  assert.deepEqual(await vault.upgrade(), { upgraded: false, added: [], updated: [], kept: [], retired: [] });
-  // 无清单的首版库只认首版原文；不认识的内容一律保留。
+  assert.deepEqual(await vault.editedBundle(), []);
+  assert.deepEqual(await vault.upgrade(), { upgraded: false, added: [], updated: [], kept: [], retired: [], replaced: [] });
+  assert.equal((await vault.validate()).valid, true, '另存的旧文件不进检查');
+  // 无清单的首版库：首页不认识的内容保留，规则换成新版。
   await fs.rm(file('.whalewing/bundle.json'));
   await fs.writeFile(file(rule), oldRule);
-  assert.deepEqual((await vault.upgrade()).kept, [home, rule]);
-  assert.equal(await fs.readFile(file(rule), 'utf8'), oldRule);
+  const legacy = await vault.upgrade();
+  assert.deepEqual([legacy.kept, legacy.replaced], [[home], [rule]]);
+  assert.match(await fs.readFile(file(rule), 'utf8'), /## 十个分区/u);
+  assert.equal(await fs.readFile(file(`${legacy.replacedTo}/${rule}`), 'utf8'), oldRule);
 });
 
 // 2026-11-01 照第二大脑改版：老库升级时补建关于自己的三篇；改名掉的旧模板，员工没改过就收走。
@@ -211,7 +238,10 @@ test('老库升级：补建关于自己的三篇，员工删了不再补；不�
   assert.deepEqual(result.added, seeds, '三篇起步笔记补建');
   assert.deepEqual(result.retired, [pristine], '没改过的旧模板收走');
   await assert.rejects(fs.stat(file(pristine)), { code: 'ENOENT' });
-  assert.match(await fs.readFile(file(changed), 'utf8'), /员工在旧模板里补了自己的说明/, '员工改过的旧模板留着');
+  // 2026-11-02 起模板文件夹只放插件的：员工改过的旧模板也挪走另存，不留在原处。
+  assert.deepEqual(result.replaced, [changed]);
+  await assert.rejects(fs.stat(file(changed)), { code: 'ENOENT' });
+  assert.match(await fs.readFile(file(`${result.replacedTo}/${changed}`), 'utf8'), /员工在旧模板里补了自己的说明/, '员工改过的旧模板另存');
   const recovery = await fs.readdir(file('.whalewing/recovery'));
   assert.ok(recovery.length >= 1, '收走前留了备份');
   assert.match(await fs.readFile(file(seeds[0]), 'utf8'), /^---\ntype: area\nstatus: active\n/u);

@@ -28,7 +28,7 @@ export function resolveUtilityPackageRoot(name) {
 /** 审核依据仅绑定固定输入载体；变更依赖或内嵌源码必须先重新核清许可。 */
 export function readUtilityLicenseAudit() {
   const audit = JSON.parse(readText(auditFile));
-  const reviewed = ['exceljs', 'docx', 'fflate', '@xmldom/xmldom', 'tslib', 'pdf-lib', 'pako', '@pdf-lib/standard-fonts', '@pdf-lib/upng', 'pdfmake', 'pdfjs-dist', 'qrcode-generator', 'jsqr', '@breezystack/lamejs'];
+  const reviewed = ['exceljs', 'docx', 'fflate', '@xmldom/xmldom', 'tslib', 'pdf-lib', 'pako', '@pdf-lib/standard-fonts', '@pdf-lib/upng', 'pdfmake', 'pdfjs-dist', 'qrcode-generator', 'jsqr'];
   if (audit.schema !== 1 || !Array.isArray(audit.packages) || audit.packages.length !== reviewed.length || reviewed.some(name => !audit.packages.some(p => p.name === name)) || !Array.isArray(audit.closures) || audit.closures.length < audit.packages.length || !/^[a-f0-9]{64}$/.test(audit.noticeSha256)) fail('审计依据格式无效');
   const identities = new Set();
   for (const item of audit.packages) {

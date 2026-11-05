@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "noticeSha256": "2f9c9a372b338e300e343043c076167ac4d64c00923a1e03a638958a14081a6e",
+  "noticeSha256": "7aa3c01842b117561d21ef35298947eb7d2336d28141768cc3fe68b7e64264b8",
   "packages": [
     {
       "name": "exceljs",
@@ -2036,27 +2036,6 @@
         {
           "file": "LICENSE",
           "sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08",
-          "input": false
-        }
-      ]
-    },
-    {
-      "name": "@breezystack/lamejs",
-      "version": "1.2.7",
-      "files": [
-        {
-          "file": "package.json",
-          "sha256": "cd7e0d13df9e60b931dd7b307c2e1c06af9c44667dda281d5c77d7d226034f9e",
-          "input": false
-        },
-        {
-          "file": "dist/lamejs.js",
-          "sha256": "1c5f944911ccf2f6e29ab36c2e568363210ab16f50c0d76077060f40ecf91d28",
-          "input": true
-        },
-        {
-          "file": "LICENSE",
-          "sha256": "cd144ca132e3842b01f5ed2d6f3a32141e24a1cc15e115aa5f19a2294ce0a379",
           "input": false
         }
       ]
