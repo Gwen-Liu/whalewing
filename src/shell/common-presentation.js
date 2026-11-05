@@ -67,7 +67,7 @@ export const zh = {
   "back": "返回上一篇",
   "previous": "上一页",
   "next": "下一页",
-  "question": "小鲸助手",
+  "question": "{assistant}",
   "avatar": "上传头像",
   "saveExpert": "保存专家",
   "closePanel": "关闭",

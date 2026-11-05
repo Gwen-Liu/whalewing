@@ -57,6 +57,7 @@ export const zh = {
   "expertSourceEdit": "这位专家由「{name}」提供，保存后改动交给「{name}」；模型和 MCP 跟随你本机的设置，这里不绑定",
   "editExpert": "编辑专家",
   "expertName": "专家名字",
+  "assistantNameLocked": "名字由「{source}」统一设定，这里改不了；关掉它后恢复原来的名字",
   "expertDescription": "一句话介绍",
   "expertPrompt": "系统提示词（必填）",
   "expertModel": "对话模型",

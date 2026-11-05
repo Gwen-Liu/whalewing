@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Vault } from '../src/vault.js';
 import { knowledgeContract } from '../features/knowledge/contract.js';
-import { createGraphCanvas, createGraphLayout, graphLayer, graphLayers } from '../src/graph-canvas.js';
+import { createGraphCanvas, createGraphLayout, graphLayer, graphLayers, liveLimits } from '../src/graph-canvas.js';
 import { z } from 'zod';
 import { forceSimulation, forceLink as nativeLink, forceManyBody as nativeManyBody, forceCollide as nativeCollide } from 'd3-force';
 
@@ -404,7 +404,14 @@ test('连续纯平移中仍在视口内的标题身份稳定，不因网格相�
   h.element.fire('pointerup', { pointerId: 1 }); assert.equal(h.opened.length, 0);
 });
 
-test('悬停与键盘突出一跳邻域，节点拖动只改本节点且连线同步，Esc恢复不打开', t => {
+// 2026-11-05 用户对比 Obsidian 录屏：拖动时相连的点要被拉着跟过来，松手后整图要回到原位。
+// 原来“拖动只改本节点”“松手留在原处”的约定作废，改成下面的实时物理。
+const near = (actual, expected, tolerance, message) => {
+  assert.equal(actual.length, expected.length, message);
+  actual.forEach((point, i) => assert.ok(distance(point, expected[i]) <= tolerance, `${message}：第 ${i} 个点差 ${distance(point, expected[i]).toFixed(3)}`));
+};
+
+test('悬停与键盘突出一跳邻域；拖动节点时相连的点被拉着跟过来，Esc 松开后整图回到原位，不打开', t => {
   const h = harness(t, small, { reduced: true }); h.flush();
   const before = h.geometry().arcs.map(node => ({ ...node }));
   const at = before[0];
@@ -414,13 +421,15 @@ test('悬停与键盘突出一跳邻域，节点拖动只改本节点且连线�
   assert.ok(h.geometry().segments.length > 0);
   assert.equal(h.geometry().fills[0].color, '#d80');
   h.element.fire('pointerdown', { button: 0, isPrimary: true, pointerId: 1, clientX: at.x, clientY: at.y });
-  h.element.fire('pointermove', { pointerId: 1, clientX: at.x + 50, clientY: at.y + 20 }); h.flush();
+  h.element.fire('pointermove', { pointerId: 1, clientX: at.x + 50, clientY: at.y + 20 }); h.flush(60);
   assert.equal(h.geometry().layersDrawn.length, 0);
-  assert.equal(h.geometry().arcs[0].x, at.x + 50);
-  assert.deepEqual(h.geometry().arcs[1], before[1]);
-  assert.ok(h.geometry().segments.some(line => Math.abs(line.from.x - at.x - 50) < 1e-8 && Math.abs(line.from.y - at.y - 20) < 1e-8));
+  const dragged = h.geometry().arcs[0], pulled = h.geometry().arcs[1];
+  assert.ok(distance(dragged, { x: at.x + 50, y: at.y + 20 }) < 1e-6, '被拖的点钉在指针处');
+  assert.ok(distance(pulled, before[1]) > 1, '相连的点跟着动');
+  assert.ok(distance(pulled, dragged) < distance(before[1], dragged), '相连的点朝被拖的点靠过去');
+  assert.ok(h.geometry().segments.some(line => distance(line.from, dragged) < 1e-6 && distance(line.to, pulled) < 1e-6), '连线跟着两端走');
   h.element.fire('keydown', { key: 'Escape' }); h.flush();
-  assert.deepEqual(h.geometry().arcs, before); assert.equal(h.element.captured, null);
+  near(h.geometry().arcs, before, 0.5, 'Esc 松开后回到原位'); assert.equal(h.element.captured, null);
   h.element.fire('pointerup', { pointerId: 1, clientX: at.x, clientY: at.y }); assert.equal(h.opened.length, 0);
   assert.equal(h.element.title, '');
   h.element.fire('keydown', { key: 'Home' }); h.flush();
@@ -428,23 +437,50 @@ test('悬停与键盘突出一跳邻域，节点拖动只改本节点且连线�
   assert.ok(h.geometry().fills[2].alpha < h.geometry().fills[1].alpha);
 });
 
-test('节点松开保留位置，普通点击不拆缓存，指针取消恢复且根容器填满父布局', t => {
+test('节点松手后整图回到原位，普通点击不拆缓存，指针取消同样回到原位且根容器填满父布局', t => {
   const h = harness(t, small, { reduced: true }); h.flush();
   assert.equal(h.render().props.style.height, '100%'); assert.equal(h.render().props.style.flex, 1); assert.equal(h.render().props.style.minHeight, 0);
-  const at = h.geometry().arcs[0]; const layers = h.edgeLayers.length;
+  const before = h.geometry().arcs.map(node => ({ ...node }));
+  const at = before[0]; const layers = h.edgeLayers.length;
   for (const name of ['pointerdown', 'pointerup']) h.element.fire(name, { button: 0, isPrimary: true, pointerId: 1, clientX: at.x, clientY: at.y });
   h.flush(); assert.equal(h.edgeLayers.length, layers); assert.equal(h.opened.length, 1);
+  near(h.geometry().arcs, before, 0, '普通点击不动布局');
   h.element.fire('pointerdown', { button: 0, isPrimary: true, pointerId: 1, clientX: at.x, clientY: at.y });
-  h.element.fire('pointermove', { pointerId: 1, clientX: at.x + 40, clientY: at.y + 15 }); h.flush();
-  const moved = h.geometry().arcs.map(node => ({ ...node }));
+  h.element.fire('pointermove', { pointerId: 1, clientX: at.x + 40, clientY: at.y + 15 }); h.flush(60);
+  assert.ok(distance(h.geometry().arcs[0], before[0]) > 40, '拖动中离开原位');
   h.element.fire('pointerup', { pointerId: 1 }); h.flush();
-  assert.deepEqual(h.geometry().arcs, moved); h.render(); assert.deepEqual(h.geometry().arcs, moved);
-  assert.ok(h.geometry().segments.some(line => line.from.x === moved[0].x && line.to.x === moved[1].x));
-  h.element.fire('pointerdown', { button: 0, isPrimary: true, pointerId: 2, clientX: moved[0].x, clientY: moved[0].y });
-  h.element.fire('pointermove', { pointerId: 2, clientX: moved[0].x + 70, clientY: moved[0].y + 25 }); h.flush();
+  near(h.geometry().arcs, before, 0.5, '松手后回到原位'); h.render(); near(h.geometry().arcs, before, 0.5, '重渲染不重启布局');
+  const settled = h.geometry().arcs;
+  assert.ok(h.geometry().segments.some(line => distance(line.from, settled[0]) < 1e-6 && distance(line.to, settled[1]) < 1e-6));
+  h.element.fire('pointerdown', { button: 0, isPrimary: true, pointerId: 2, clientX: settled[0].x, clientY: settled[0].y });
+  h.element.fire('pointermove', { pointerId: 2, clientX: settled[0].x + 70, clientY: settled[0].y + 25 }); h.flush(60);
   h.element.fire('pointercancel', { pointerId: 99 }); assert.equal(h.element.captured, 2);
   h.element.fire('pointercancel', { pointerId: 2 }); h.flush();
-  assert.deepEqual(h.geometry().arcs, moved); assert.equal(h.element.captured, null); assert.equal(h.opened.length, 1);
+  near(h.geometry().arcs, before, 0.5, '指针取消后同样回到原位'); assert.equal(h.element.captured, null); assert.equal(h.opened.length, 1);
+});
+
+test('松手后逐帧柔和地滑回原位，不一下跳回；系统要求减弱动态时算完一次换上', t => {
+  const moving = harness(t, small); moving.flush();
+  const before = moving.geometry().arcs.map(node => ({ ...node }));
+  moving.element.fire('pointerdown', { button: 0, isPrimary: true, pointerId: 1, clientX: before[0].x, clientY: before[0].y });
+  moving.element.fire('pointermove', { pointerId: 1, clientX: before[0].x + 80, clientY: before[0].y }); moving.flush(60);
+  moving.element.fire('pointerup', { pointerId: 1 }); moving.flush(1);
+  const first = moving.geometry().arcs[0];
+  assert.ok(distance(first, before[0]) > 20, `松手后的第一帧还在半路：离原位 ${distance(first, before[0]).toFixed(1)}`);
+  moving.flush(10);
+  assert.ok(distance(moving.geometry().arcs[0], before[0]) < distance(first, before[0]), '一帧帧往回走');
+  assert.ok(moving.flush() > 30, '回弹分在多帧里');
+  near(moving.geometry().arcs, before, 0.5, '最后准确落回原位');
+  moving.unmount();
+  const quiet = harness(t, small, { reduced: true }); quiet.flush();
+  quiet.element.fire('pointerdown', { button: 0, isPrimary: true, pointerId: 1, clientX: before[0].x, clientY: before[0].y });
+  quiet.element.fire('pointermove', { pointerId: 1, clientX: before[0].x + 80, clientY: before[0].y }); quiet.flush(60);
+  const held = quiet.geometry().arcs.map(node => ({ ...node }));
+  quiet.element.fire('pointerup', { pointerId: 1 }); quiet.flush(1);
+  const next = quiet.geometry().arcs;
+  assert.ok(next.every((point, i) => distance(point, held[i]) < 1e-9 || distance(point, before[i]) <= 0.5), '减弱动态时不呈现回弹的中间位置');
+  quiet.flush(); near(quiet.geometry().arcs, before, 0.5, '减弱动态时也回到原位');
+  quiet.unmount();
 });
 
 test('高密度拖节点只重建一次排除层，逐帧有界且松开恢复全部20万边', t => {
@@ -467,14 +503,18 @@ test('高密度拖节点只重建一次排除层，逐帧有界且松开恢复�
   h.element.fire('pointerup', { pointerId: 1 });
   assert.equal(h.render().props.children[0].props['aria-busy'], true);
   h.flush(); assert.equal(h.edgeLayers.at(-1).lines, edges.length); assert.equal(h.render().props.children[0].props['aria-busy'], false);
+  assert.ok(distance(h.geometry().arcs[0], at) < 1e-6, '超出实时物理规模时松手把点放回原处');
   assert.ok(h.geometry().widestFrame < 100, `最长计算帧 ${h.geometry().widestFrame}ms`);
   t.diagnostic(JSON.stringify({ interaction: '1000节点/200000边持续拖动60帧', longestComputeFrameMs: Math.round(h.geometry().widestFrame), raster: '真实Canvas由浏览器验收' }));
 });
 
-test('拖动背景的主题替换、失捕获、隐藏和卸载废弃旧构建，迟到帧不覆盖恢复位置', t => {
-  const count = 100;
+test('超出实时物理规模的大图：拖动中的主题替换、失捕获、隐藏和卸载废弃旧构建，迟到帧不覆盖放回原处的位置', t => {
+  // 160 点、12720 条不重复连线，超过实时物理的 1.2 万条上限，走原来的分批缓存。
+  const count = 160;
   const nodes = Array.from({ length: count }, (_, i) => ({ path: `${i}`, title: `笔记${i}`, degree: count - 1 }));
-  const edges = Array.from({ length: 9000 }, (_, i) => ({ source: `${i % count}`, target: `${(i % count + 1 + Math.floor(i / count)) % count}` }));
+  const edges = Array.from({ length: 12800 }, (_, i) => ({ source: `${i % count}`, target: `${(i % count + 1 + Math.floor(i / count)) % count}` }));
+  const unique = new Set(edges.map(edge => [Number(edge.source), Number(edge.target)].sort((a, b) => a - b).join())).size;
+  assert.ok(unique > liveLimits.edges);
   const h = harness(t, { nodes, edges }, { reduced: true }); h.flush();
   const before = h.geometry().arcs.map(node => ({ ...node }));
   const start = () => {
@@ -487,16 +527,54 @@ test('拖动背景的主题替换、失捕获、隐藏和卸载废弃旧构建�
   h.callbacks.forEach(callback => callback()); assert.equal(pending.width, 0); h.flush(1);
   const recolored = h.edgeLayers.at(-1);
   h.element.fire('lostpointercapture', { pointerId: 5 }); assert.equal(recolored.width, 0); h.flush();
-  assert.deepEqual(h.geometry().arcs, before); assert.equal(h.edgeLayers.at(-1).lines, 4950);
+  assert.deepEqual(h.geometry().arcs, before); assert.equal(h.edgeLayers.at(-1).lines, unique);
   const hidden = start(), late = [...h.frames.values()][0];
   h.document.hidden = true; h.document.fire('visibilitychange');
   assert.equal(hidden.width, 0); assert.equal(h.element.captured, null);
   const lineCount = h.geometry().lines; late(); assert.equal(h.geometry().lines, lineCount);
   h.document.hidden = false; h.document.fire('visibilitychange'); h.flush();
-  assert.deepEqual(h.geometry().arcs, before); assert.equal(h.edgeLayers.at(-1).lines, 4950);
+  assert.deepEqual(h.geometry().arcs, before); assert.equal(h.edgeLayers.at(-1).lines, unique);
   start(); const afterUnmount = [...h.frames.values()][0]; h.unmount(); const finalCount = h.geometry().lines; afterUnmount();
   assert.equal(h.geometry().lines, finalCount); assert.equal(h.frames.size, 0); assert.equal(h.element.captured, null);
   assert.ok(h.edgeLayers.every(layer => layer.width === 0 && layer.height === 0));
+  assert.equal(h.observers.size, 0); assert.equal(h.callbacks.size, 0); assert.equal(h.opened.length, 0);
+});
+
+test('实时物理期间连线逐帧直接画、不建分批缓存；主题替换、失捕获、隐藏、迟到帧和卸载都干净，停下后重建全部连线', t => {
+  // 100 点、4950 条不重复连线：平时走分批缓存，拖动时在实时物理规模内。
+  const count = 100;
+  const nodes = Array.from({ length: count }, (_, i) => ({ path: `${i}`, title: `笔记${i}`, degree: count - 1 }));
+  const edges = Array.from({ length: 9000 }, (_, i) => ({ source: `${i % count}`, target: `${(i % count + 1 + Math.floor(i / count)) % count}` }));
+  const h = harness(t, { nodes, edges }, { reduced: true }); h.flush();
+  const before = h.geometry().arcs.map(node => ({ ...node }));
+  const cached = h.edgeLayers.at(-1);
+  assert.equal(cached.lines, 4950);
+  const start = () => {
+    h.element.fire('pointerdown', { button: 0, isPrimary: true, pointerId: 5, clientX: before[0].x, clientY: before[0].y });
+    h.element.fire('pointermove', { pointerId: 5, clientX: before[0].x + 50, clientY: before[0].y + 30 }); h.flush(1);
+    assert.equal(h.render().props.children[0].props['aria-busy'], false, '实时物理期间不进入分批绘制');
+    return h.edgeLayers.length;
+  };
+  const layers = start();
+  assert.equal(cached.width, 0, '开始拖动就丢掉坐标已旧的缓存');
+  h.flush(5);
+  assert.equal(h.edgeLayers.length, layers, '拖动中不建分批缓存');
+  assert.equal(h.lineLayers.at(-1).segments.length, 4950, '每帧直接画全部连线');
+  assert.equal(h.geometry().layersDrawn.length, 0);
+  h.callbacks.forEach(callback => callback()); h.flush(2);
+  assert.equal(h.edgeLayers.length, layers, '拖动中换主题也不建缓存');
+  h.element.fire('lostpointercapture', { pointerId: 5 }); h.flush();
+  near(h.geometry().arcs, before, 1, '失捕获后回到原位（稠密图最后还剩一点其他力，差不到 1 像素）');
+  assert.equal(h.edgeLayers.at(-1).lines, 4950); assert.equal(h.render().props.children[0].props['aria-busy'], false);
+  start(); const late = [...h.frames.values()][0];
+  h.document.hidden = true; h.document.fire('visibilitychange');
+  assert.equal(h.element.captured, null);
+  const lineCount = h.geometry().lines; late(); assert.equal(h.geometry().lines, lineCount, '隐藏后迟到的帧不再画');
+  h.document.hidden = false; h.document.fire('visibilitychange'); h.flush();
+  near(h.geometry().arcs, before, 1, '隐藏期间松开，回来后照样回到原位'); assert.equal(h.edgeLayers.at(-1).lines, 4950);
+  start(); const afterUnmount = [...h.frames.values()][0]; h.unmount(); const finalCount = h.geometry().lines; afterUnmount();
+  assert.equal(h.geometry().lines, finalCount); assert.equal(h.frames.size, 0); assert.equal(h.element.captured, null);
+  assert.ok([...h.edgeLayers, ...h.lineLayers].every(layer => layer.width === 0 && layer.height === 0));
   assert.equal(h.observers.size, 0); assert.equal(h.callbacks.size, 0); assert.equal(h.opened.length, 0);
 });
 

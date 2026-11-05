@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { readFileSync } from 'node:fs';
 import { realpath, stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -14,8 +15,11 @@ import { FileSystemSkillProvider } from '@deepseek-ai/dsh-skill-filesystem';
 import { automationProjection, claimCommands, automationIdentity, automationPurposes } from './src/identity.js';
 import { FeatureRegistry } from './src/features.js';
 import { ExtensionSources } from './src/extension-sources.js';
+import { assistantNames } from './src/assistant-name.js';
 import { installNewsGate } from './src/news-gate.js';
 import { workbenchContract } from './src/workbench-contract.js';
+import { checkUpdate } from './src/update-check.js';
+import { evaluatePluginCompatibility, getDshRuntimeVersion } from '@deepseek-ai/dsh-app-boot';
 import { apply as installSkills } from './src/skill-provider.js';
 import { isInside } from './src/skill-roots.js';
 import { parts } from './features/index.js';
@@ -26,6 +30,7 @@ import * as Skills from './features/skills/host.js';
 import * as Automation from './features/automation/host.js';
 
 const packageRoot = fileURLToPath(new URL('.', import.meta.url));
+const pluginVersion = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version;
 export const baseHosts = { experts: Experts, assistant: Assistant, knowledge: Knowledge.default, skills: Skills.default, automation: Automation.default };
 // 工作台身份只由本命令的成功回执重建；标题、浏览器缓存和其他命令都不是身份依据。
 export const workbenchProjection = {
@@ -106,8 +111,13 @@ export default class Whalewing extends Service {
     this.skills = this.core.skills;
     this.apiVersion = 1;
     this.registry = new FeatureRegistry(ctx, parts);
-    // 扩展提供的专家和知识只在内存里，随各自登记撤销；总开关关闭时一起清掉。
-    this.sources = new ExtensionSources(this.registry, { changed: kind => { if (kind === 'experts') ctx.emit('whalewing-experts/changed'); }, maxNoteBytes: this.vault.limits.maxNoteBytes, maxResults: this.vault.limits.maxResults });
+    // 扩展提供的专家、知识和助手名称只在内存里，随各自登记撤销；总开关关闭时一起清掉。
+    // 助手名称变了：专家列表里小鲸的名字跟着变，功能快照把新名字带给界面。
+    this.sources = new ExtensionSources(this.registry, { changed: kind => {
+      if (kind === 'experts' || kind === 'assistant') ctx.emit('whalewing-experts/changed');
+      if (kind === 'assistant') this.registry.changed();
+    }, maxNoteBytes: this.vault.limits.maxNoteBytes, maxResults: this.vault.limits.maxResults });
+    this.registry.extras = () => { const assistant = this.sources.assistantName(); return assistant ? { assistant } : {}; };
     ctx.effect(() => () => this.sources.dispose(), '鲸翼扩展来源');
     this.features = Object.assign(() => this.registry.snapshot(), { register: (scope, manifest) => this.registry.register(scope, manifest) });
     const handlers = this.commandHandlers = new Map();
@@ -204,6 +214,13 @@ export default class Whalewing extends Service {
     return { registerSource: (scope, options) => this.sources.registerExperts(scope, options) };
   }
 
+  get assistant() {
+    return { registerName: (scope, name) => this.sources.registerAssistantName(scope, name) };
+  }
+
+  /** 小鲸现在叫什么：扩展起了名就用扩展的（没有简称），否则是“小鲸助手”“小鲸”。 */
+  assistantName() { return assistantNames(this.sources?.assistantName()?.name); }
+
   /** 技能库“扩展”一组：只列 DSH 实际从扩展技能目录发现的技能；没有带技能目录的扩展时不读注册表。 */
   extensionRoots() {
     return [...this.registry.entries.values()].filter(entry => entry.kind === 'extension' && entry.skills.length && entry.fiber.state === 2);
@@ -233,6 +250,21 @@ export default class Whalewing extends Service {
 
   watchFeatures(signal) { return this.registry.watch(signal); }
   async retryBase(id) { await this.registry.retry(id); return this.registry.snapshot(); }
+  /** 员工点“检查更新”时才联网：来源和安装源取自 DSH 插件管理器，兼容按 DSH 自己的判断。 */
+  async checkUpdate() {
+    const runtimeVersion = getDshRuntimeVersion();
+    const manager = this.ctx.get('pluginManager');
+    if (!manager) return { status: 'local', current: pluginVersion, runtimeVersion };
+    let source;
+    try { source = (await manager.listBundles()).find(bundle => bundle.name === 'dsh-whalewing')?.source; } catch (error) {
+      return { status: 'failed', current: pluginVersion, runtimeVersion, reason: `读不到 DSH 插件列表：${error?.message || error}` };
+    }
+    const registries = await Promise.resolve().then(() => manager.registries()).catch(() => undefined);
+    const compatible = manifest => {
+      try { const issue = evaluatePluginCompatibility(manifest, {}, runtimeVersion); return !issue || issue.exempted; } catch { return false; }
+    };
+    return { ...(await checkUpdate({ current: pluginVersion, source, registries, compatible })), runtimeVersion };
+  }
   automationIdentity(id, signal) {
     return automationIdentity((sessionId, nextSignal) => {
       const controller = this.ctx.get('sessionController');

@@ -63,3 +63,53 @@ test('由内置专家转来的自定义专家同时有恢复原版和删除；�
   const notice = nodes(render()).find(node => node.type === 'p' && node.props.className === 'ww-notice');
   assert.match(text(notice), /^原版有更新：提示词。/);
 });
+
+// 2026-11-05 助手名称：扩展给小鲸起名后，界面上写着小鲸的地方跟着换；编辑小鲸时名字只读，扩展撤销后恢复。
+const renamed = async (f, revision, assistant) => {
+  const { parts } = await import('../features/index.js');
+  await f.featureUpdate({ revision, features: parts.map((part, index) => ({ instance: index + 1, id: part.id, kind: part.kind, api: 1, package: 'dsh-whalewing', skills: [] })), ...(assistant ? { assistant } : {}) });
+};
+const team = { name: '小司助手', feature: 'team', package: 'dsh-fixture-team', label: { zh: '团队', en: 'Team' } };
+
+test('扩展给小鲸起名：助手入口、标题和欢迎页用新名字，扩展撤销后恢复“小鲸助手”', async () => {
+  const f = await fixture();
+  f.render(); f.flushEffects();
+  assert.ok(button(f.render(), '打开小鲸助手'));
+  await renamed(f, 1, team);
+  button(f.render(), '打开小司助手').props.onClick();
+  f.render(); f.flushEffects();
+  const tree = f.render();
+  assert.equal(nodes(tree).find(node => node.type === 'aside').props['aria-label'], '小司助手');
+  assert.ok(button(tree, '开始与小司助手协作'));
+  // 专家卡片和头像拿到的专家数据由宿主换好名字（这里的假数据没换），只核对助手面板显示的文字和提示。
+  const aside = nodes(tree).find(node => node.type === 'aside');
+  const shown = [text(aside), ...nodes(aside).flatMap(node => [node.props?.title, node.props?.['aria-label']]).filter(value => typeof value === 'string')].join('|');
+  assert.match(shown, /小司助手/);
+  assert.equal(shown.includes('小鲸'), false, '助手面板上不再显示小鲸');
+  await renamed(f, 2);
+  assert.ok(button(f.render(), '开始与小鲸协作'));
+});
+
+test('扩展给小鲸起名：编辑小鲸时名字只读并写明由谁设定，其他专家照常可改', async () => {
+  let lists = 0;
+  const f = await fixture({ experts: async input => {
+    if (input.action === 'list') { lists++; return { ok: true, value: { experts: [{ ...roles[0], name: '小司助手' }, roles[1]], deleted: [] } }; }
+    if (input.action === 'catalog') return { ok: true, value: { models: [], defaultModel: null, skills: [], mcpServers: [], issues: [] } };
+    throw new Error(`意外动作 ${input.action}`);
+  } });
+  const before = lists;
+  await renamed(f, 1, team);
+  assert.ok(lists > before, '名字变了重新读专家列表');
+  const nameInput = index => {
+    button(cards(f)[index], '编辑专家').props.onClick();
+    const editor = nodes(f.render()).find(node => typeof node.type === 'function' && node.type.name === 'ExpertEditor');
+    const render = f.isolate(editor); render(); f.flushEffects();
+    const label = nodes(render()).find(node => node.type === 'label' && text(node).startsWith('专家名字'));
+    return { input: nodes(label).find(node => node.type === 'input'), help: text(nodes(label).find(node => node.type === 'small')) };
+  };
+  const other = nameInput(1);
+  assert.deepEqual([other.input.props.value, other.input.props.disabled, other.help], ['研发专家', false, '']);
+  const manager = nameInput(0);
+  assert.deepEqual([manager.input.props.value, manager.input.props.disabled], ['小司助手', true]);
+  assert.equal(manager.help, '名字由「团队」统一设定，这里改不了；关掉它后恢复原来的名字');
+});

@@ -1,11 +1,13 @@
 import { createClients } from './clients.js';
 import { zh, en, css, explainError } from './presentation-content.js';
 import { registerPluginPage } from './plugin-page.js';
+import { UPDATE_LOCALE, createUpdater, createUpdateDialog } from './update.js';
 import { connectRemote } from './remote.js';
 import { createWorkbenchService, createWorkbenchView } from './workbench.js';
 import { startFeatures } from './features.js';
 import { workbenchContract } from '../workbench-contract.js';
 import { createSharedUi } from './ui.js';
+import { assistantTextArgs } from '../assistant-name.js';
 
 /** DSH工厂只接实际使用的宿主资源；组合只接线，领域通过实际模块形成依赖闭包。 */
 export function createShell(require, validator, avatars) {
@@ -19,10 +21,14 @@ export function createShell(require, validator, avatars) {
   const { Glyph, Avatar, ActionMenu, useClosedPopover, Modal, ConfirmDialog, Drawer, useDiscard, Logo, PageHead, avatarArt, presetAvatars } = createSharedUi(React, avatars);
   const kit = { React, loadChunk: path => require.async(path), Glyph, Avatar, ActionMenu, useClosedPopover, Modal, ConfirmDialog, Drawer, useDiscard, Logo, PageHead, z, avatarArt, presetAvatars, css, formatFileMention };
   const Workbench = createWorkbenchView({ React, css, Logo, Modal, ActionMenu });
+  const UpdateDialog = createUpdateDialog({ React, Modal });
 
   function registerUi(ctx) {
       ctx.effect(() => ctx.locale.register(NS, { zh, en }), '鲸翼文案');
-      const t = ctx.locale.bind(NS);
+      // 词条里的 {assistant}、{assistantShort} 换成小鲸现在的名字：扩展起了名就用扩展的，名字随功能快照送来。
+      const bound = ctx.locale.bind(NS);
+      let workbench;
+      const t = (key, args) => bound(key, { ...assistantTextArgs(workbench?.internal.featureSnapshot()?.assistant?.name), ...args });
       // 扩展登记的来源名是 { zh, en }，按 DSH 当前语言取一份。
       kit.resolveText = value => ctx.locale.resolveText(value);
       const { bridge, clients, workbenchSession } = createClients(ctx, t, z, explainError);
@@ -87,8 +93,13 @@ export function createShell(require, validator, avatars) {
       // 标准字形作为文字标识，不维护第二套图标库或读取宿主 DOM。
       function Icon({ size }) { return h(Logo, { size }); }
       ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({ name: 'sidebar.panellist', id: 'whalewing', order: 20, locale: NS, label: () => t('panel') }, Icon));
-      const workbench = createWorkbenchService(ctx, { bridge, clients, workbenchSession, t, notify: publish, ui: { ConfirmDialog, Drawer, Modal, ActionMenu, Logo }, explainError: (error, extraGuide) => extraGuide?.[error.code] || explainError(error.code, error.message).text });
+      workbench = createWorkbenchService(ctx, { bridge, clients, workbenchSession, t, notify: publish, ui: { ConfirmDialog, Drawer, Modal, ActionMenu, Logo }, explainError: (error, extraGuide) => extraGuide?.[error.code] || explainError(error.code, error.message).text });
       workbench.internal.kit = kit;
+      ctx.effect(() => ctx.locale.register('whalewingUpdate', UPDATE_LOCALE), '鲸翼更新文案');
+      const updater = createUpdater(ctx, { notify: publish });
+      ctx.effect(() => () => updater.dispose(), '鲸翼检查更新');
+      workbench.internal.updater = updater;
+      workbench.internal.UpdateDialog = UpdateDialog;
       ctx.provide('whalewingWorkbench', workbench);
       ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: 'whalewing', locale: NS, children: { 'whalewing.workbench.tab': { kind: 'list', scope: 'root' }, 'whalewing.workbench.dock': { kind: 'single', scope: 'root' }, 'whalewing.assistant.conversation': { kind: 'single', scope: 'session' } }, inject: () => ({ bridge, clients, workbenchSession, notify: publish, workbench }) }, Workbench));
       startFeatures(ctx, workbench);

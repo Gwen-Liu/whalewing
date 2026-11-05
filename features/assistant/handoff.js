@@ -1,5 +1,6 @@
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import { approveEscalation } from '@deepseek-ai/dsh-sandbox';
+import { defaultAssistantName } from '../../src/assistant-name.js';
 
 export const handoffToolName = 'whalewing_handoff';
 const expertIdPattern = /^[a-z][a-z0-9-]{0,79}$/;
@@ -13,10 +14,10 @@ function field(value, label, max, required = true) {
   return text;
 }
 
-/** 交接说明是员工将要发给专家的原话草稿，只分员工看得懂的几段。 */
-export function handoffDraft({ title, goal, deliverable, materials = [], notes = '' }) {
+/** 交接说明是员工将要发给专家的原话草稿，只分员工看得懂的几段；开头用助手现在的简称（默认“小鲸”）。 */
+export function handoffDraft({ title, goal, deliverable, materials = [], notes = '' }, names = defaultAssistantName) {
   return [
-    `【小鲸交接】${title}`,
+    `【${names.short}交接】${title}`,
     `目标：${goal}`,
     `要交付：${deliverable}`,
     ...(materials.length ? [['相关笔记和文件：', ...materials.map(item => `- ${item}`)].join('\n')] : []),
@@ -25,10 +26,10 @@ export function handoffDraft({ title, goal, deliverable, materials = [], notes =
 }
 
 /** 参数先在副作用之前全部校验，审批弹窗里看到的就是将要建的任务。 */
-export function handoffInput(args) {
+export function handoffInput(args, names = defaultAssistantName) {
   const expertId = typeof args.expertId === 'string' ? args.expertId.trim() : '';
   if (!expertIdPattern.test(expertId)) fail('专家标识无效，请先用 whalewing_experts 的 list 查到准确标识');
-  if (expertId === 'manager') fail('不能交给小鲸自己，请选一位负责这件事的专家');
+  if (expertId === 'manager') fail(`不能交给${names.short}自己，请选一位负责这件事的专家`);
   const title = field(args.title, '任务名', limits.title);
   if (/[\r\n]/.test(title)) fail('任务名只写一行');
   const goal = field(args.goal, '目标', limits.field);
@@ -37,7 +38,7 @@ export function handoffInput(args) {
   const materials = [...new Set((args.materials ?? []).map(item => field(item, '资料路径', limits.material)))];
   if (materials.length > limits.materials) fail(`相关资料最多 ${limits.materials} 项，请只带上专家必须先看的`);
   if (materials.some(item => /[\r\n]/.test(item))) fail('每项资料路径只写一行');
-  return { expertId, title, goal, deliverable, materials, notes, draft: handoffDraft({ title, goal, deliverable, materials, notes }) };
+  return { expertId, title, goal, deliverable, materials, notes, draft: handoffDraft({ title, goal, deliverable, materials, notes }, names) };
 }
 
 // 新任务放进小鲸所在的工作区，交接说明里的相对路径对专家同样有效。
@@ -81,8 +82,9 @@ function definition(scope) {
       exec.signal.throwIfAborted();
       const agent = exec.agent;
       // 原生父子链会继承这项定义，执行时仍按实际会话核对。
-      if (!agent || scope.whalewingExperts.selectedFor(agent) !== 'manager') fail('只有小鲸助手的主会话能把任务交给专家；子代理和其他专家请把建议交回负责的会话');
-      const input = handoffInput(args);
+      const names = scope.get('whalewing')?.assistantName?.() ?? defaultAssistantName;
+      if (!agent || scope.whalewingExperts.selectedFor(agent) !== 'manager') fail(`只有${names.full}的主会话能把任务交给专家；子代理和其他专家请把建议交回负责的会话`);
+      const input = handoffInput(args, names);
       const role = scope.whalewingExperts.get(input.expertId);
       const controller = scope.get('sessionController'), commands = scope.get('commands'), sessions = scope.get('sessions'), projections = scope.get('sessionProjections');
       if (typeof controller?.create !== 'function' || typeof controller.resolveAgent !== 'function' || !commands || !sessions || !projections) {

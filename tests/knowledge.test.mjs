@@ -111,6 +111,9 @@ test('图谱按页限制节点且如实返回省略连线，外部修改立即�
   const first = await vault.graph({ query: '40-知识/' });
   assert.equal(first.total, 3); assert.equal(first.nodes.length, 2); assert.equal(first.truncated, true); assert.ok(first.omittedEdges > 0);
   assert.equal((await vault.graph({ query: '40-知识/', offset: 2 })).nodes.length, 1);
+  // 2026-11-05 界面上的图谱画全库，不受每页上限限制。
+  const whole = await vault.graph({ query: '40-知识/' }, undefined, { whole: true });
+  assert.deepEqual([whole.nodes.length, whole.total, whole.truncated], [3, 3, false]);
   await fs.writeFile(await vault.resolve('40-知识/一.md'), note('一', '[[三]]'));
   assert.ok((await vault.graph({ path: '40-知识/一.md' })).edges.some(edge => edge.target === '40-知识/三.md'));
   await fs.unlink(await vault.resolve('40-知识/三.md'));

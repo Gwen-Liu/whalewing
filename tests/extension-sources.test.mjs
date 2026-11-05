@@ -249,3 +249,58 @@ test('个人笔记属性里有 source 时，有没有知识来源搜索结果都
   assert.deepEqual(merged.notes.map(item => item.path).slice(-1), ['@team/规范/发布.md']);
   assert.deepEqual(merged.sourceLabels, { team: label });
 });
+
+// 2026-11-05 助手名称：扩展给小鲸起企业自己的叫法（企业版要用），同一时间只认一个扩展，关掉就恢复“小鲸助手”。
+test('扩展给小鲸起名：快照带上名字，可以再改，同一时间只认一个扩展，撤销或关掉后恢复', async t => {
+  const h = await harness(t);
+  assert.deepEqual(h.service.assistantName(), { full: '小鲸助手', short: '小鲸' });
+  assert.equal(Object.hasOwn(h.service.features(), 'assistant'), false, '没有扩展起名时快照不带名字');
+  const team = await extension(h.ctx, { setup: current => current.whalewing.knowledge.registerSource(current, teamSource().options) });
+  const name = team.scope.whalewing.assistant.registerName(team.scope, '  小司助手 ');
+  assert.deepEqual(h.service.features().assistant, { name: '小司助手', feature: 'team', package: 'dsh-fixture-team', label });
+  assert.deepEqual(h.service.assistantName(), { full: '小司助手', short: '小司助手' }, '扩展起的名字没有简称');
+  const revision = h.service.features().revision;
+  name.set('小航助手');
+  assert.equal(h.service.features().assistant.name, '小航助手');
+  assert.ok(h.service.features().revision > revision, '改名推一帧新快照');
+  name.set('小航助手');
+  assert.throws(() => team.scope.whalewing.assistant.registerName(team.scope, '再来一个'), { code: 'ASSISTANT_NAME_CONFLICT', message: /要改名请调 set/ });
+  const other = await extension(h.ctx, { id: 'other' });
+  assert.throws(() => other.scope.whalewing.assistant.registerName(other.scope, '别的名字'), { code: 'ASSISTANT_NAME_CONFLICT', message: /「团队」/ });
+  name.dispose();
+  assert.equal(Object.hasOwn(h.service.features(), 'assistant'), false);
+  assert.throws(() => name.set('又改'), { code: 'FEATURE_CLOSED' });
+  // 撤销后别的扩展可以起名；没登记来源的扩展不带来源名；扩展关掉自动恢复。
+  other.scope.whalewing.assistant.registerName(other.scope, '别的名字');
+  assert.deepEqual(h.service.features().assistant, { name: '别的名字', feature: 'other', package: 'dsh-fixture-other' });
+  await other.fiber.dispose();
+  assert.equal(Object.hasOwn(h.service.features(), 'assistant'), false);
+  assert.deepEqual(h.service.assistantName(), { full: '小鲸助手', short: '小鲸' });
+});
+
+test('助手名称要先登记功能，名字一行、去掉首尾空白后 1 到 16 个字', async t => {
+  const h = await harness(t);
+  let bare;
+  await h.ctx.plugin({ inject: ['whalewing'], apply(current) { bare = current; } });
+  assert.throws(() => bare.whalewing.assistant.registerName(bare, '小司助手'), { code: 'FEATURE_CALLER', message: /设置助手名称/ });
+  const { scope } = await extension(h.ctx);
+  for (const value of ['', '   ', '小司\n助手', '小司\u0007助手', 'x'.repeat(17), 12, null, { zh: '小司助手' }]) {
+    assert.throws(() => scope.whalewing.assistant.registerName(scope, value), { code: 'ASSISTANT_NAME_INPUT' }, JSON.stringify(value));
+  }
+  assert.equal(Object.hasOwn(h.service.features(), 'assistant'), false, '校验失败不占名字');
+  const name = scope.whalewing.assistant.registerName(scope, 'x'.repeat(16));
+  assert.throws(() => name.set(`a${String.fromCodePoint(0x2028)}b`), { code: 'ASSISTANT_NAME_INPUT' });
+  assert.equal(h.service.features().assistant.name, 'x'.repeat(16), '改名失败保留原名');
+});
+
+// 2026-11-05 用户定：界面上的关系图谱和 Obsidian 一样画全库；模型调用图谱仍按每页上限分页，免得把对话塞满。
+test('员工在界面上看的图谱画全库，模型调用图谱仍按每页上限分页', async t => {
+  const h = await harness(t);
+  for (let i = 0; i < 5; i++) await h.manage({ action: 'write', path: `40-知识/全库${i}.md`, content: note(`全库${i}`, `[[全库${(i + 1) % 5}]]`), expectedHash: '' });
+  h.service.vault.limits.maxGraphNodes = 2;
+  const shown = knowledge.graphResult.parse(await h.manage({ action: 'graph', query: '全库' }));
+  assert.deepEqual([shown.nodes.length, shown.total, shown.truncated], [5, 5, false]);
+  assert.equal(shown.edges.length, 5);
+  const paged = await h.service.execute({ action: 'graph', query: '全库' }, { kind: 'model', signal: new AbortController().signal });
+  assert.deepEqual([paged.nodes.length, paged.total, paged.truncated], [2, 5, true]);
+});

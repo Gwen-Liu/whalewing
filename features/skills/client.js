@@ -145,7 +145,7 @@ export function createView(kit) {
       if (list.length) groups.push(h(React.Fragment, { key: `extension:${extension.id}` }, h('p', { className: 'ww-skill-group' }, `${t('skillExtension')} · ${labelText(extension)}`), ...list.map(extensionRow)));
     }
     // 来源笔记变了的提炼技能照常可用，只提示复核。
-    const reviewText = review => [review.changed.length > 0 && `来源笔记有改动：${review.changed.join('、')}。`, review.missing.length > 0 && `来源笔记找不到（可能移动或删除了）：${review.missing.join('、')}。`, review.otherVault && '来源在另一个知识库，暂时没法核对。', '技能照常可用；可以和小鲸核对后重新提炼。'].filter(Boolean).join('');
+    const reviewText = review => [review.changed.length > 0 && `来源笔记有改动：${review.changed.join('、')}。`, review.missing.length > 0 && `来源笔记找不到（可能移动或删除了）：${review.missing.join('、')}。`, review.otherVault && '来源在另一个知识库，暂时没法核对。', `技能照常可用；可以和${core.assistantName().short}核对后重新提炼。`].filter(Boolean).join('');
     body = h('section', { className: 'ww-skill-library' },
       h('header', { className: 'ww-pagehead' }, h('div', null, h('h2', null, t('skillLibrary')), h('p', null, summary)), h('div', { className: 'ww-pagehead-actions' }, button('refine', () => openAssistant(t('refinePrompt')), dirty), button('newSkill', () => setSkillEditor(null), false, { className: 'ww-primary' }))),
       h('div', { className: 'ww-skill-filters' }, h('label', { className: 'ww-search' }, h('input', { type: 'search', value: skillQuery, placeholder: '名字或用途', 'aria-label': '查找技能', onChange: event => setSkillQuery(event.target.value) })), chip('all', '全部'), chip('mine', '我的'), chip('evolution', '提炼'), chip('builtin', '系统'), chip('updated', '有更新'), chip('review', '待复核'), extensionRows.length > 0 && chip('extension', t('skillExtension'))),

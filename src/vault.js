@@ -735,7 +735,11 @@ export class Vault {
     return { path: note.path, content: note.content, hash: note.hash, readOnly: note.readOnly, view: note.parsed.view, links: note.links, anchors: note.parsed.anchors, properties: note.parsed.properties, backlinks: shown, totalBacklinks: backlinks.length };
   }
 
-  async graph(args, signal) {
+  /**
+   * 关系图谱。界面上的图谱画全库（whole，2026-11-05 用户定：和 Obsidian 一样一张图画全部）；
+   * 模型调用时按 maxGraphNodes 分页，免得一次拿到上千个点把对话塞满。
+   */
+  async graph(args, signal, { whole = false } = {}) {
     if (typeof (args.query ?? '') !== 'string' || (args.query || '').length > 200) fail('QUERY', '搜索词最长 200 字');
     const records = await this.index(signal);
     const pairs = new Map(), missing = new Map(), missingSources = new Map();
@@ -783,7 +787,7 @@ export class Vault {
     const filtered = allNodes.filter(record => selected.has(record.path) && (!query || `${record.path} ${record.title} ${(record.aliases || []).join(' ')}`.toLocaleLowerCase().includes(query)));
     const offset = args.offset ?? 0;
     if (!Number.isInteger(offset) || offset < 0) fail('OFFSET', '图谱分页位置无效');
-    const nodes = filtered.slice(offset, offset + this.limits.maxGraphNodes).map(({ aliases, ...node }) => ({ ...node, degree: neighbors.get(node.path).size }));
+    const nodes = filtered.slice(offset, whole ? undefined : offset + this.limits.maxGraphNodes).map(({ aliases, ...node }) => ({ ...node, degree: neighbors.get(node.path).size }));
     const visible = new Set(nodes.map(node => node.path));
     const allEdges = [...pairs.values()].filter(edge => selected.has(edge.source) && selected.has(edge.target));
     const edges = allEdges.filter(edge => visible.has(edge.source) && visible.has(edge.target));

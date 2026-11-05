@@ -36,10 +36,16 @@ const sorted = value => Object.fromEntries(Object.entries(value).sort(([a], [b])
 // 同日定时任务跟着改版：“DSH 工作知识整理”改名“每日记忆”，新增“每周思考”和旧任务“换成新版”共 9 个词条
 // （每周思考名称和说明 2 个、可换新版的提示和按钮 6 个、换好后的提示 1 个），处理范围、旧计划说明里的“知识整理”改成“每日记忆”，样式不变。
 // 2026-11-02 关系图谱照第二大脑按层上色：图例 1 个、六层名称 6 个、“图上没画”和三种没画的 4 个、列举用的顿号 1 个，共 12 个词条，样式不变（图例的样式写在画布组件里）。
+// 2026-11-05 扩展可以给小鲸改名（企业版要用）：写着“小鲸助手”“小鲸”的 10 个词条改成占位符 {assistant}、{assistantShort}，
+// 没有扩展改名时显示的文字和原来一样；交接失败“原因见助手的回复”、扩展笔记“不能引用给助手”两条罕见报错改成通称（这两条不在快照里）；
+// 新增 1 个词条：编辑小鲸时名字由扩展定着的说明。样式不变。
 test('全栏改版后的双语词条与样式快照', () => {
-  assert.equal(Object.keys(zh).length, 691); assert.equal(Object.keys(en).length, 691);
-  assert.equal(hash(sorted(zh)), '453f9fb4f5731caf68763407fb7f222e27c867ffaed2a835b061694e6071f36a');
-  assert.equal(hash(sorted(en)), 'b79b8ef90132a48f89d97158aabf871e7883790c0c63d23414d3914bfc973990');
+  assert.equal(Object.keys(zh).length, 692); assert.equal(Object.keys(en).length, 692);
+  assert.equal(hash(sorted(zh)), '9d069dfe89851da45e86a7117d439b6ff1ff15dd6d1478a740590f386ca1bf2d');
+  assert.equal(hash(sorted(en)), '731a8bb331a89729e7ddf632e61d6a5088b3c819f90e362014c8c91331da43f0');
+  // 没有扩展改名时，界面上的名字和原来逐字相同。
+  const fill = text => text.replaceAll('{assistant}', '小鲸助手').replaceAll('{assistantShort}', '小鲸');
+  assert.deepEqual([zh.question, zh.assistantOpen, zh.assistantStart, zh.refine, zh.skillEdit].map(fill), ['小鲸助手', '打开小鲸助手', '开始与小鲸协作', '与小鲸讨论提炼', '与小鲸编辑技能']);
   // 2026-11-02 其余页签按设计稿补点缀：AI 网页每张入口卡底边水纹、办公工坊分类卡水纹和宋体标题、
   // 技能页空卡（左上回纹、右下鲸尾印）、定时任务分栏右上角鲸尾印、个人知识阅读区左下角回纹（右下角留给小鲸气泡）。
   assert.equal(hash(css), '001c3dfca904842fef17ee808bc74ad14f742ab14abbf108c8cb2d51b77a13df');

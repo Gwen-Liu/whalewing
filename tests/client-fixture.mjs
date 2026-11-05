@@ -337,7 +337,7 @@ async function fixture(overrides = {}) {
   function expand(tree, path = 'root', inside = false, seen = new Set()) {
     if (!tree || typeof tree !== 'object') return tree;
     if (Array.isArray(tree)) return tree.map((node, index) => expand(node, `${path}/${node?.props?.key === undefined ? index : 'key:' + node.props.key}`, inside, seen));
-    const feature = typeof tree.type === 'function' && ['FeatureGate', 'DeferredFeature', 'TabContent', 'ExtensionsSection', 'ExtensionList', 'ExpertsView', 'KnowledgeView', 'SkillsView', 'AutomationView', 'CardsView', 'AssistantDock', 'AiWebFeature', 'ToolboxFeature', 'ModelWorldFeature'].includes(tree.type.name);
+    const feature = typeof tree.type === 'function' && ['FeatureGate', 'DeferredFeature', 'TabContent', 'ExtensionsSection', 'ExtensionList', 'UpdateSection', 'UpdateBlock', 'UpdateDialog', 'ExpertsView', 'KnowledgeView', 'SkillsView', 'AutomationView', 'CardsView', 'AssistantDock', 'AiWebFeature', 'ToolboxFeature', 'ModelWorldFeature'].includes(tree.type.name);
     // 分发产物会压缩函数名，递归执行真实组件，不依赖源码中的调试名称。
     if (typeof tree.type === 'function' && (overrides.clientSource || feature || inside || ['ModelWorldView', 'WorkspacePicker', 'Modal', 'ConfirmDialog', 'Drawer', 'Toast', 'ExpertPicker', 'BookReader', ...(overrides.expand || [])].includes(tree.type.name))) {
       const id = `${path}/${tree.type.name}/${tree.props.key ?? ''}`; seen.add(id);
@@ -357,7 +357,8 @@ async function fixture(overrides = {}) {
     assert.deepEqual(deniedRemote, [], '已执行的Remote消费者必须全部声明依赖，即使页面捕获了错误');
     renderAgain = false;
     stateIndex = 0; refIndex = 0; effectIndex = 0;
-    const entry = entries.get(slot);
+    // 列表插槽里有多块时按 id 取其中一块；不指定时取最后登记的那块。
+    const entry = extra.only ? (registrations.get(slot) || []).find(item => item.options.id === extra.only) : entries.get(slot);
     const seen = new Set();
     const renderSlot = (name, props = {}, select = {}) => {
       if (!name.startsWith('whalewing.workbench.')) return extra.renderSlot?.(name, props, select) || { type: name, props: { children: [] } };

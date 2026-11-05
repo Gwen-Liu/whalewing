@@ -17,7 +17,7 @@ const extension = (id = 'hello', packageName = 'dsh-whalewing-hello') => ({ id, 
 const frame = (revision, extra = []) => ({ revision, features: [...parts.map(part => ({ id: part.id, kind: part.kind, api: 1, package: 'dsh-whalewing', skills: [] })), ...extra] });
 const nodes = tree => !tree || typeof tree !== 'object' ? [] : Array.isArray(tree) ? tree.flatMap(nodes) : [tree, ...nodes(tree.props?.children)];
 const text = tree => nodes(tree).flatMap(node => node.props.children || []).filter(value => typeof value === 'string');
-const view = (f, value = subject) => f.render(slot, { subject: value });
+const view = (f, value = subject) => f.render(slot, { subject: value, only: 'whalewing-extensions' });
 const tick = () => new Promise(setImmediate);
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
@@ -98,7 +98,7 @@ test('扩展区只消费鲸翼包详情与权威外部登记，空列表及其�
   assert.equal(view(f), null); f.flushEffects(); await tick(); assert.equal(reads, 0);
   await f.featureUpdate(frame(1, [extension(), extension('hello-two')]));
   for (const other of [undefined, { kind: 'row', pkg: { name: 'dsh-whalewing' } }, { kind: 'item', id: 'dsh-whalewing' }, { kind: 'bundle', pkg: { name: 'other' } }]) {
-    assert.equal(f.render(slot, { subject: other }), null); f.flushEffects();
+    assert.equal(f.render(slot, { subject: other, only: 'whalewing-extensions' }), null); f.flushEffects();
   }
   await tick(); assert.equal(reads, 0);
   assert.equal(nodes(view(f)).filter(node => node.type === 'li').length, 2, '同一包多个登记功能各自列出，包名只用于名字读取与打开');

@@ -723,6 +723,53 @@ test('关系图谱：打开时淡入，按层上色、不画归档模板和没�
   });
 });
 
+// 2026-11-05 用户对比 Obsidian 录屏：拖一个点时相连的点要被拉着跟过来，松手后整图要回到原位。
+test('关系图谱：按住节点拖动时整图跟着动（鼠标停住画面还在变），松手后约一秒滑回，停下后和拖之前几乎一样', async t => {
+  await prepare(t, fixtures.link, fixtures.refer);
+  await withPage(browser, t, async ({ page, errors }) => {
+    await openWhaleWing(page, dsh.url);
+    await openTab(page, '个人知识');
+    await settled(page);
+    // 记下拖之前的画面；之后按像素比有多少不一样。
+    await canvasOf(page).evaluate(canvas => { window.__graphBefore = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data; });
+    const changed = () => canvasOf(page).evaluate(canvas => {
+      const now = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data, before = window.__graphBefore;
+      let differ = 0;
+      for (let i = 0; i < now.length; i += 4) if (Math.max(Math.abs(now[i] - before[i]), Math.abs(now[i + 1] - before[i + 1]), Math.abs(now[i + 2] - before[i + 2]), Math.abs(now[i + 3] - before[i + 3])) > 24) differ++;
+      return differ / (now.length / 4);
+    });
+    // 画布没有 DOM 节点：在不透明的像素上悬停，画布的 title 变成笔记标题就是找到了节点。
+    const candidates = await canvasOf(page).evaluate(canvas => {
+      const w = canvas.width, h = canvas.height, data = canvas.getContext('2d').getImageData(0, 0, w, h).data, box = canvas.getBoundingClientRect(), found = [];
+      for (let y = 40; y < h - 40 && found.length < 200; y += 3) for (let x = 40; x < w - 40 && found.length < 200; x += 3) if (data[(y * w + x) * 4 + 3] === 255) found.push([box.left + x * box.width / w, box.top + y * box.height / h]);
+      return found;
+    });
+    let node = null;
+    for (const [x, y] of candidates) {
+      await page.mouse.move(x, y);
+      if (await canvasOf(page).evaluate(canvas => canvas.title)) { node = [x, y]; break; }
+    }
+    assert.ok(node, '画布上找得到节点');
+    await page.mouse.down();
+    await page.mouse.move(node[0] + 90, node[1] + 50, { steps: 10 });
+    await frames(page, 2);
+    const holding = await digest(page);
+    await frames(page, 20);
+    assert.notEqual((await digest(page)).hash, holding.hash, '鼠标停住不动时画面还在变：相连的点正被拉过来');
+    assert.ok(await changed() > 0.002, '拖动中画面和拖之前明显不同');
+    await page.mouse.up();
+    // 指针移出画布，免得停在别的节点上留下悬停高亮。
+    await page.mouse.move(2, 2);
+    await frames(page, 6);
+    assert.ok(await changed() > 0.001, '松手后不是一下跳回去');
+    await settled(page);
+    const left = await changed();
+    assert.ok(left < 0.003, `停下后和拖之前几乎一样（不同的像素占 ${(left * 100).toFixed(2)}%）`);
+    assert.equal(await canvasOf(page).evaluate(canvas => canvas.title), '', '松手不打开笔记，指针移开后不再悬停');
+    assert.deepEqual(errors, []);
+  });
+});
+
 /** 悬停 A 时看 B（不相邻）的不透明度：返回 [悬停前, 悬停中, 移开后]；reduced 时悬停后只等两帧。 */
 async function hoverDimming(page, immediate) {
   const a = fixtures.refer.title, b = '知识库规则';

@@ -997,7 +997,7 @@ test('真实模块工厂注册宿主和工作台 slots，纯渲染不创建会�
   assert.equal(f.entries.get('sidebar.panellist').options.id, 'whalewing');
   f.render();
   assert.deepEqual(f.calls, []);
-  assert.equal(f.dictionaries.size, 2);
+  assert.equal(f.dictionaries.size, 3);
   f.disposed.forEach((dispose) => dispose());
   assert.equal(f.dictionaries.size, 0);
 });
@@ -4180,7 +4180,7 @@ test('专家后台读取失败的重试仍属于专家，不按点击时的页�
 
 
 // 2026-10-25 改版：标志、页签和“…”同在一行，“管理功能”“刷新”收进“…”；没有可用动作时不出现空的“…”。
-test('工作台页头一行排开，无刷新动作时不出现空的更多菜单', async () => {
+test('工作台页头一行排开，“…”里始终有检查更新，无刷新动作时不列刷新', async () => {
   const f = await fixture();
   const first = f.render();
   const header = tree => nodes(tree).find(node => node.type === 'header' && node.props.className === 'ww-header ww-workbench-header');
@@ -4191,7 +4191,7 @@ test('工作台页头一行排开，无刷新动作时不出现空的更多菜�
   assert.match(css, /\.ww-page>\.ww-workbench-header\{display:flex;[^}]*min-height:52px/);
   await button(first, 'AI 网页').props.onClick();
   const second = f.render(); assert.ok(header(second));
-  assert.equal(menu(second), undefined);
+  assert.ok(button(menu(second), '检查更新')); assert.equal(nodes(menu(second)).some(node => node.type === 'button' && (node.props.children || []).includes('刷新')), false);
   assert.equal(nodes(second).filter(node => node.props.className === 'ww-header ww-workbench-header').length, 1);
   f.unmount();
 });

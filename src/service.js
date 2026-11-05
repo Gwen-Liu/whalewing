@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { Vault, abort, digest, fail, sourceDocument } from './vault.js';
 import { isSourceNotePath } from './extension-sources.js';
+import { assistantNames } from './assistant-name.js';
 import { SkillLibrary } from './skills.js';
 import { ProfileSources } from './profile-sources.js';
 
@@ -169,7 +170,8 @@ export class WhalewingCore {
       case 'browse': return this.vault.browse(args.directory, args.offset, signal);
       case 'read': return this.vault.read(args.path);
       case 'document': return this.vault.document(args.path, signal);
-      case 'graph': return this.vault.graph(args, signal);
+      // 员工在界面上看的是全库图；模型调用仍分页。
+      case 'graph': return this.vault.graph(args, signal, { whole: caller.kind === 'human' });
       case 'question': return this.question(args, signal);
       case 'write': {
         const result = await this.vault.write(args.path, args.content, args.expectedHash, signal);
@@ -218,7 +220,9 @@ export class WhalewingCore {
   /** 将明确选定且实际读取的资料交给原生会话；不查询模型、不改写知识。 */
   async question(args, signal) {
     if (typeof args.question !== 'string' || !args.question.trim() || args.question.length > 4000 || !Array.isArray(args.paths) || args.paths.length > 12 || new Set(args.paths).size !== args.paths.length) fail('QUESTION', '请填写问题；参考笔记最多 12 篇且不得重复');
-    if (!args.paths.length) return { sources: [], prompt: `小鲸助手\n用户问题：${args.question.trim()}\n\n本次未选定参考笔记。直接帮助员工完成当前问题，需要知识依据时通过 whalewing_knowledge 检索并回读实际来源，回答保留出处与未确认项。默认只回答，不修改笔记或工作文件；修改须符合员工明确要求。` };
+    // 开头的称呼跟随扩展给小鲸起的名字。
+    const assistant = assistantNames(this.dependencies.sources?.()?.assistantName()?.name).full;
+    if (!args.paths.length) return { sources: [], prompt: `${assistant}\n用户问题：${args.question.trim()}\n\n本次未选定参考笔记。直接帮助员工完成当前问题，需要知识依据时通过 whalewing_knowledge 检索并回读实际来源，回答保留出处与未确认项。默认只回答，不修改笔记或工作文件；修改须符合员工明确要求。` };
     const sources = [], excerpts = [];
     let bytes = 0;
     for (const name of args.paths) {
@@ -227,7 +231,7 @@ export class WhalewingCore {
       const extensions = fromSource && this.dependencies.sources?.();
       if (fromSource && !extensions) fail('EXTENSION_SOURCE_CLOSED', '选定的笔记来自已关闭或卸载的扩展；请重新开启扩展，或取消选择这篇笔记');
       const note = fromSource ? await extensions.readKnowledge(name, signal) : await this.vault.read(name);
-      if (fromSource && !note.absolutePath) fail('EXTENSION_NOTE_LOCAL', `「${note.source.label.zh}」的笔记「${path.posix.basename(name, '.md')}」没有本机文件，不能引用给小鲸助手；请取消选择这篇笔记`);
+      if (fromSource && !note.absolutePath) fail('EXTENSION_NOTE_LOCAL', `「${note.source.label.zh}」的笔记「${path.posix.basename(name, '.md')}」没有本机文件，不能引用给${assistant}；请取消选择这篇笔记`);
       bytes += Buffer.byteLength(note.content);
       if (bytes > 98304) fail('QUESTION_LIMIT', '选定笔记正文超过 96 KiB；请缩小范围后提问，不截断来源冒充完整依据');
       const absolutePath = fromSource ? note.absolutePath.replaceAll('\\', '/') : path.join(this.vault.root, note.path).replaceAll('\\', '/');

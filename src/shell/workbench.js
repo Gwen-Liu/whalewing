@@ -1,5 +1,6 @@
 import { parts } from '../../features/index.js';
 import { createPresentation } from './presentation.js';
+import { assistantNames } from '../assistant-name.js';
 
 const TAB_SLOT = 'whalewing.workbench.tab';
 const DOCK_SLOT = 'whalewing.workbench.dock';
@@ -130,6 +131,8 @@ export function createWorkbenchService(ctx, { bridge, clients, workbenchSession,
         } else emit({});
       },
       featureSnapshot: () => features,
+      /** 小鲸现在的全称、简称，以及是哪个扩展起的名（没有扩展起名时 custom 为 null）。 */
+      assistantName: () => ({ ...assistantNames(features?.assistant?.name), custom: features?.assistant ?? null }),
       setFeatures(frame, connectionEpoch = epoch) { if (olderEpoch(connectionEpoch)) return; epoch = connectionEpoch; features = frame; updateTabs(); emit({}); },
       resetFeatures(connectionEpoch) { if (olderEpoch(connectionEpoch)) return; epoch = connectionEpoch; features = null; retiringViews.clear(); updateTabs(); emit({}); },
       featureEnabled: id => Boolean(features?.features.some(feature => feature.id === id && !feature.error && Number.isSafeInteger(feature.instance) && feature.instance > 0)),
@@ -251,6 +254,8 @@ export function createWorkbenchService(ctx, { bridge, clients, workbenchSession,
   return service;
 }
 
+const noSubscribe = () => () => {}, noSnapshot = () => null;
+
 export function createWorkbenchView({ React, css, Logo, Modal, ActionMenu }) {
   const { createElement: h, useLayoutEffect, useSyncExternalStore } = React;
   function TabContent({ core, id, children }) {
@@ -264,7 +269,10 @@ export function createWorkbenchView({ React, css, Logo, Modal, ActionMenu }) {
     useLayoutEffect(() => { core.mount(); return () => core.reset(); }, [core]);
     const button = (key, onClick, disabled = false, props = {}) => h('button', { type: 'button', onClick, disabled: state.busy || disabled, ...props }, t(key));
     // 标志、页签和“…”同在一行；“管理功能”“刷新”是低频动作，收进右端菜单。
-    const tools = [core.canManageFeatures() && h('button', { type: 'button', key: 'manage', onClick: workbench.manageFeatures }, '管理功能'), core.hasRefresh(state.tab) && h(React.Fragment, { key: 'refresh' }, button('refresh', () => core.refresh()))].filter(Boolean);
+    const updater = core.updater, UpdateDialog = core.UpdateDialog;
+    const update = useSyncExternalStore(updater?.subscribe || noSubscribe, updater?.snapshot || noSnapshot, updater?.snapshot || noSnapshot);
+    const tools = [core.canManageFeatures() && h('button', { type: 'button', key: 'manage', onClick: workbench.manageFeatures }, '管理功能'), core.hasRefresh(state.tab) && h(React.Fragment, { key: 'refresh' }, button('refresh', () => core.refresh())),
+      updater && h('button', { type: 'button', key: 'update', disabled: update?.phase === 'checking' || update?.phase === 'installing', onClick: () => updater.check('workbench') }, updater.t(update?.phase === 'checking' ? 'checking' : 'check'))].filter(Boolean);
     const tab = entry => {
       const id = entry.options.id, meta = core.metadata(id);
       return h('button', { type: 'button', key: id, 'data-tab': parts.find(part => part.id === id)?.label || id, disabled: state.busy, 'aria-pressed': state.tab === id, className: state.tab === id ? 'ww-selected' : '', onClick: () => workbench.openTab(id) }, typeof entry.options.label === 'function' ? entry.options.label() : entry.options.label, ...(meta.icon ? [h('span', { className: 'ww-tab-icon', 'aria-hidden': true, style: { display: 'inline-block', width: 16, height: 16, flexShrink: 0, backgroundColor: 'currentColor', mask: `url("data:image/svg+xml,${encodeURIComponent(meta.icon)}") center / contain no-repeat`, WebkitMask: `url("data:image/svg+xml,${encodeURIComponent(meta.icon)}") center / contain no-repeat` } })] : []));
@@ -278,6 +286,7 @@ export function createWorkbenchView({ React, css, Logo, Modal, ActionMenu }) {
       endTabs.length > 0 && h('div', { className: 'ww-tabs ww-tabs-end' }, ...endTabs.map(tab)),
       tools.length > 0 && h(ActionMenu, { label: t('more'), iconOnly: true }, ...tools)),
       state.busy && h('div', { className: 'ww-busy', role: 'status' }, h('span', { className: 'ww-spinner', 'aria-label': t('loading') }), h('button', { type: 'button', onClick: core.stop }, t('stopWait'))),
+      updater && UpdateDialog && h(UpdateDialog, { updater, owner: 'workbench' }),
       state.recoverySession && h(Modal, { title: t('workbenchRecoverTitle'), busy: state.busy, onClose: core.closeRecovery, className: 'ww-confirm' }, h('div', { className: 'ww-confirm-body' }, h('p', null, t('prepareHelp')), h('p', null, h('code', null, state.recoverySession))), h('footer', { className: 'ww-dialog-actions' }, button('inspectWorkbench', () => core.bridge.open(state.recoverySession), core.guarded()), button('prepareWorkbench', core.restartWorkbench, core.guarded(), { className: 'ww-primary' }))),
       h('div', { className: `ww-workspace ww-workspace-${state.layout}` }, h('main', { className: 'ww-view' }, ...entries.filter(entry => state.tab === entry.options.id || (core.visited.has(entry.options.id) && core.metadata(entry.options.id).keepAlive)).map(entry => h('div', { key: core.mountKey(entry.options.id), hidden: state.tab !== entry.options.id, style: { display: state.tab === entry.options.id ? 'contents' : undefined } }, h(TabContent, { core, id: entry.options.id }, renderSlot(TAB_SLOT, { active: state.tab === entry.options.id, workbench: core.scope(entry.options.id), SessionProvider, renderSlot }, { only: entry.options.id }))))), core.dockEnabled() && h(React.Fragment, { key: core.mountKey('assistant') }, renderSlot(DOCK_SLOT, { workbench: core.scope('assistant'), SessionProvider, renderSlot }))));
   };

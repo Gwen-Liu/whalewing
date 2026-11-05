@@ -88,8 +88,19 @@ export class ExpertRegistry extends Service {
   }
   /** 扩展登记的专家来源在核心里；没有来源时专家列表和读取与原来完全一样。 */
   sources() { return this.ctx.get('whalewing')?.sources; }
+  /** 扩展给小鲸起的名字；没有时为 undefined。 */
+  customName() { return this.sources()?.assistantName?.()?.name; }
+  /**
+   * 扩展给小鲸起了名，读取和列出时小鲸就叫这个名字；存储里仍是员工自己的那份（改过就是改过的，没改过就是原版），
+   * 扩展关掉后原样回来。只换名字，其余字段不动。
+   */
+  named(expert, custom = this.customName()) { return custom && expert?.id === 'manager' ? { ...expert, name: custom } : expert; }
+  namedList(value) {
+    const custom = this.customName();
+    return custom ? { ...value, experts: value.experts.map(expert => this.named(expert, custom)), deleted: value.deleted.map(expert => this.named(expert, custom)) } : value;
+  }
   get(id) {
-    if (!isSourceExpertId(id)) return this.store.get(id);
+    if (!isSourceExpertId(id)) return this.named(this.store.get(id));
     const sources = this.sources();
     if (!sources) throw expertError('EXPERT_SOURCE_CLOSED', '这位专家来自已关闭或卸载的扩展；请重新开启扩展，或改选其他专家');
     return sources.getExpert(id);
@@ -132,7 +143,7 @@ export class ExpertRegistry extends Service {
     const owner = this.ctx.get('mcpResources');
     return !owner || typeof owner.catalog === 'function';
   }
-  list() { return this.withSources(this.store.list()); }
+  list() { return this.withSources(this.namedList(this.store.list())); }
   /** 客户端图片准入和 Host 组装共用此准备；默认值只读宿主，不保存另一份路由配置。 */
   async prepareModel(input, signal) {
     signal = AbortSignal.any([this.closing.signal, AbortSignal.timeout(this.config.operationMs), ...(signal ? [signal] : [])]);
@@ -210,7 +221,7 @@ export class ExpertRegistry extends Service {
       const input = contract.input.parse(raw);
       signal?.throwIfAborted();
       // 管理界面另要“改过哪些、原版有没有更新”；模型工具读的 list() 不带这些。
-      if (input.action === 'list') return this.withSources(this.store.list(true));
+      if (input.action === 'list') return this.withSources(this.namedList(this.store.list(true)));
       if (input.action === 'templates') return { templates: expertTemplates.map(item => ({ ...item, skills: [...item.skills] })) };
       if (input.action === 'catalog') return await this.catalog(input.sessionId, signal);
       if (input.action === 'prepare_model') return await this.prepareModel(input, signal);
@@ -230,7 +241,10 @@ export class ExpertRegistry extends Service {
         for (const name of input.expert.mcpServers) if (!previous?.mcpServers.includes(name) && !catalog.mcpServers.some(item => item.name === name && item.connected)) throw expertError('BINDING_UNAVAILABLE', `MCP ${name} 未连接或尚未发现，未修改绑定`);
       }
       signal?.throwIfAborted();
-      const result = await this.store[input.action](input, signal);
+      // 小鲸的名字由扩展定着时，编辑抽屉里的名字只读；保存时用存储里原来的名字，不把扩展起的名字记成员工改的。
+      const kept = input.action === 'save' && input.id === 'manager' && this.customName() ? { ...input, expert: { ...input.expert, name: this.store.get('manager').name } } : input;
+      const stored = await this.store[input.action](kept, signal);
+      const result = stored?.expert ? { ...stored, expert: this.named(stored.expert) } : stored;
       this.ctx.emit('whalewing-experts/changed');
       return result;
     } catch (error) { throw new RemoteError(error.code || 'EXPERT_INPUT', error.message, {}); }
@@ -346,7 +360,7 @@ export async function apply(ctx, config) {
         if (!id) return;
         try {
           const role = registry.get(id);
-          if (hiddenFor(exec.name, role)) return '小鲸不用浏览器工具：要上网查资料请交给研究专家；要看鲸翼或 DSH 的界面，请员工自己在 DSH 里看一眼';
+          if (hiddenFor(exec.name, role)) return `${role.name}不用浏览器工具：要上网查资料请交给研究专家；要看鲸翼或 DSH 的界面，请员工自己在 DSH 里看一眼`;
           const current = facts(agent, role);
           if (!current) return;
           if (policy.error) return policy.error.message;
@@ -477,7 +491,12 @@ export async function apply(ctx, config) {
       skills.push({ name, description: skill.description });
     }
     const frame = text => `【鲸翼专家上下文 · 非用户原话】\n${text}`;
-    const full = role && frame(`本轮专家身份：${role.name}。此选择替代历史专家身份，原生模式和工具仍由宿主持有。\n${commonPrompt}\n\n${role.prompt}\n\n当前绑定技能（名称：用途。按上面“先加载再动手”的对照加载；宿主列出的其它技能贴合任务时也可加载）：\n${skills.map(skill => `${skill.name}：${skill.description}`).join('\n') || '未绑定额外技能'}\n当前绑定 MCP：${role.mcpServers.join('、') || '无'}。配置由员工管理，不自行增加绑定。`);
+    // 扩展给小鲸起了名：随包的说明和技能里仍写“小鲸助手”“小鲸”，在这里告诉模型现在的叫法，不改员工自己写的提示词。
+    const custom = registry.customName();
+    const naming = !custom ? '' : role?.id === 'manager'
+      ? `\n在这里你的名字是「${custom}」：下文和技能里说的“小鲸助手”“小鲸”都是你，对员工自称「${custom}」。`
+      : `\n在这里助手叫「${custom}」：下文和技能里说的“小鲸助手”“小鲸”都指它，提到时用「${custom}」。`;
+    const full = role && frame(`本轮专家身份：${role.name}。此选择替代历史专家身份，原生模式和工具仍由宿主持有。${naming}\n${commonPrompt}\n\n${role.prompt}\n\n当前绑定技能（名称：用途。按上面“先加载再动手”的对照加载；宿主列出的其它技能贴合任务时也可加载）：\n${skills.map(skill => `${skill.name}：${skill.description}`).join('\n') || '未绑定额外技能'}\n当前绑定 MCP：${role.mcpServers.join('、') || '无'}。配置由员工管理，不自行增加绑定。`);
     const reminder = role && frame(`本轮专家身份：${role.name}。本会话前面那条完整的鲸翼专家上下文继续有效，按其中的底线做事；遇到对应情况先加载技能再动手。当前绑定技能：${skills.map(skill => skill.name).join('、') || '无'}。`);
     // 原生 loop 把 pre-step 消息记成 user/message 并留在历史里，全文每轮重发会在长对话里堆积。
     // 模型可见历史里最近一条非提醒的专家上下文正是这份全文时，只发短提醒；首轮、换过专家、改了配置或技能，

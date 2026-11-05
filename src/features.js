@@ -57,7 +57,8 @@ export class FeatureRegistry {
       if (features.some(entry => entry.id === base.part.id)) continue;
       features.push({ id: base.part.id, kind: 'base', api: 1, package: 'dsh-whalewing', skills: [], error: base.error ?? '功能正在加载，请稍后重试' });
     }
-    return { revision: this.revision, features };
+    // 助手名称这类跟着功能登记变化的状态由核心挂在 extras 上，和功能列表同一帧送到界面。
+    return { revision: this.revision, features, ...this.extras?.() };
   }
 
   caller(ctx, purpose = '读取个人知识') {

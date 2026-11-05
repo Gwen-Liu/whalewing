@@ -85,16 +85,33 @@ test('每个页签开头是标题，下面一句现状摘要', async t => {
 });
 
 // 需求§基础功能与可选功能（“管理功能”直接打开鲸翼详情页，只显示四个可选开关）；需求§界面通用约定·页头
-test('“…”菜单只有“管理功能”“刷新”；“管理功能”打开 DSH 插件页里鲸翼的详情，四个可选功能默认都开着', async t => {
+test('“…”菜单有“管理功能”“刷新”“检查更新”；“管理功能”打开 DSH 插件页里鲸翼的详情，四个可选功能默认都开着', async t => {
   await withPage(browser, t, async ({ page }) => {
     await openWhaleWing(page, dsh.url);
     await moreButton(page).click();
     const menu = page.getByRole('dialog', { name: '更多操作' });
-    assert.deepEqual((await menu.getByRole('button').allInnerTexts()).map(text => text.trim()), ['管理功能', '刷新']);
+    assert.deepEqual((await menu.getByRole('button').allInnerTexts()).map(text => text.trim()), ['管理功能', '刷新', '检查更新']);
     await menu.getByRole('button', { name: '管理功能' }).click();
     await page.getByRole('switch', { name: '启用 鲸翼' }).waitFor();
     const labels = await page.getByRole('switch').evaluateAll(nodes => nodes.map(node => [node.getAttribute('aria-label'), node.getAttribute('aria-checked')]));
     assert.deepEqual(labels, [['启用 鲸翼', 'true'], ...optional.map(name => [`启用组件 ${name}`, 'true'])]);
+  });
+});
+
+// 需求§安装与更新（检查更新只在员工点时联网；从本机目录装的鲸翼不在这里更新）
+test('反例：从开发目录装的鲸翼点“检查更新”，页头和插件详情页都说明请在开发目录里更新，不弹确认框', async t => {
+  await withPage(browser, t, async ({ page, errors }) => {
+    await openWhaleWing(page, dsh.url);
+    await moreButton(page).click();
+    await page.getByRole('dialog', { name: '更多操作' }).getByRole('button', { name: '检查更新' }).click();
+    await toast(page, '本机目录装的（开发用），请在开发目录里更新').waitFor();
+    assert.equal(await page.locator('.ww-update-dialog').count(), 0);
+    await openManage(page);
+    const block = page.locator('[data-whalewing-update]');
+    await block.getByRole('button', { name: '检查更新' }).click();
+    await block.getByRole('status').filter({ hasText: '本机目录装的' }).waitFor();
+    assert.equal(await block.getByRole('button', { name: /^更新到/ }).count(), 0);
+    assert.deepEqual(errors, []);
   });
 });
 

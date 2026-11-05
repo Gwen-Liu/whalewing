@@ -27,7 +27,10 @@ export function startFeatures(ctx, workbench) {
   ctx.inject(['remote.whalewingWorkbench'], scope => {
     const sync = watchFeatures(scope, {
       accept(frame, epoch) {
+        const renamed = (core.featureSnapshot()?.assistant?.name ?? null) !== (frame.assistant?.name ?? null);
         core.setFeatures(frame, epoch);
+        // 扩展给小鲸改了名：专家列表里小鲸的名字由宿主换好，这里重新读一次；读不到时等下次打开专家页。
+        if (renamed) Promise.resolve().then(() => core.clients.experts?.loadExperts?.()).catch(() => {});
         reconciliation = reconciliation.then(async () => {
           if (stopped || core.featureSnapshot() !== frame) return;
           for (const part of parts) if (part.kind === 'optional') {

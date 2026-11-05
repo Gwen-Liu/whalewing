@@ -4,6 +4,19 @@ import { forceLink, forceManyBody, forceCollide } from './graph-forces.js';
 const radius = degree => 3 + Math.min(10, Math.sqrt(degree) * 1.3);
 
 /**
+ * 实时物理（照 Obsidian：拖动时邻居被连线拉着跟过来、周围让开，松手后整图回到平衡）的规模上限。
+ * 拖动和回弹期间每帧算一步布局、重画全部连线；2026-11-05 在开发机上实测，1000 点一步约 1.2ms，
+ * 画 1.2 万条线约 6ms。更大的图拖动时只动被拖的点，松手放回原处。
+ */
+export const liveLimits = Object.freeze({ nodes: 2000, edges: 12000 });
+// 拖动时把模拟重新加热到这个强度；松手后降到 0，按 d3 的冷却速度约 4 秒停下。
+const liveHeat = 0.3;
+// 每个点被拉回布局算好时的位置：拖动时很弱，邻居照样跟过来；松手后整图柔和地滑回原来的形状，不会越拖越歪。
+// 松手后的回拉每步固定是离家距离的 4.5%，不随冷却减弱（d3 的力会乘上逐步变小的 alpha，这里按 alpha 反过来放大），
+// 所以最后准确落回原位；约一秒滑回去。
+const homeStrength = Object.freeze({ dragging: 0.03, releasedPull: 0.045 });
+
+/**
  * 按层上色，照发起者第二大脑 2026-10-30 的 Obsidian 图谱分组和颜色：从上往下取第一组对上的。
  * 颜色是图上的小圆点，深浅两种底色都看得清；不属于任何一组的（根目录入口、归档、缺失笔记）用正文色。
  */
@@ -104,6 +117,9 @@ export function createGraphCanvas(React) {
       let hover = -1, keyboard = -1, drag = null, touched = false;
       let steps = 0, running = n > 1, palette, labelCache = [], labelSelection = null;
       let edgeCache = null, building = null, refineTimer = 0;
+      // live：拖动和松手后的回弹期间，模拟逐帧推进、全部连线逐帧直接画；停下后再回到平时的绘制。
+      const liveCapable = n > 1 && n <= liveLimits.nodes && edges.length <= liveLimits.edges;
+      let live = false, homed = false;
       // 常见规模的连线图层：按当前镜头与像素逐帧精绘，镜头、坐标、尺寸、主题都没变时（悬停、渐变）直接复用。
       let lineLayer = null, geometry = 0;
       const camera = { k: 1, x: 0, y: 0 };
@@ -188,7 +204,8 @@ export function createGraphCanvas(React) {
         return layer;
       };
       const beginEdges = () => {
-        if (!alive || document.hidden || running) return;
+        // 实时物理期间坐标逐帧在变，连线直接画，不建分批缓存；停下后再建。
+        if (!alive || document.hidden || running || live) return;
         if (direct) { setSettling(false); setPainted(edges.length); schedule(); return; }
         releaseLayer(building);
         const layer = document.createElement('canvas');
@@ -241,10 +258,10 @@ export function createGraphCanvas(React) {
         const dim = (alpha, i) => emphasized >= 0 && !related(i) ? 1 - (1 - alpha) * glow : 1;
         if (intro < 1 && !reveal) reveal = revealOrder();
         const appear = i => intro < 1 ? fade(reveal[i] * 0.55, 0.45) : 1;
-        const cache = edgeCache || building;
+        const cache = live ? null : edgeCache || building;
         const edgeAlpha = clamp(0.3 / Math.sqrt(1 + edges.length / Math.max(n, 1) / 4), 0.035, 0.24) * (1 - 0.8 * glow) * fade(0.25, 0.6);
-        if (direct && !running) {
-          // 常见知识库按当前镜头和像素绘制全部几何线，图层与画布一一对应，不做位图缩放插值。
+        if ((direct || live) && !running) {
+          // 常见知识库（以及实时物理期间的图）按当前镜头和像素绘制全部几何线，图层与画布一一对应，不做位图缩放插值。
           const layer = directLines();
           context.globalAlpha = edgeAlpha;
           if (layer) context.drawImage(layer, 0, 0, width, height);
@@ -318,6 +335,40 @@ export function createGraphCanvas(React) {
         } }
         return steps < 300;
       };
+      // 把模拟里的坐标换上画布；标题选哪些在实时物理期间不重排，免得跟着点的移动一闪一闪，停下后再重选。
+      const publish = () => {
+        for (let i = 0; i < n; i++) { x[i] = layout.nodes[i].x; y[i] = layout.nodes[i].y; }
+        geometry++;
+      };
+      /** 开始拖一个点：把模拟重新加热，被拖的点钉在指针处，其余的点按连线和斥力跟着动。 */
+      const home = strength => { simulation.force('homeX').strength(strength); simulation.force('homeY').strength(strength); };
+      const startLive = () => {
+        if (!homed) {
+          // 回家的位置取布局算好时的坐标，只在第一次拖动时记一次。
+          const homeX = Float64Array.from(layout.nodes, node => node.x), homeY = Float64Array.from(layout.nodes, node => node.y);
+          simulation.force('homeX', forceX(node => homeX[node.index])).force('homeY', forceY(node => homeY[node.index]));
+          homed = true;
+        }
+        home(homeStrength.dragging);
+        if (!live) {
+          live = true;
+          releaseLayer(edgeCache); edgeCache = null; releaseLayer(building); building = null; setSettling(false);
+          for (const node of layout.nodes) { node.vx = 0; node.vy = 0; }
+        }
+        simulation.alpha(Math.max(simulation.alpha(), liveHeat)).alphaTarget(liveHeat);
+      };
+      /** 实时物理的一帧：拖动中每帧一步，跟手；松手后逐帧冷却。系统要求减弱动态时，松手后的冷却不逐帧呈现，算完一次换上。 */
+      const liveStep = () => {
+        const dragging = Boolean(drag?.live), quiet = !motion && !dragging;
+        const until = performance.now() + 8;
+        do {
+          if (!dragging) home(homeStrength.releasedPull / Math.max(simulation.alpha(), simulation.alphaMin()));
+          simulation.tick();
+        } while (quiet && simulation.alpha() >= simulation.alphaMin() && performance.now() < until);
+        if (!dragging && simulation.alpha() < simulation.alphaMin()) {
+          live = false; publish(); labelSelection = null; beginEdges();
+        } else if (!quiet) publish();
+      };
       const tick = () => {
         frame = 0;
         if (!alive || document.hidden) return;
@@ -326,11 +377,12 @@ export function createGraphCanvas(React) {
           do { running = step(); } while (running && performance.now() < until);
           if (!running) { if (!touched) fit(); beginEdges(); }
         }
-        if (!direct && !running && !building && !edgeCache) beginEdges();
+        if (live && !running) liveStep();
+        if (!direct && !running && !live && !building && !edgeCache) beginEdges();
         paintEdges();
         // 未收敛坐标不呈现为可交互图，首个可见帧只使用最终 fit，避免缩放跳变。
         if (!running) { animate(); draw(); }
-        if (running || building || animating()) schedule(); else clock = 0;
+        if (running || live || building || animating()) schedule(); else clock = 0;
       };
       const schedule = () => { if (alive && !frame && !document.hidden) frame = requestAnimationFrame(tick); };
       const stopDrag = (cancel = false) => {
@@ -338,8 +390,15 @@ export function createGraphCanvas(React) {
         drag = null; element.style.cursor = 'grab';
         if (!ended) return;
         if (element.hasPointerCapture(ended.id)) element.releasePointerCapture(ended.id);
-        if (ended.moved && ended.node >= 0) {
-          if (cancel) { x[ended.node] = ended.origin.x; y[ended.node] = ended.origin.y; geometry++; }
+        if (ended.moved && ended.live) {
+          // 松手（或取消）：解开钉住的点、停止加热，整图逐帧回到平衡。
+          const node = layout.nodes[ended.node];
+          node.fx = node.fy = null;
+          simulation.alphaTarget(0);
+          schedule();
+        } else if (ended.moved && ended.node >= 0) {
+          // 超出实时物理规模的大图：松手和取消都把点放回原处。
+          x[ended.node] = ended.origin.x; y[ended.node] = ended.origin.y; geometry++;
           labelSelection = null; beginEdges(); schedule();
         } else if (cancel && ended.moved) { Object.assign(camera, ended.camera); schedule(); }
         if (ended.moved && ended.node < 0) beginEdges();
@@ -387,14 +446,19 @@ export function createGraphCanvas(React) {
         if (drag && drag.id === event.pointerId) {
           if (!drag.moved && Math.hypot(p.x - drag.start.x, p.y - drag.start.y) > 4) {
             drag.moved = true; running = false;
-            if (drag.node >= 0) {
-              // 仅越过拖动阈值才丢弃含旧端点的层；随后每帧只更新一跳连线。
+            if (drag.node >= 0 && liveCapable) { drag.live = true; startLive(); }
+            else if (drag.node >= 0) {
+              // 大图仅越过拖动阈值才丢弃含旧端点的层；随后每帧只更新一跳连线。
               releaseLayer(edgeCache); edgeCache = null; beginEdges();
             } else if (!edgeCache && !building) beginEdges();
           }
           if (drag.moved) {
             const dx = p.x - drag.start.x, dy = p.y - drag.start.y;
-            if (drag.node >= 0) { x[drag.node] = drag.origin.x + dx / camera.k; y[drag.node] = drag.origin.y + dy / camera.k; labelSelection = null; geometry++; }
+            if (drag.live) {
+              // 被拖的点钉在指针处，画面上立刻跟手；其余的点下一帧按力跟着动。
+              const node = layout.nodes[drag.node];
+              x[drag.node] = node.fx = drag.origin.x + dx / camera.k; y[drag.node] = node.fy = drag.origin.y + dy / camera.k; geometry++;
+            } else if (drag.node >= 0) { x[drag.node] = drag.origin.x + dx / camera.k; y[drag.node] = drag.origin.y + dy / camera.k; labelSelection = null; geometry++; }
             else { camera.x = drag.camera.x + dx; camera.y = drag.camera.y + dy; }
             touched = true; schedule();
           }

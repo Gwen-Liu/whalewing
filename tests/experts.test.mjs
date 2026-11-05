@@ -316,6 +316,24 @@ test('内置专家默认绑定三项基础技能和各自的通用专业技能�
   assert.deepEqual(roles, source);
 });
 
+test('测试专家按通用的测试用例模板出 Excel：13 列固定不改，用例编号只写数字从 001 往下排，带上 office 技能', () => {
+  const testing = roles.find(role => role.id === 'testing');
+  assert.ok(testing.skills.includes('office'), '要生成 Excel 文件得有 DSH 自带的 office 技能');
+  const section = testing.prompt.split('## 测试用例模板')[1]?.split('\n## ')[0];
+  assert.ok(section, '提示词里要有“测试用例模板”一节');
+  const table = section.split('| 列 | 写法 |')[1].split('\n\n')[0];
+  const columns = table.split('\n').filter(line => line.startsWith('| ') && !line.startsWith('|---')).map(line => line.split('|')[1].trim());
+  assert.deepEqual(columns, ['序号', '测试用例编号', '一级模块', '二级模块', '用例名称', '测试点', '用例类型', '用例性质', '前置条件', '步骤描述', '预期结果', '测试轮次', '所属系统']);
+  // 原模板的编号写的是“系统-一级模块-二级模块”，同一模块几十条用例编号相同；用户定只写数字、按行往下排。
+  const idRule = table.split('\n').find(line => line.startsWith('| 测试用例编号 |'));
+  assert.match(idRule, /只写数字，从 `001` 起按行往下排/);
+  assert.match(idRule, /每条都不重复/);
+  assert.doesNotMatch(idRule, /模块/, '编号里不再带模块名');
+  assert.match(section, /编号接着表里最大的往后编，已有的编号不改/);
+  assert.match(testing.prompt, /- \[ \] 测试用例按模板的 13 列出，编号从 001 往下排/);
+  assert.match(testing.prompt, /生成或修改测试用例表等 Excel、Word 文件 → office/);
+});
+
 test('无会话专家候选允许配置本地技能，真实session目录及回合仍只认scoped运行时', async t => {
   const h = await harness(t); let candidateReads = 0;
   h.ctx.whalewing.skillCandidates = async () => { candidateReads++; return { skills: [{ name: 'local-configurable', description: '已入库但是否可用由真实模式决定' }], issues: [] }; };
@@ -1042,4 +1060,40 @@ test('扩展关闭后来源专家撤下，已选它的会话说明原因；重�
   // 来源还在但这位专家被移除：和“专家已删除”同一条路。
   team.source().set([]);
   assert.throws(() => h.ctx.whalewingExperts.get('team--lead'), { code: 'EXPERT_DELETED' });
+});
+
+// 2026-11-05 助手名称：扩展给小鲸起名后，专家列表、读取和会话里给模型的说明都用新名字；员工自己那份不变，扩展关掉就回来。
+test('扩展给小鲸起名：列表和读取换成新名字，保存不把它记成员工改的，给模型的说明写明新叫法，扩展关掉后恢复', async t => {
+  const h = await harness(t);
+  const registry = h.ctx.whalewingExperts;
+  const team = await teamExtension(h.ctx, current => current.whalewing.assistant.registerName(current, '小司助手'));
+  assert.equal(registry.get('manager').name, '小司助手');
+  assert.equal(registry.list().experts.find(expert => expert.id === 'manager').name, '小司助手', '模型工具读的列表也换了');
+  const manager = (await registry.manage({ action: 'list' })).experts.find(expert => expert.id === 'manager');
+  assert.equal(manager.name, '小司助手');
+  assert.equal(registry.get('development').name, '研发专家', '别的专家不受影响');
+  assert.equal(registry.store.get('manager').name, '小鲸助手', '存储里还是原来的名字');
+  // 抽屉里名字只读、送来的是新名字；只改介绍，保存后存储里的名字不变，回执显示新名字。
+  const { name: _name, description: _description, revision, ...rest } = manager;
+  const saved = await registry.manage({ action: 'save', id: 'manager', expectedRevision: revision, expert: { name: '小司助手', description: '改过的介绍', avatar: rest.avatar, prompt: rest.prompt, model: rest.model, skills: rest.skills, mcpServers: rest.mcpServers } });
+  assert.deepEqual([saved.expert.name, saved.expert.description], ['小司助手', '改过的介绍']);
+  assert.equal(registry.store.get('manager').name, '小鲸助手');
+  const context = () => h.adapter.requests.at(-1).messages.filter(message => message.source.kind === 'whalewing-expert').at(-1).content[0].text;
+  assert.equal((await h.run({ expertId: 'manager' })).result.kind, 'success');
+  await turn(h.ctx, h.agent);
+  assert.match(context(), /本轮专家身份：小司助手。[^\n]*\n在这里你的名字是「小司助手」：下文和技能里说的“小鲸助手”“小鲸”都是你/);
+  assert.equal((await h.run({ expertId: 'development' })).result.kind, 'success');
+  await turn(h.ctx, h.agent);
+  assert.match(context(), /本轮专家身份：研发专家。[^\n]*\n在这里助手叫「小司助手」/);
+  // 扩展改名：下一轮重发带新名字的全文。
+  team.source().set('小航助手');
+  assert.equal(registry.get('manager').name, '小航助手');
+  await turn(h.ctx, h.agent);
+  assert.match(context(), /在这里助手叫「小航助手」/);
+  // 扩展关掉：名字回到员工自己那份，员工改过的介绍还在；说明里不再提新叫法。
+  await team.fiber.dispose();
+  const restored = registry.get('manager');
+  assert.deepEqual([restored.name, restored.description], ['小鲸助手', '改过的介绍']);
+  await turn(h.ctx, h.agent);
+  assert.doesNotMatch(context(), /在这里助手叫/);
 });

@@ -10,7 +10,7 @@ export function createView(kit) {
   const { createElement: h, useState, useRef, useEffect, useLayoutEffect, useSyncExternalStore } = React;
   // 扩展登记的来源名是 { zh, en }；取不到语言服务时用中文。
   const labelText = label => kit.resolveText ? kit.resolveText(label) : label.zh;
-  function ExpertEditor({ api, expert, preset, onClose, t, notify }) {
+  function ExpertEditor({ api, expert, preset, onClose, t, notify, nameLock = null }) {
     // 扩展提供的专家：只读的只能查看；可改的不绑定模型和 MCP（那是员工本机的配置），保存交给扩展。
     const sourced = Boolean(expert?.source), viewing = Boolean(expert?.readOnly);
     const avatarRead = useRef(null);
@@ -128,7 +128,11 @@ export function createView(kit) {
         h('div', { className: 'ww-avatar-side' },
           h('div', { className: 'ww-avatar-actions' }, h('label', { className: 'ww-avatar-upload' }, t('avatar'), h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', disabled: busy, onChange: upload })), h('button', { type: 'button', disabled: busy, onClick: () => update('avatar', null) }, t('clearAvatar'))),
           presetAvatars.length > 0 && h('div', { className: 'ww-avatar-presets', role: 'group', 'aria-label': t('avatarPresets') }, ...presetAvatars.map((id, index) => h('button', { type: 'button', key: id, className: 'ww-avatar-preset', 'aria-pressed': draft.avatar === avatarArt[id], 'aria-label': `${t('avatarPresets')} ${index + 1}`, disabled: busy, onClick: () => update('avatar', avatarArt[id]) }, h('img', { src: avatarArt[id], alt: '' })))))),
-      ...[['name', 'expertName'], ['description', 'expertDescription']].map(([key, label]) => h('label', { key }, t(label), h('input', { value: draft[key], required: true, disabled: busy, maxLength: key === 'name' ? 40 : 240, onChange: event => update(key, event.target.value) }))),
+      ...[['name', 'expertName'], ['description', 'expertDescription']].map(([key, label]) => {
+        // 小鲸的名字由扩展定着时只读，保存时宿主保留员工原来的名字；扩展关掉后原来的名字回来。
+        const lock = key === 'name' ? nameLock : null;
+        return h('label', { key }, t(label), lock && h('small', { className: 'ww-muted' }, t('assistantNameLocked', { source: lock.label ? labelText(lock.label) : lock.package })), h('input', { value: lock ? lock.name : draft[key], required: true, disabled: busy || Boolean(lock), maxLength: key === 'name' ? 40 : 240, onChange: event => update(key, event.target.value) }));
+      }),
       h('label', null, t('expertPrompt'), h('textarea', { required: true, value: draft.prompt, disabled: busy, onChange: event => update('prompt', event.target.value), spellCheck: false })),
       !sourced && h('label', null, t('expertModel'), catalog?.modelSupported === false && h('small', { className: 'ww-muted' }, t('modelUnsupported')), h('select', { value: modelValue, disabled: busy || !catalog || catalog.modelSupported === false, onChange: event => update('model', event.target.value ? JSON.parse(event.target.value) : null) }, h('option', { value: '' }, t('inheritModel')), draft.model && !modelOptions.some(item => item.value === modelValue) && h('option', { value: modelValue }, `${draft.model.provider} / ${draft.model.model} · ${t('modelMissing')}`), ...modelOptions.map(item => h('option', { value: item.value, key: item.value }, item.name || item.model || item.id)))),
       !sourced && selectedModel?.reasoning && h('label', null, t('reasoning'), h('select', { value: draft.model?.reasoningEffort || '', disabled: busy, onChange: event => { const { reasoningEffort, ...model } = draft.model; update('model', event.target.value ? { ...model, reasoningEffort: event.target.value } : model); } }, h('option', { value: '' }, t('reasoningDefault')), ...selectedModel.reasoning.efforts.map(item => h('option', { value: item.id, key: item.id }, item.name)))),
@@ -227,7 +231,7 @@ export function createView(kit) {
           h('p', { key: 'h' }, t('expertResetHelp'))], confirmLabel: t('resetExpert'), cancelLabel: t('cancel'), busy, onConfirm: confirmReset, onCancel: () => setConfirm(null) });
       })());
 
-    body = h(React.Fragment, null, body, expertEditor !== undefined && h(ExpertEditor, { key: expertEditor?.id || (expertPreset ? `copy-${expertPreset.id}` : 'new'), api, expert: expertEditor, preset: expertPreset, onClose: () => openEditor(undefined), t, notify }));
+    body = h(React.Fragment, null, body, expertEditor !== undefined && h(ExpertEditor, { key: expertEditor?.id || (expertPreset ? `copy-${expertPreset.id}` : 'new'), api, expert: expertEditor, preset: expertPreset, onClose: () => openEditor(undefined), t, notify, nameLock: expertEditor?.id === 'manager' ? workbench.internal.assistantName().custom : null }));
     return active ? body : null;
   };
 }

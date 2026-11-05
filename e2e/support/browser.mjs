@@ -72,6 +72,9 @@ export async function openWhaleWing(page, url, { desktop = false } = {}) {
   // 之后再弹（例如刷新页面）由处理器在下一次操作前关掉。
   const welcome = page.getByRole('dialog', { name: '开始使用' });
   const dismiss = async () => { await welcome.getByRole('button', { name: '关闭' }).click(); await welcome.waitFor({ state: 'hidden' }); };
+  // 同一页面第二次打开时，上一次注册的处理器还在：下面主动点“关闭”时它会抢先把框关掉，主动点击就一直等一个已经消失的按钮
+  // （2026-11-05 每周思考用例因此偶发 30 秒超时）。先撤掉旧处理器，关完再重新注册。
+  await page.removeLocatorHandler(welcome);
   await page.goto(url);
   if (await welcome.waitFor({ timeout: 5000 }).then(() => true, () => false)) await dismiss();
   await page.addLocatorHandler(welcome, dismiss);

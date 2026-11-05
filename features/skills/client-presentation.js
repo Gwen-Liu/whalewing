@@ -18,13 +18,13 @@ export const zh = {
   "rollbackSkill": "回退到发布前旧版",
   "confirmRollback": "确认恢复最近一次发布前的有效旧版？不是恢复停用的当前版本；旧版来源失效时会保留现状",
   "confirmRollbackAction": "确认回退",
-  "refine": "与小鲸讨论提炼",
+  "refine": "与{assistantShort}讨论提炼",
   "refinePrompt": "请和我讨论如何从已有知识提炼个人技能。先查找现有技能与知识，和我确认要解决的问题及来源，再按现有技能演进流程准备候选；不要直接发布",
   "skillOverrideConflict": "同名位置不是这项系统技能的有效个人修改，请先在技能库处理冲突；原件与现有文件均保留",
   "skillLibrary": "技能成长",
   "skillExtension": "扩展",
   "skillReadOnly": "只读",
-  "skillExtensionHelp": "这项技能由「{name}」提供，只读；专家和小鲸可以直接调用，要修改请到「{name}」里改",
+  "skillExtensionHelp": "这项技能由「{name}」提供，只读；专家和{assistantShort}可以直接调用，要修改请到「{name}」里改",
   "skillHelp": "已入库不代表当前对话已使用",
   "newSkill": "新增技能",
   "editSkill": "编辑技能",
@@ -50,7 +50,7 @@ export const zh = {
   "skillBaseUpdated": "系统原件已随插件更新。你的修改照常生效；想改用新版，点“恢复系统原件”。",
   "selectSkill": "选择技能查看正文与来源",
   "sourcePaths": "知识来源",
-  "skillEdit": "与小鲸编辑技能",
+  "skillEdit": "与{assistantShort}编辑技能",
   "skillEditPrompt": "请协助编辑我所选的自有技能：{reference}。先通过 whalewing_skill 的 read 动作读取指定 name 和 state，核对返回 hash 与上述已读 hash 一致；不一致时停止修改并请我重新选择。读取来源后和我确认编辑内容，再按现有技能演进流程处理；不要按同名的其他状态替换，也不要修改宿主或其他插件的技能正文"
 };
 export const en = {

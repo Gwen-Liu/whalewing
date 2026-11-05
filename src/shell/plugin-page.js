@@ -124,4 +124,28 @@ export function registerPluginPage(ctx, workbench, React) {
     return subject?.kind === 'bundle' && subject.pkg?.name === 'dsh-whalewing' && features.length ? h(ExtensionList, { features }) : null;
   }
   ctx.slots.inject('plugins.detail.section', () => ctx.slots.register({ name: 'plugins.detail.section', id: 'whalewing-extensions', order: 20 }, ExtensionsSection));
+  // DSH 只给官方插件提供“更新”；鲸翼在自己的详情页放一块检查更新，确认框开在这一页。
+  function UpdateBlock() {
+    const updater = core.updater, UpdateDialog = core.UpdateDialog;
+    const state = useSyncExternalStore(updater.subscribe, updater.snapshot, updater.snapshot);
+    const { t } = updater, result = state.result, busy = state.phase === 'checking' || state.phase === 'installing';
+    const status = state.phase === 'checking' ? t('checking') : state.phase === 'installing' ? t('installing') : state.updated ? t('updated', { version: state.updated }) : !result ? null
+      : result.status === 'latest' ? t('latest', { current: result.current }) : result.status === 'available' ? t('available', { version: result.version })
+        : result.status === 'needs-dsh' ? t('needsDsh', { version: result.version, requires: result.requires, runtime: result.runtimeVersion }) : result.status === 'local' ? t('local') : t('failed', { reason: result.reason });
+    const dialog = state.dialog && state.owner === 'plugin-page';
+    return h('section', { className: 'ww-plugin-section', 'data-whalewing-update': true, style: { padding: 16, border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 12 } },
+      h('style', null, CONTROL_STYLE),
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: 12, minHeight: 28, minWidth: 0, flexWrap: 'wrap' } },
+        h('h4', { style: { margin: 0, fontSize: 14 } }, t('title')),
+        status && h('small', { role: 'status', style: { color: 'var(--dsw-alias-label-secondary)', flex: '1 1 160px', minWidth: 0 } }, status),
+        h('span', { style: { display: 'flex', gap: 8, marginLeft: 'auto' } },
+          result?.status === 'available' && !state.updated && h('button', { type: 'button', disabled: busy, onClick: () => updater.open('plugin-page') }, t('updateTo', { version: result.version })),
+          h('button', { type: 'button', disabled: busy, onClick: () => updater.check('plugin-page') }, t('check')))),
+      dialog && core.kit?.css && h('style', null, core.kit.css),
+      UpdateDialog && h(UpdateDialog, { updater, owner: 'plugin-page' }));
+  }
+  function UpdateSection({ subject }) {
+    return subject?.kind === 'bundle' && subject.pkg?.name === 'dsh-whalewing' && core.updater ? h(UpdateBlock) : null;
+  }
+  ctx.slots.inject('plugins.detail.section', () => ctx.slots.register({ name: 'plugins.detail.section', id: 'whalewing-update', order: 10 }, UpdateSection));
 }

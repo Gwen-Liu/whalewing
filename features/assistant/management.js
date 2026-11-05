@@ -39,7 +39,7 @@ export function applyManagement(ctx) {
         const record = records.get(agent);
         if (!record) return;
         records.delete(agent);
-        record.controller.abort(new Error('小鲸管理范围已退出；已接收的操作仍需核对原生结果'));
+        record.controller.abort(new Error('助手的管理范围已退出；已接收的操作仍需核对原生结果'));
         record.guard(); record.around(); record.agentCleanup?.();
         // 撤注册不等待进行中的工具调用，避免自卸载形成自等。
         void record.fork?.dispose();
@@ -64,7 +64,7 @@ export function applyManagement(ctx) {
         records.set(agent, own);
         const isOwn = exec => exec.name === toolName && ready.tools.get(toolName, exec.agent) === own.definition;
         own.guard = agent.ctx.tools.guard(exec => {
-          if (isOwn(exec) && (own.controller.signal.aborted || exec.agent !== agent || !selected(exec.agent))) return '小鲸管理身份已变化，请从当前主会话重新核对';
+          if (isOwn(exec) && (own.controller.signal.aborted || exec.agent !== agent || !selected(exec.agent))) return '助手的管理身份已变化，请从当前主会话重新核对';
         });
         own.around = agent.ctx.on('tools/execute', async (exec, next) => {
           if (!isOwn(exec)) return next();

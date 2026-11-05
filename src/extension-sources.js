@@ -14,6 +14,8 @@ export const sourceExpertItem = z.strictObject({
   avatar: z.string().max(700000).nullable().optional(), skills: z.array(z.string().min(1).max(100)).max(40).optional(), readOnly: z.boolean().optional(),
 });
 const expertItems = z.array(sourceExpertItem).max(200);
+// 助手名称会出现在按钮、标题和给模型的说明里：一行字，不带换行和控制字符。
+const assistantName = z.string().trim().min(1, '不能为空').max(16, '最长 16 个字').refine(value => !/[\p{Cc}\p{Zl}\p{Zp}]/u.test(value), '不能带换行或控制字符');
 
 /** 来源笔记的本地路径：正斜杠分隔的相对 .md 路径，不带盘符、不回到上级。 */
 export function sourceNotePath(value) {
@@ -31,9 +33,9 @@ const readResult = z.strictObject({ path: localNotePath, content: z.string(), ha
 export const isSourceExpertId = id => typeof id === 'string' && id.includes('--');
 export const isSourceNotePath = value => typeof value === 'string' && value.startsWith('@');
 
-function input(schema, raw, what) {
+function input(schema, raw, what, code = 'EXTENSION_SOURCE_INPUT') {
   const parsed = schema.safeParse(raw);
-  if (!parsed.success) fail('EXTENSION_SOURCE_INPUT', `${what}不符合鲸翼扩展接口：${parsed.error.issues.map(issue => `${issue.path.join('.') || '整体'} ${issue.message}`).slice(0, 3).join('；')}`);
+  if (!parsed.success) fail(code, `${what}不符合鲸翼扩展接口：${parsed.error.issues.map(issue => `${issue.path.join('.') || '整体'} ${issue.message}`).slice(0, 3).join('；')}`);
   return parsed.data;
 }
 
@@ -48,16 +50,16 @@ async function bounded(work, signal) {
   } finally { signal.removeEventListener('abort', stop); }
 }
 
-/** 专家来源和知识来源：每个已登记的扩展功能各至多一个，登记绑定扩展自己的作用域。 */
+/** 专家来源和知识来源：每个已登记的扩展功能各至多一个；助手名称同一时间只认一个扩展。登记都绑定扩展自己的作用域。 */
 export class ExtensionSources {
   constructor(registry, { changed = () => {}, maxNoteBytes = 1048576, maxResults = 50 } = {}) {
     this.registry = registry; this.changed = changed; this.maxNoteBytes = maxNoteBytes; this.maxResults = maxResults;
-    this.experts = new Map(); this.knowledge = new Map(); this.closed = false;
+    this.experts = new Map(); this.knowledge = new Map(); this.names = new Map(); this.closed = false;
   }
 
   dispose() {
     this.closed = true;
-    for (const map of [this.experts, this.knowledge]) { for (const entry of map.values()) entry.closed = true; map.clear(); }
+    for (const map of [this.experts, this.knowledge, this.names]) { for (const entry of map.values()) entry.closed = true; map.clear(); }
   }
 
   /** 登记还在、扩展没关：任何一项不成立都视为已撤销，顺手清掉。 */
@@ -205,6 +207,38 @@ export class ExtensionSources {
     if (value.path !== match[2]) fail('EXTENSION_SOURCE_INPUT', `「${entry.label.zh}」返回的笔记和请求的路径对不上`);
     if (Buffer.byteLength(value.content) > this.maxNoteBytes) fail('SIZE', `「${entry.label.zh}」的这篇笔记超出单篇大小限制`);
     return { path: full, content: value.content, hash: value.hash, readOnly: true, source: { id: entry.feature.id, label: { ...entry.label } }, ...(value.absolutePath ? { absolutePath: value.absolutePath } : {}) };
+  }
+
+  /** 给小鲸起名：同一时间只认一个扩展；扩展关闭、卸载或调 dispose 后恢复“小鲸助手”。 */
+  registerAssistantName(ctx, raw) {
+    const feature = this.registry.caller(ctx, '设置助手名称');
+    const name = input(assistantName, raw, '助手名称', 'ASSISTANT_NAME_INPUT');
+    const holder = this.assistantEntry();
+    if (holder) fail('ASSISTANT_NAME_CONFLICT', holder.feature.id === feature.id ? '这个扩展已经设置过助手名称；要改名请调 set' : `助手名称已由「${this.labelOf(holder.feature.id)?.zh ?? holder.feature.package}」设置，同一时间只认一个扩展`);
+    const entry = { feature, name, closed: false };
+    const dispose = this.register(this.names, 'assistant', ctx, entry);
+    return { set: value => this.setAssistantName(entry, value), dispose };
+  }
+
+  setAssistantName(entry, raw) {
+    if (!this.alive(this.names, entry)) fail('FEATURE_CLOSED', '助手名称已撤销，请重新打开扩展后再试');
+    const name = input(assistantName, raw, '助手名称', 'ASSISTANT_NAME_INPUT');
+    if (name === entry.name) return;
+    entry.name = name;
+    this.changed('assistant');
+  }
+
+  assistantEntry() {
+    for (const entry of [...this.names.values()]) if (this.alive(this.names, entry)) return entry;
+    return undefined;
+  }
+
+  /** 扩展起的助手名称和是谁起的；没有扩展起名时为 undefined。 */
+  assistantName() {
+    const entry = this.assistantEntry();
+    if (!entry) return undefined;
+    const label = this.labelOf(entry.feature.id);
+    return { name: entry.name, feature: entry.feature.id, package: entry.feature.package, ...(label ? { label } : {}) };
   }
 
   /** 技能库分组用的名字：同一扩展登记了来源就用来源的名字，否则由调用方退回包名。 */

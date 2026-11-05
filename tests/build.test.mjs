@@ -167,9 +167,12 @@ test('真实生成Client自带严格校验器，各功能独立挂接且资源�
       const service = services[descriptor.method] ?? descriptor.namespace;
       if (Object.values(services).includes(service)) assert.equal(descriptor.namespace, service);
       if (service === 'whalewingWorkbench') {
-        assert.deepEqual(contribution.descriptors.map(item => item.method), ['features', 'watchFeatures', 'retryBase']);
+        assert.deepEqual(contribution.descriptors.map(item => item.method), ['features', 'watchFeatures', 'retryBase', 'checkUpdate']);
         const snapshot = { revision: 0, features: parts.map((part, index) => ({ instance: index + 1, id: part.id, kind: part.kind, api: 1, package: 'dsh-whalewing', skills: [] })) };
-        for (const item of contribution.descriptors) {
+        const update = contribution.descriptors.find(item => item.method === 'checkUpdate').result.create();
+        assert.equal(update.safeParse({ status: 'latest', current: '0.2.1-rc.5.4', runtimeVersion: '0.2.1-rc.5' }).success, true);
+        assert.equal(update.safeParse({ status: 'latest', current: '0.2.1-rc.5.4', runtimeVersion: '0.2.1-rc.5', caller: 'human' }).success, false);
+        for (const item of contribution.descriptors.filter(item => item.method !== 'checkUpdate')) {
           assert.equal(item.result.create().safeParse(snapshot).success, true);
           assert.equal(item.result.create().safeParse({ ...snapshot, caller: 'human' }).success, false);
         }

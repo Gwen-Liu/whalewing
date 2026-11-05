@@ -117,6 +117,12 @@ test('交接说明按目标、交付、资料、员工原话分段，重复路�
   assert.throws(() => handoffInput({ ...brief, materials: Array.from({ length: 21 }, (_, i) => `${i}.md`) }), /最多 20 项/);
 });
 
+test('扩展给小鲸起了名：交接说明开头和“不能交给自己”都用新名字', () => {
+  const names = { full: '小司助手', short: '小司助手' };
+  assert.match(handoffInput(brief, names).draft, /^【小司助手交接】修复登录报错\n/);
+  assert.throws(() => handoffInput({ ...brief, expertId: 'manager' }, names), /不能交给小司助手自己/);
+});
+
 const meta = { sessionId: 'task-1', expertId: 'development', expertName: '研发专家', title: '修复登录报错', draft: '【小鲸交接】修复登录报错' };
 function opener(overrides = {}) {
   const calls = [];
