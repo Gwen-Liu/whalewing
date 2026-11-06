@@ -1,4 +1,5 @@
 import Cards from '../features/cards/host.js';
+import { sessionSchedule } from '../src/schedule-compat.js';
 import { LockedDomain } from '../src/host/locked-domain.js';
 import { newsContract } from '../features/cards/contract.js';
 import test from 'node:test';
@@ -344,10 +345,12 @@ test('目标版原生Schedule真实持久化、CAS、自然到期回执、取消
   // 夹具没有已挂载 Agent；新版 Schedule 会查询 get 来排除子代理。
   ctx.provide('agents', { roots: () => [], get: () => undefined, withoutInitiator: fn => fn() });
   ctx.provide('sessions', { flush: async () => true });
-  ctx.provide('tools', {}); ctx.provide('sessionPersistence', {});
-  ctx.provide('sessionController', { resolveAgent: async sessionId => ({ agent: { session: { id: sessionId }, followup: message => messages.push(message) } }) });
+  // DSH 0.2.2 起建任务前用 stat 核对投递会话存在、不是子代理；这里的会话都当作已保存的普通会话。
+  ctx.provide('tools', {}); ctx.provide('sessionPersistence', { async stat() { return { header: {} }; } });
+  // DSH 0.2.2 起投递到已有会话后要等它空闲才放开执行槽，假会话也要能回答 whenIdle。
+  ctx.provide('sessionController', { resolveAgent: async sessionId => ({ agent: { session: { id: sessionId }, followup: message => messages.push(message), whenIdle: async () => {} } }) });
   const native = new Schedule(ctx, {});
-  const owner = new Automation({ schedule: () => native, projections: async () => ({ asOfSeq: 0, values: { whalewingAutomation: 'custom' } }), confirmClaim: async () => {}, prepareModel: async () => {} });
+  const owner = new Automation({ schedule: () => sessionSchedule(native), projections: async () => ({ asOfSeq: 0, values: { whalewingAutomation: 'custom' } }), confirmClaim: async () => {}, prepareModel: async () => {} });
   const contract = automationContract(z);
   const call = async input => contract.result.parse(await owner.manage(contract.input.parse(input), AbortSignal.timeout(10000)));
   const { task } = await call({ action: 'create', purpose: 'custom', sessionId: 'native-auto', spec: { title: '真实原生计划', prompt: '隔离测试指令', daily: { time: '08:00:00', time_zone: 'Asia/Shanghai' } } });
@@ -523,9 +526,9 @@ test('原生Schedule磁盘冷恢复保留范围与CAS原件，无插件任务镜
     const ctx = new Context(); contexts.push(ctx); new TypertRegistry(ctx);
     await ctx.plugin(Storage); await ctx.plugin(StorageJson, { root: directory }); await ctx.plugin(StorageDomain, { backend: 'json' });
     ctx.provide('agents', { roots: () => [], get: () => undefined, withoutInitiator: fn => fn() }); ctx.provide('sessions', { flush: async () => true });
-    ctx.provide('tools', {}); ctx.provide('sessionPersistence', {});
+    ctx.provide('tools', {}); ctx.provide('sessionPersistence', { async stat() { return { header: {} }; } });
     const native = new Schedule(ctx, {});
-    const owner = new Automation({ schedule: () => native, projections: async () => ({ asOfSeq: 0, values: { whalewingAutomation: 'knowledge' } }), confirmClaim: async () => {}, prepareModel: async () => {}, listWorkspaces: async () => [{ workspaceId: 'a', path: '/a', sessionIds: ['source-a'] }] });
+    const owner = new Automation({ schedule: () => sessionSchedule(native), projections: async () => ({ asOfSeq: 0, values: { whalewingAutomation: 'knowledge' } }), confirmClaim: async () => {}, prepareModel: async () => {}, listWorkspaces: async () => [{ workspaceId: 'a', path: '/a', sessionIds: ['source-a'] }] });
     return { ctx, owner, native };
   }
   const first = await open();

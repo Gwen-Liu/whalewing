@@ -525,8 +525,8 @@ test('反例：取消计划时在确认框点“取消”，任务还在、下�
 
 // ===================== 每日资讯 =====================
 
-// 需求§定时任务（每日资讯固定每天 08:00，详情写明要改关注的领域和来源到知识卡片的卡片设置里改，只留暂停、删除等原生允许的操作；暂停和恢复只在原生服务公开相应接口时显示，当前原版未提供）
-test('每日资讯详情写明固定每天 08:00、到知识卡片的卡片设置里改领域和来源；菜单里没有编辑，原版没有暂停', async t => {
+// 需求§定时任务（每日资讯固定每天 08:00，详情写明要改关注的领域和来源到知识卡片的卡片设置里改，只留暂停、删除等原生允许的操作；DSH 0.2.2 起原版定时服务支持暂停，菜单里有暂停、恢复）
+test('每日资讯详情写明固定每天 08:00、到知识卡片的卡片设置里改领域和来源；菜单里没有编辑，暂停后 DSH 里也停了，恢复后下次还是北京时间 08:00', async t => {
   await withPage(browser, t, async ({ page, errors }) => {
     await openSchedules(page);
     await selectTask(page, '每日资讯');
@@ -535,10 +535,18 @@ test('每日资讯详情写明固定每天 08:00、到知识卡片的卡片设�
     assert.match(text, /知识卡片/);
     assert.match(text, /卡片设置/);
     assert.match(text, /领域和来源/);
-    const items = await (await taskMenu(page, '每日资讯')).getByRole('button').allInnerTexts();
+    const menu = await taskMenu(page, '每日资讯'), items = await menu.getByRole('button').allInnerTexts();
     assert.ok(!items.some(item => /编辑/.test(item)), `没有编辑项：${items.join('、')}`);
-    assert.ok(!items.some(item => /暂停|恢复/.test(item)), `原版没有暂停、恢复：${items.join('、')}`);
+    assert.ok(items.includes('暂停'), `DSH 0.2.2 起有暂停：${items.join('、')}`);
     assert.ok(items.includes('取消计划'), '保留删除（取消计划）');
+    // 菜单还开着，直接点；再点一次“…”会把它关上。
+    await menu.getByRole('button', { name: '暂停', exact: true }).click();
+    await row(page, '每日资讯').locator('small', { hasText: '已暂停' }).waitFor();
+    assert.equal(newsTask().status, 'paused', 'DSH 自己的存储里也暂停了');
+    await (await taskMenu(page, '每日资讯')).getByRole('button', { name: '恢复', exact: true }).click();
+    await row(page, '每日资讯').locator('small', { hasText: '已启用' }).waitFor();
+    assert.equal(newsTask().status, 'active');
+    assert.equal(Date.parse(newsTask().record.scheduledAt), nextClockRuns(Date.now(), { hour: 8, minute: 0 }, 1)[0], '恢复后从下一个北京时间 08:00 继续');
     assert.deepEqual(errors, []);
   });
 });

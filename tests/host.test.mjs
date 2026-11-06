@@ -1,4 +1,5 @@
 import { mountFeatures } from './feature-fixture.mjs';
+import { sessionSchedule } from '../src/schedule-compat.js';
 import { controllerFixture } from './session-controller-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -429,18 +430,10 @@ test('资讯可信计划经过统一Host与原生Schedule，关闭末领域先�
   const h = await featureHost(t);
   // 夹具没有已挂载 Agent；新版 Schedule 会查询 get 来排除子代理。
   h.ctx.provide('agents', { roots: () => [], get: () => undefined, withoutInitiator: fn => fn() });
-  h.ctx.provide('tools', {}); h.ctx.provide('sessionPersistence', {});
-  const schedule = new Schedule(h.ctx, {}), create = schedule.create.bind(schedule);
-  // 基线原生服务尚无pause；此边界夹具仅验证插件参数与权威读回，新适配运行时另验真实暂停。
-  const catalog = schedule.catalog.bind(schedule), list = schedule.list.bind(schedule), paused = new Set();
-  schedule.catalog = async () => (await catalog()).map(row => paused.has(row.id) ? { ...row, status: 'paused' } : row);
-  schedule.list = async request => (await list(request)).filter(row => !paused.has(row.id));
-  schedule.pause = async request => {
-    const row = (await schedule.catalog()).find(row => row.id === request.id && row.sessionId === request.sessionId);
-    const { sessionId: _, status, lastDelivery: __, ...record } = row;
-    assert.equal(request.expectedStatus, status); assert.deepEqual(request.expected, record);
-    paused.add(row.id); return { id: row.id, updated: true, record };
-  };
+  // DSH 0.2.2 起建任务前用 stat 核对投递会话存在、不是子代理；这里的会话都当作已保存的普通会话。
+  h.ctx.provide('tools', {}); h.ctx.provide('sessionPersistence', { async stat() { return { header: {} }; } });
+  // DSH 0.2.2 起原生定时服务能暂停；这里走真实暂停，按鲸翼的转换层读回。
+  const schedule = new Schedule(h.ctx, {}), create = schedule.create.bind(schedule), view = sessionSchedule(schedule);
   let lockedDuringCreate = false;
   schedule.create = async (...args) => { lockedDuringCreate = h.cards.resource.owner.writing; return create(...args); };
   await h.cards.manageNews({ action: 'save', id: 'work', expectedRevision: 0, field: hostNewsField });
@@ -452,9 +445,9 @@ test('资讯可信计划经过统一Host与原生Schedule，关闭末领域先�
   assert.match(task.prompt, /whalewing_news fields/);
   const close = { action: 'save', id: 'work', expectedRevision: 1, field: { ...hostNewsField, enabled: false } };
   await assert.rejects(h.cards.manageNews(close), { code: 'NEWS_CANCEL_CONFIRM' });
-  assert.equal((await schedule.list({ sessionId: 'news-session' })).length, 1);
+  assert.deepEqual((await view.catalog()).map(row => row.status), ['active']);
   const disabled = await h.cards.manageNews({ ...close, confirmCancel: true });
-  assert.equal(disabled.field.enabled, false); assert.equal((await schedule.catalog())[0].status, 'paused'); assert.equal((await schedule.catalog())[0].id, task.id);
+  assert.equal(disabled.field.enabled, false); assert.equal((await view.catalog())[0].status, 'paused'); assert.equal((await view.catalog())[0].id, task.id);
   assert.equal(h.cards.resource.owner.writing, false); assert.equal(h.automationHost.automation.writing, false);
 });
 
@@ -514,12 +507,14 @@ test('Host服务就绪自动初始化默认资讯，不打开页面也不初始�
   });
   Object.assign(h.ctx.get('commands'), { execute: async (agent, line) => { claims++; assert.match(line, /automation_claim/); purposes.set(agent.session.id, 'news'); return { result: { kind: 'success' } }; } });
   const accepted = Promise.withResolvers();
+  // DSH 0.2.2 的定时服务形状：create 带时间规则和投递目标，目录条目用 target 记投递会话。
   h.ctx.provide('schedule', {
     catalog: async () => structuredClone(records),
-    create: async (sessionId, spec) => {
-      assert.equal(spec.daily.time, '08:00:00'); assert.equal(spec.daily.time_zone, 'Asia/Shanghai');
-      const task = { id: 'native-default', kind: 'daily', title: spec.title, prompt: spec.prompt, scheduledAt: '2030-01-02T00:00:00Z', time: '08:00:00.000', timeZone: 'Asia/Shanghai' };
-      records.push({ ...task, sessionId, status: 'active' }); accepted.resolve(); return task;
+    create: async ({ title, prompt, timing, target }, actorSessionId) => {
+      assert.equal(timing.kind, 'daily'); assert.equal(timing.daily.time, '08:00:00'); assert.equal(timing.daily.time_zone, 'Asia/Shanghai');
+      assert.deepEqual(target, { kind: 'session', sessionId: actorSessionId }, '投递到资讯自己的会话，并以它为操作方');
+      const task = { id: 'native-default', kind: 'daily', title, prompt, scheduledAt: '2030-01-02T00:00:00.000Z', time: '08:00:00.000', timeZone: 'Asia/Shanghai', target, involvedSessionIds: [actorSessionId], status: 'active' };
+      records.push(task); accepted.resolve(); return structuredClone(task);
     },
   });
   await accepted.promise;
@@ -572,7 +567,7 @@ for (const mode of ['complete', 'cancel', 'members-error', 'catalog-error']) tes
   await entered.promise;
   assert.deepEqual(trace, ['catalog']); assert.equal(accepted, 0);
   // catalog尚未完成时真实写入并挂接，最终必须接纳新快照而不是开始等待时的空值。
-  const task = await h.ctx.schedule.create('source', { title: '来源读取', prompt: '隔离验证', after_seconds: 3600 }, h.signal());
+  const task = await sessionSchedule(h.ctx.schedule).create('source', { title: '来源读取', prompt: '隔离验证', after_seconds: 3600 }, h.signal());
   await h.workspace.attachSession('source');
   if (mode === 'cancel') controller.abort(new Error('来源读取取消'));
   release.resolve();

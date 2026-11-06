@@ -124,10 +124,12 @@ export function registerPluginPage(ctx, workbench, React) {
     return subject?.kind === 'bundle' && subject.pkg?.name === 'dsh-whalewing' && features.length ? h(ExtensionList, { features }) : null;
   }
   ctx.slots.inject('plugins.detail.section', () => ctx.slots.register({ name: 'plugins.detail.section', id: 'whalewing-extensions', order: 20 }, ExtensionsSection));
-  // DSH 只给官方插件提供“更新”；鲸翼在自己的详情页放一块检查更新，确认框开在这一页。
+  // 鲸翼在自己的详情页放一块检查更新，确认框开在这一页。DSH 0.2.2 起按包名从安装源装的插件，详情页上面另有 DSH 自己的“版本”区块，
+  // 它把鲸翼的版本都算作预发布、更新时还会先卸载；鲸翼保留自己的更新，在这块说明一句（2026-11-06 用户定）。
   function UpdateBlock() {
     const updater = core.updater, UpdateDialog = core.UpdateDialog;
     const state = useSyncExternalStore(updater.subscribe, updater.snapshot, updater.snapshot);
+    useEffect(() => { updater.detectNative?.(); }, [updater]);
     const { t } = updater, result = state.result, busy = state.phase === 'checking' || state.phase === 'installing';
     const status = state.phase === 'checking' ? t('checking') : state.phase === 'installing' ? t('installing') : state.updated ? t('updated', { version: state.updated }) : !result ? null
       : result.status === 'latest' ? t('latest', { current: result.current }) : result.status === 'available' ? t('available', { version: result.version })
@@ -141,6 +143,7 @@ export function registerPluginPage(ctx, workbench, React) {
         h('span', { style: { display: 'flex', gap: 8, marginLeft: 'auto' } },
           result?.status === 'available' && !state.updated && h('button', { type: 'button', disabled: busy, onClick: () => updater.open('plugin-page') }, t('updateTo', { version: result.version })),
           h('button', { type: 'button', disabled: busy, onClick: () => updater.check('plugin-page') }, t('check')))),
+      state.nativeVersions && !state.updated && h('p', { 'data-whalewing-update-note': true, style: { margin: '8px 0 0', fontSize: 12, lineHeight: 1.6, color: 'var(--dsw-alias-label-secondary)' } }, t('nativeNote')),
       dialog && core.kit?.css && h('style', null, core.kit.css),
       UpdateDialog && h(UpdateDialog, { updater, owner: 'plugin-page' }));
   }

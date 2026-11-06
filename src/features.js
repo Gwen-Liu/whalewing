@@ -92,7 +92,8 @@ export class FeatureRegistry {
     if (base.retrying) return base.retrying;
     const operation = (async () => {
       try {
-        if (base.fiber) await base.fiber.restart();
+        // cordis 4.1 起失败的功能只有 update() 才会清掉错误重新加载，restart() 不再重试；带 true 不写配置。
+        if (base.fiber) await base.fiber.update(base.fiber.config, true);
         else base.fiber = base.create().ctx.fiber;
         await this.observe(base);
       } catch (error) { base.error = error.message; this.changed(); }

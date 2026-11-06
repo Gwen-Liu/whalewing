@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { sessionSchedule } from '../src/schedule-compat.js';
 import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { LlmAdapter } from '@deepseek-ai/dsh-llm';
@@ -123,7 +124,7 @@ test('真实到点运行：完成、出错和资讯跳过写进会话投影，�
     const claim = await h.ctx.commands.execute(handle.agent, `/whalewing ${JSON.stringify({ action: 'automation_claim', purpose })}`, [], h.signal());
     assert.equal(claim.result.kind, 'success'); assert.equal(await h.ctx.sessions.flush(handle.agent.session), true);
     adapter.fail = fail;
-    const task = await h.ctx.schedule.create(sessionId, { title: `运行结果 ${sessionId}`, prompt: '隔离到点任务', after_seconds: 1 });
+    const task = await sessionSchedule(h.ctx.schedule).create(sessionId, { title: `运行结果 ${sessionId}`, prompt: '隔离到点任务', after_seconds: 1 });
     await waitFor(async () => (await h.ctx.schedule.catalog()).find(row => row.id === task.id)?.lastDelivery, '原生送达回执');
     await waitFor(() => (h.ctx.sessionProjections.stateOf(handle.agent.session, runsKey)?.runs ?? []).some(row => !['waiting', 'running'].includes(row.state)), '那一轮结束');
     await handle.agent.whenIdle();

@@ -76,7 +76,7 @@ export function newsWindow(now = Date.now()) {
 }
 export function newsUrl(input) {
   let url; try { url = new URL(input); } catch { fail('NEWS_URL', '订阅和文章须使用公开 HTTPS 地址'); }
-  if (url.protocol !== 'https:' || url.username || url.password || input.length > 2048 || !url.hostname.includes('.') || isIP(url.hostname.replace(/^\[|\]$/g, '')) || /(?:^|\.)(?:localhost|local|internal|lan|home|test|invalid)$/.test(url.hostname)) fail('NEWS_URL', '只接受不带凭据的公开 HTTPS 域名；DNS 与跳转由宿主网络策略再次检查');
+  if (url.protocol !== 'https:' || url.username || url.password || input.length > 2048 || !url.hostname.includes('.') || isIP(url.hostname.replace(/^\[|\]$/g, '')) || /(?:^|\.)(?:localhost|local|internal|lan|home|test|invalid)$/.test(url.hostname)) fail('NEWS_URL', '只接受不带凭据的公开 HTTPS 域名');
   url.hash = '';
   for (const key of [...url.searchParams.keys()]) if (/^(utm_|fbclid$|gclid$)/i.test(key)) url.searchParams.delete(key);
   url.searchParams.sort();

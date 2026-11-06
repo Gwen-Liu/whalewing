@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { sessionSchedule } from '../src/schedule-compat.js';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -11,6 +12,7 @@ import * as StorageDomain from '@deepseek-ai/dsh-storage-domain';
 import Schedule from '@deepseek-ai/dsh-schedule';
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt';
 import Tools, { validateJsonSchemaValue } from '@deepseek-ai/dsh-tools';
+import * as NativeExecutor from '@deepseek-ai/dsh-tool-executor-native';
 import { TypertRegistry } from '@deepseek-ai/dsh-typert-registry';
 import { z } from 'zod';
 import { newsContract, newsItemLimit, newsSubmitLimit } from '../features/cards/contract.js';
@@ -53,11 +55,12 @@ test('实际原生工具注册与模型schema只声明最多8条，不凑数且�
   const ctx = new Context();
   t.after(() => ctx.fiber.dispose());
   await ctx.plugin(SystemPrompt, { includeHarnessIdentity: false, includeRuntimeContext: false });
-  await ctx.plugin(Tools);
+  await ctx.plugin(Tools); await ctx.plugin(NativeExecutor);
   const fiber = await ctx.plugin({ inject: ['tools'], apply: NewsTool.apply });
   // 核对实际注册及发给模型的schema，不用自行拼出的工具描述代替消费者。
   const tool = ctx.tools.get('whalewing_news');
-  const schema = ctx.tools.wireSchemas().schemas.find(value => value.name === 'whalewing_news');
+  // DSH 0.2.2 起发给模型的 schema 由执行器在系统提示词组装时给出。
+  const schema = (await ctx.systemPrompt.assemble()).tools.find(value => value.name === 'whalewing_news');
   assert.equal(newsSubmitLimit, 8);
   assert.equal(schema.description, tool.description);
   assert.match(schema.description, new RegExp(`最多${newsSubmitLimit}个去重事件`));
@@ -246,9 +249,11 @@ test('资讯owner生成的08:00:00被目标版原生Schedule真实接纳并取�
   // 夹具没有已挂载 Agent；新版 Schedule 会查询 get 来排除子代理。
   h.ctx.provide('agents', { roots: () => [], get: () => undefined, withoutInitiator: fn => fn() });
   h.ctx.provide('sessions', { flush: async () => true });
-  h.ctx.provide('tools', {}); h.ctx.provide('sessionPersistence', {});
-  h.ctx.provide('sessionController', { resolveAgent: async sessionId => ({ agent: { session: { id: sessionId }, followup() { throw new Error('本测试不触发模型'); } } }) });
-  const native = new Schedule(h.ctx, {});
+  // DSH 0.2.2 起建任务前用 stat 核对投递会话存在、不是子代理；这里的会话都当作已保存的普通会话。
+  h.ctx.provide('tools', {}); h.ctx.provide('sessionPersistence', { async stat() { return { header: {} }; } });
+  h.ctx.provide('sessionController', { resolveAgent: async sessionId => ({ agent: { session: { id: sessionId }, followup() { throw new Error('本测试不触发模型'); }, whenIdle: async () => {} } }) });
+  // 经鲸翼的转换层提交，和实际走的路径一样。
+  const native = sessionSchedule(new Schedule(h.ctx, {}));
   const spec = await h.news.scheduleSpec('news-session', signal());
   const accepted = await native.create('news-session', spec, signal());
   assert.equal(accepted.kind, 'daily'); assert.equal(accepted.time, '08:00:00.000'); assert.equal(accepted.timeZone, 'Asia/Shanghai');

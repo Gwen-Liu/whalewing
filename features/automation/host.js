@@ -10,6 +10,7 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, realpath } from 'node:fs/promises';
 import { Automation, initializeBuiltIns } from './automation.js';
+import { sessionSchedule } from '../../src/schedule-compat.js';
 import { automationContract } from './contract.js';
 import { runsProjection } from './runs.js';
 const taskWorkspaceTitle = '鲸翼定时任务';
@@ -33,7 +34,7 @@ export default class AutomationHost extends Service {
     this.automation = new Automation({
       listWorkspaces: signal => this.host.listWorkspaces(signal),
       taskDirectory: signal => this.taskDirectory(signal),
-      schedule: () => ctx.get('schedule'),
+      schedule: () => sessionSchedule(ctx.get('schedule')),
       projections: (sessionId, signal) => {
         const controller = ctx.get('sessionController');
         if (!controller) fail('AUTOMATION_UNAVAILABLE', '宿主会话服务尚未加载');

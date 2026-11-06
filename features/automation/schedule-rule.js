@@ -168,6 +168,8 @@ export function describeSchedule(rule, { now = Date.now() } = {}) {
     case 'every': return intervalText(value.everySeconds);
     case 'at': return onceText(instant(value.at), current);
     case 'after': return Number.isSafeInteger(value.seconds) && value.seconds > 0 ? `${amount(value.seconds).join(' ')}后运行一次` : '只运行一次';
+    // DSH 0.2.2 起「自动化任务」可以设自定义规则（RRULE）；鲸翼只显示，要改规则请回 DSH 改，或在这里换成别的规则。
+    case 'rrule': return '自定义规则（在 DSH「自动化任务」里设置）';
     default: return '时间规则未知';
   }
 }

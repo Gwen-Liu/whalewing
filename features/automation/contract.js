@@ -35,8 +35,9 @@ export function automationContract(z) {
   const spec = z.union(Object.entries(selectors).map(([key, value]) => z.strictObject({ title: text.trim().min(1).max(120), prompt: text.trim().min(1).max(32000), [key]: value })));
   const timing = z.union(Object.entries(selectors).map(([key, value]) => z.strictObject({ [key]: value })));
   const change = z.union(Object.entries(selectors).filter(([key]) => key !== 'after_seconds').map(([key, value]) => z.strictObject({ kind: z.literal(key === 'every_seconds' ? 'every' : key), [key]: value })));
-  const record = z.strictObject({ id: text, kind: z.enum(['after', 'at', 'every', 'daily', 'weekly', 'cron']), title: text, prompt: text, scheduledAt: text,
-    afterSeconds: z.number().optional(), everySeconds: z.number().optional(), time: text.optional(), timeZone: text.optional(), weekdays: z.array(z.number()).optional(), expression: text.optional() });
+  // rrule 是 DSH 0.2.2 起「自动化任务」和模型工具用的自定义规则；鲸翼只显示、不新建这种规则。
+  const record = z.strictObject({ id: text, kind: z.enum(['after', 'at', 'every', 'daily', 'weekly', 'cron', 'rrule']), title: text, prompt: text, scheduledAt: text,
+    afterSeconds: z.number().optional(), everySeconds: z.number().optional(), time: text.optional(), timeZone: text.optional(), weekdays: z.array(z.number()).optional(), expression: text.optional(), rrule: text.optional() });
   const input = z.union([
     z.strictObject({ action: z.literal('create'), sessionId: id, purpose: z.literal('custom'), spec, workspaceScope: workspaceScope.optional() }),
     z.strictObject({ action: z.literal('create'), sessionId: id, purpose: z.literal('knowledge'), spec: timing, workspaceScope: workspaceScope.optional() }),

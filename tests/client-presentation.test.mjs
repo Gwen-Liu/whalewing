@@ -40,9 +40,10 @@ const sorted = value => Object.fromEntries(Object.entries(value).sort(([a], [b])
 // 没有扩展改名时显示的文字和原来一样；交接失败“原因见助手的回复”、扩展笔记“不能引用给助手”两条罕见报错改成通称（这两条不在快照里）；
 // 新增 1 个词条：编辑小鲸时名字由扩展定着的说明。样式不变。
 test('全栏改版后的双语词条与样式快照', () => {
-  assert.equal(Object.keys(zh).length, 692); assert.equal(Object.keys(en).length, 692);
-  assert.equal(hash(sorted(zh)), '9d069dfe89851da45e86a7117d439b6ff1ff15dd6d1478a740590f386ca1bf2d');
-  assert.equal(hash(sorted(en)), '731a8bb331a89729e7ddf632e61d6a5088b3c819f90e362014c8c91331da43f0');
+  // 2026-11-06 适配 DSH 0.2.2：加“自定义规则”（rule_rrule），显示 DSH「自动化任务」设的 RRULE 任务。
+  assert.equal(Object.keys(zh).length, 693); assert.equal(Object.keys(en).length, 693);
+  assert.equal(hash(sorted(zh)), 'e798193f88b68eae0e68e8be54735fbb493b21da2fc4744f934cf541b2814744');
+  assert.equal(hash(sorted(en)), '960d6b52efb5a3b474262bc071794f0c458b6bebe02df177ed47fa2baa6f0e94');
   // 没有扩展改名时，界面上的名字和原来逐字相同。
   const fill = text => text.replaceAll('{assistant}', '小鲸助手').replaceAll('{assistantShort}', '小鲸');
   assert.deepEqual([zh.question, zh.assistantOpen, zh.assistantStart, zh.refine, zh.skillEdit].map(fill), ['小鲸助手', '打开小鲸助手', '开始与小鲸协作', '与小鲸讨论提炼', '与小鲸编辑技能']);

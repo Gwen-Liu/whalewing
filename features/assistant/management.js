@@ -10,7 +10,8 @@ const packageRoot = fileURLToPath(new URL('../../', import.meta.url));
 export function applyManagement(ctx) {
   ctx.inject(['whalewingExperts', 'agents'], scope => {
     const lastTurn = new WeakMap();
-    const selected = agent => scope.whalewingExperts.selectedFor(agent) === 'manager';
+    // cordis 4.1 起作用域卸载后不能再取服务；在途的请求等回来时专家功能可能已经卸载，这时一律当作没选小鲸。
+    const selected = agent => scope.fiber.state === 2 && scope.whalewingExperts.selectedFor(agent) === 'manager';
     scope.on('agent/pre-step', async ({ agent, turn, signal }, next) => {
       const decision = await next();
       if (decision.kind === 'reject' || signal.aborted || !decision.messages.length || !selected(agent) || lastTurn.get(agent) === turn) return decision;

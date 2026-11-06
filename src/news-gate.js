@@ -1,4 +1,5 @@
 import { abort, fail } from './vault.js';
+import { isScheduledDelivery } from './schedule-notice.js';
 
 export const newsSkippedNotice = '「知识卡片」已关闭，本次资讯未生成';
 
@@ -11,7 +12,7 @@ export function installNewsGate(ctx, registry) {
       const decision = await next();
       const { agent, messages, signal } = payload;
       if (decision.kind === 'reject' || active() || ctx.sessionProjections.stateOf(agent.session, 'whalewingAutomation')?.purpose !== 'news') return decision;
-      const blocked = new Set(messages.filter(message => message.source?.kind === 'schedule').map(message => message.id));
+      const blocked = new Set(messages.filter(isScheduledDelivery).map(message => message.id));
       if (!blocked.size) return decision;
       try {
         abort(signal); abort(closing.signal);
@@ -20,7 +21,7 @@ export function installNewsGate(ctx, registry) {
         // 一次扫描原生日志，不为每条同批消息重扫历史，也不保存第二份持久状态。
         for (const event of events) {
           if (event.type === 'agent/inbox/spliced') {
-            for (const message of event.data.inserted) if (blocked.has(message.id) && message.source?.kind === 'schedule' && !origins.has(message.id)) origins.set(message.id, event.seq);
+            for (const message of event.data.inserted) if (blocked.has(message.id) && isScheduledDelivery(message) && !origins.has(message.id)) origins.set(message.id, event.seq);
           } else if (event.type === 'command/run' && event.data.name === 'whalewing') commands.add(event.data.commandId);
           else if (event.type === 'command/done' && commands.delete(event.data.commandId) && event.data.kind === 'success' && event.data.text === newsSkippedNotice) recorded.add(event.data.sourceEventSeq);
         }

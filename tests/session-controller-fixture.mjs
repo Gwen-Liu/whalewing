@@ -13,12 +13,14 @@ import Projections from '@deepseek-ai/dsh-session-projection';
 import Commands from '@deepseek-ai/dsh-commands';
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt';
 import Tools from '@deepseek-ai/dsh-tools';
+import * as NativeExecutor from '@deepseek-ai/dsh-tool-executor-native';
 import Agents from '@deepseek-ai/dsh-agent';
 import Loop from '@deepseek-ai/dsh-agent-loop';
 import * as Jsonl from '@deepseek-ai/dsh-session-persistence-jsonl';
 import Query from '@deepseek-ai/dsh-session-query';
 import Workspace from '@deepseek-ai/dsh-workspace';
 import Controller from '@deepseek-ai/dsh-api-session-controller';
+import Gateway from '@deepseek-ai/dsh-api-gateway';
 import Schedule from '@deepseek-ai/dsh-schedule';
 import { TypertRegistry } from '@deepseek-ai/dsh-typert-registry';
 import { mountFeatures } from './feature-fixture.mjs';
@@ -40,7 +42,8 @@ export async function controllerFixture(t) {
   await ctx.plugin(StorageDomain, { backend: 'json' });
   for (const plugin of [Llm, Sessions, Projections, Commands]) await ctx.plugin(plugin);
   await ctx.plugin(SystemPrompt, { includeHarnessIdentity: false, includeRuntimeContext: false });
-  for (const plugin of [Tools, Agents]) await ctx.plugin(plugin);
+  // DSH 0.2.2 起工具注册表和执行器分开，原生函数调用要单独挂执行器。
+  for (const plugin of [Tools, NativeExecutor, Agents]) await ctx.plugin(plugin);
   await ctx.plugin(Jsonl.default ?? Jsonl, { root: path.join(root, 'sessions'), compression: 'none' });
   await ctx.plugin(Query); await ctx.plugin(Loop, { agents: [] }); await ctx.plugin(Workspace);
   ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'fixture', model: 'fixture' }), saveSelection() {} });
@@ -52,6 +55,8 @@ export async function controllerFixture(t) {
   await ctx.plugin(Presets, { default: 'standard' });
   const releasePreset = await ctx.agentPresets.register({ id: 'standard', plugins: [] });
   restores.push(releasePreset);
+  // DSH 0.2.2 起会话控制器要读 Gateway 暂存的转发事件。
+  await ctx.plugin(Gateway);
   await ctx.plugin(Controller, { nativeOpen: false });
   const mounted = await mountFeatures(ctx, root, {}, false);
   await ctx.plugin(Schedule, {});

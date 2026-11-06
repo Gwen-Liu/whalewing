@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { sessionSchedule } from '../src/schedule-compat.js';
 import assert from 'node:assert/strict';
 import Cards from '../features/cards/host.js';
 import { controllerFixture } from './session-controller-fixture.mjs';
@@ -124,7 +125,7 @@ test('回执丢失后精确空白原ID恢复，真实认领与Schedule读回后�
   assert.equal((await h.projection(id)).values.sessionListMetadata.blank, true);
   await b.clients.automation.createAutomation(specification, true);
   assert.equal(creates, 1); assert.equal(b.clients.automation.pendingAutomation(), null);
-  const tasks = await h.ctx.schedule.catalog();
+  const tasks = await sessionSchedule(h.ctx.schedule).catalog();
   assert.equal(tasks.length, 1); assert.equal(tasks[0].sessionId, id);
   assert.equal((await h.projection(id)).values.whalewingAutomation, 'custom');
 });
@@ -245,7 +246,7 @@ for (const stage of ['claim', 'schedule']) test(`真实${stage}成功后确认�
   assert.equal((await h.projection(id)).values.whalewingAutomation, 'custom');
   await b.clients.automation.createAutomation(specification, true);
   assert.equal(creates, 1); assert.equal(b.clients.automation.pendingAutomation(), null);
-  const tasks = await h.ctx.schedule.catalog(); assert.equal(tasks.length, 1); assert.equal(tasks[0].sessionId, id);
+  const tasks = await sessionSchedule(h.ctx.schedule).catalog(); assert.equal(tasks.length, 1); assert.equal(tasks[0].sessionId, id);
 });
 
 
@@ -328,7 +329,7 @@ test('完整 DSH 里默认打开每日记忆和每周思考：会话在“鲸翼
   h.ctx.provide('profileContext', { dir: profile });
   await h.automationHost.openBuiltIns(h.signal());
   await h.automationHost.openBuiltIns(h.signal());
-  const tasks = (await h.ctx.schedule.catalog()).sort((a, b) => a.title.localeCompare(b.title, 'zh'));
+  const tasks = (await sessionSchedule(h.ctx.schedule).catalog()).sort((a, b) => a.title.localeCompare(b.title, 'zh'));
   assert.deepEqual(tasks.map(task => [task.title, task.kind, task.time, task.weekdays]).sort(), [['每周思考', 'weekly', '07:00:00.000', [1]], ['每日记忆', 'daily', '01:00:00.000', undefined]].sort());
   const workspace = await h.automationHost.taskWorkspace(h.signal());
   for (const task of tasks) {
@@ -337,7 +338,7 @@ test('完整 DSH 里默认打开每日记忆和每周思考：会话在“鲸翼
     assert.ok(workspace.sessionIds.includes(task.sessionId), `${task.title} 的会话在鲸翼定时任务工作区`);
   }
   const thinking = tasks.find(task => task.title === '每周思考');
-  await h.ctx.schedule.delete({ sessionId: thinking.sessionId, id: thinking.id });
+  await sessionSchedule(h.ctx.schedule).delete({ sessionId: thinking.sessionId, id: thinking.id });
   assert.deepEqual((await h.automationHost.openBuiltIns(h.signal())).created, []);
   assert.deepEqual((await h.ctx.schedule.catalog()).map(task => task.title), ['每日记忆'], '员工删掉的不再建回来');
 });

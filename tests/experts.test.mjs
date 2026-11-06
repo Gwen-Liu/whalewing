@@ -7,12 +7,14 @@ import SessionStore from '@deepseek-ai/dsh-session';
 import SessionProjections from '@deepseek-ai/dsh-session-projection';
 import CommandRuntime from '@deepseek-ai/dsh-commands';
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt';
-import ToolRuntime, { defineContentToolFixture } from '@deepseek-ai/dsh-tools';
+import ToolRuntime, { defineTool } from '@deepseek-ai/dsh-tools';
+import * as NativeExecutor from '@deepseek-ai/dsh-tool-executor-native';
 import AgentRegistry from '@deepseek-ai/dsh-agent';
 import AgentLoop from '@deepseek-ai/dsh-agent-loop';
 import * as JsonlModule from '@deepseek-ai/dsh-session-persistence-jsonl';
 import SessionQuery from '@deepseek-ai/dsh-session-query';
 import Controller from '@deepseek-ai/dsh-api-session-controller';
+import Gateway from '@deepseek-ai/dsh-api-gateway';
 import Workspace from '@deepseek-ai/dsh-workspace';
 import Loader from '@deepseek-ai/cordis-plugin-loader';
 import Presets from '@deepseek-ai/dsh-agent-preset-registry';
@@ -36,6 +38,9 @@ import Cards from '../features/cards/host.js';
 import ModelWorld from '../features/model-world/host.js';
 import * as Toolbox from '../features/toolbox/host.js';
 import { automationProjection } from '../src/identity.js';
+
+// DSH 0.2.2 起 dsh-tools 不再导出测试用的 defineContentToolFixture；照它原来的定义在本地写：内容块就是工具的输出值。
+const defineContentToolFixture = options => defineTool({ ...options, output: { schema: { type: 'array', items: { type: 'json' } }, render: (_args, value) => value } });
 
 const SessionPersistenceJsonl = JsonlModule.default ?? JsonlModule;
 
@@ -71,7 +76,8 @@ async function harness(t, persistence = true, expertConfig = {}) {
   ctx.agentDefaultModel.saveSelection = () => { throw new Error('禁止写全局默认'); };
   for (const plugin of [LlmRuntime, SessionStore, SessionProjections, CommandRuntime]) await ctx.plugin(plugin);
   await ctx.plugin(SystemPrompt, { includeHarnessIdentity: false, includeRuntimeContext: false });
-  for (const plugin of [ToolRuntime, AgentRegistry]) await ctx.plugin(plugin);
+  // DSH 0.2.2 起工具注册表和执行器分开，原生函数调用要单独挂执行器。
+  for (const plugin of [ToolRuntime, NativeExecutor, AgentRegistry]) await ctx.plugin(plugin);
   await ctx.plugin(AgentLoop, { agents: [] });
   if (persistence) await ctx.plugin(SessionPersistenceJsonl, { root: path.join(directory, 'sessions'), compression: 'none' });
   await ctx.plugin(SessionQuery);
@@ -84,6 +90,8 @@ async function harness(t, persistence = true, expertConfig = {}) {
   await ctx.plugin(Loader, { baseUrl: import.meta.url });
   await ctx.plugin(Presets, { default: 'standard' });
   await ctx.agentPresets.register({ id: 'standard', plugins: [] });
+  // DSH 0.2.2 起会话控制器要读 Gateway 暂存的转发事件。
+  await ctx.plugin(Gateway);
   await ctx.plugin(Controller, { nativeOpen: false });
   const adapter = new Adapter();
   ctx.llm.registerAdapter(['fixture'], adapter);
@@ -650,7 +658,8 @@ test('MCP 资源守卫按 server 判断、断线阻断并在卸载时清理', as
   for (const name of ['mcp__bound_read', 'read_mcp_resource']) h.ctx.tools.register(defineContentToolFixture({ name, description: name, parameters: { server: { type: 'string', required: true } }, async execute() { calls++; return [{ type: 'text', text: 'ok' }]; } }));
   const created = (await h.ctx.whalewingExperts.manage({ action: 'save', expectedRevision: 0, expert: { ...draft(), mcpServers: ['bound'] } })).expert;
   await h.run({ expertId: created.id });
-  const execute = server => h.ctx.tools.execute({ name: 'read_mcp_resource', arguments: { server }, agent: h.agent, callId: `resource-${server}`, signal: new AbortController().signal });
+  // DSH 0.2.2 起 tools.execute 按批执行；单次调用包成只有一条的批，取回这一条的结果。
+  const execute = server => h.ctx.tools.execute({ calls: [{ id: `resource-${server}`, name: 'read_mcp_resource', arguments: JSON.stringify({ server }) }], agent: h.agent, signal: new AbortController().signal }).then(batch => batch.results[0].result);
   await execute('other'); assert.equal(calls, 0);
   await execute('bound'); assert.equal(calls, 1);
   servers[0].connected = false;
@@ -749,7 +758,8 @@ test('两种注册顺序均保留原生模型快照，专家不写选择事件�
     const config = h.agent.session.requestHeader().config;
     assert.equal(config.model, 'first');
     assert.equal(config.reasoningEffort, 'medium');
-    const assembly = await h.ctx.systemPrompt.assemble({ agent: h.agent, scope: h.agent });
+    // DSH 0.2.2 起循环每一步把固定下来的模型选择传给组装；这里照样传，核对的是同一份快照。
+    const assembly = await h.ctx.systemPrompt.assemble({ agent: h.agent, scope: h.agent, modelSelection: h.agent.model.current() });
     assert.equal(assembly.variables.model, 'first');
     const selections = () => h.agent.session.snapshotEvents().filter(event => event.type === 'model/selection');
     assert.equal(selections().length, 0);

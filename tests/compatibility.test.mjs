@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { Context } from '@deepseek-ai/cordis';
 import { TypertRegistry } from '@deepseek-ai/dsh-typert-registry';
 import { evaluatePluginCompatibility, getDshRuntimeVersion } from '@deepseek-ai/dsh-app-boot';
@@ -10,7 +12,7 @@ import { parseMarketIndex, marketInstallTarget } from '@deepseek-ai/dsh-plugin-m
 const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 const starter = JSON.parse(await readFile(new URL('../examples/feature-starter/package.json', import.meta.url), 'utf8'));
 const target = manifest.engines.dsh;
-const otherRuntimes = ['0.2.0-rc.2', '0.2.1-rc.3', '0.2.1-rc.4', '0.2.1-rc.6', '0.2.1', '0.3.0'];
+const otherRuntimes = ['0.2.0-rc.2', '0.2.1-rc.3', '0.2.1-rc.5', '0.2.1', '0.2.2-rc.0', '0.2.2-rc.2', '0.2.2', '0.3.0'];
 
 test('当前包、DSH peers、独立模板与实际宿主共用准确支持目标', () => {
   assert.equal(target, getDshRuntimeVersion());
@@ -91,7 +93,10 @@ test('真实市场search和entry只推荐当前宿主兼容固定版本，不自
     listVersionExemptions: () => ({ exemptions: {} }),
     installBundle: () => assert.fail('市场读取不得触发安装'),
   });
-  await ctx.plugin(PluginMarket, { indexes: [indexUrl] });
+  // DSH 0.2.2 起市场服务在 profile 之外运行时要给绝对路径的详情缓存目录；这条测试只读索引，不会克隆。
+  const detailCacheDir = await mkdtemp(path.join(os.tmpdir(), 'whalewing-market-'));
+  t.after(() => rm(detailCacheDir, { recursive: true, force: true }));
+  await ctx.plugin(PluginMarket, { indexes: [indexUrl], detailCacheDir });
   const result = await ctx.pluginMarket.search(indexUrl, { offset: 0, limit: 10, sort: { kind: 'index' } });
   assert.equal(result.total, 1);
   const entry = await ctx.pluginMarket.entry(indexUrl, fixtureName);

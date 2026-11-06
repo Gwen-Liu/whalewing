@@ -19,6 +19,7 @@ import { assistantNames } from './src/assistant-name.js';
 import { installNewsGate } from './src/news-gate.js';
 import { workbenchContract } from './src/workbench-contract.js';
 import { checkUpdate } from './src/update-check.js';
+import { sessionSchedule } from './src/schedule-compat.js';
 import { evaluatePluginCompatibility, getDshRuntimeVersion } from '@deepseek-ai/dsh-app-boot';
 import { apply as installSkills } from './src/skill-provider.js';
 import { isInside } from './src/skill-roots.js';
@@ -88,7 +89,7 @@ export default class Whalewing extends Service {
       listWorkspaces: signal => this.listWorkspaces(signal),
       readSourceScope: (accept, signal) => this.readSourceScope(accept, signal),
       automationIdentity: (id, signal) => this.automationIdentity(id, signal),
-      schedule: () => ctx.get('schedule'),
+      schedule: () => sessionSchedule(ctx.get('schedule')),
       sources: () => this.sources,
       changed: () => ctx.emit('whalewing/changed'),
       discover: async (record, caller, signal) => {
@@ -288,7 +289,7 @@ export default class Whalewing extends Service {
 
   readSourceScope(accept, signal) {
     abort(signal);
-    const schedule = this.ctx.get('schedule');
+    const schedule = sessionSchedule(this.ctx.get('schedule'));
     if (!schedule) fail('SOURCE_UNAVAILABLE', 'DSH 定时服务尚未就绪；新版请检查启动日志并重启 DSH，旧版请确认官方定时任务插件已启用，然后重试');
     if (typeof schedule.readCatalog !== 'function') {
       // 未适配的 DSH 没有同步读取口：先读计划目录再读工作区，两步之间有很短的窗口，不影响知识整理的结果。

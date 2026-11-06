@@ -2,6 +2,9 @@
  * 检查更新与原地更新。检查问鲸翼宿主（读 npm 版本、按 DSH 的兼容判断挑版本）；更新交给 DSH 插件管理器，
  * 装的是新版本的安装包地址：DSH 不按包名拦它，装好后原地换成新版，不卸载，重启 DSH 生效；装失败 DSH 自己还原配置。
  * 只在员工点“检查更新”时联网；从哪里点的（鲸翼页头或 DSH 插件详情页），确认弹窗就开在哪里。
+ * DSH 0.2.2 起按包名装的插件，详情页还有 DSH 自己的“版本”区块。它只把正式版当作可更新，鲸翼的版本号（DSH 版本加序号）
+ * 都算预发布，所以那块对鲸翼一直显示“没有可直接安装的新版本”；它的更新还会先卸掉正在运行的鲸翼再装。2026-11-06 用户定：
+ * 保留鲸翼自己的更新（不卸载、不删员工已有的东西），只在详情页鲸翼这块说明一句。
  */
 export const UPDATE_LOCALE = {
   zh: {
@@ -13,6 +16,7 @@ export const UPDATE_LOCALE = {
     notes: '查看更新内容', cancel: '取消', update: '更新', installing: '正在下载并安装新版本…', stop: '停止',
     stopped: '已停止更新，鲸翼仍是 {current}', done: '已更新到 {version}，重启 DSH 后生效', installFailed: '更新没有完成，鲸翼仍是 {current}：{reason}',
     unknown: '没有收到 DSH 的安装结果，请到「插件」页看鲸翼的版本',
+    nativeNote: '上面 DSH 的「版本」只把正式版当作可更新，鲸翼的版本都算预发布，它不会提示鲸翼有新版本。请在这里检查更新：不卸载鲸翼，专家、知识库和各项设置都保留。',
   },
   en: {
     check: 'Check for updates', checking: 'Checking for updates…', title: 'Updates', dialogTitle: 'Update WhaleWing',
@@ -23,6 +27,7 @@ export const UPDATE_LOCALE = {
     notes: 'What\'s new', cancel: 'Cancel', update: 'Update', installing: 'Downloading and installing…', stop: 'Stop',
     stopped: 'Update stopped; WhaleWing is still {current}', done: 'Updated to {version}; restart DSH to use it', installFailed: 'Update did not finish; WhaleWing is still {current}: {reason}',
     unknown: 'DSH did not report the install result. Check the WhaleWing version on the Plugins page',
+    nativeNote: 'The Versions section above only offers stable releases. Every WhaleWing version counts as a prerelease, so it will not offer WhaleWing updates. Check for updates here: WhaleWing is not uninstalled and your experts, knowledge and settings stay.',
   },
 };
 
@@ -42,7 +47,9 @@ export function installReason(value) {
 export function createUpdater(ctx, { notify, deadline = 30_000 }) {
   const t = (key, values = {}) => fill(ctx.locale.bind('whalewingUpdate')(key), values);
   let workbench, manager, disposed = false, request;
-  let state = { phase: 'idle', owner: null, result: null, dialog: false, error: null, updated: null };
+  // nativeVersions：DSH 详情页会不会显示它自己的“版本”区块（按包名装的才有），只读插件列表、不联网。
+  let state = { phase: 'idle', owner: null, result: null, dialog: false, error: null, updated: null, nativeVersions: false };
+  let detecting = false;
   const listeners = new Set();
   const publish = patch => { if (disposed) return; state = { ...state, ...patch }; for (const listener of listeners) listener(); };
   ctx.inject(['remote.whalewingWorkbench'], scope => { workbench = scope.remote.whalewingWorkbench; scope.effect(() => () => { workbench = undefined; }); });
@@ -110,6 +117,17 @@ export function createUpdater(ctx, { notify, deadline = 30_000 }) {
     }
   }
 
+  /** 打开详情页时读一次 DSH 插件列表里鲸翼的 updatable：为真时 DSH 会显示它自己的“版本”区块。读不到就当没有，不报错。 */
+  async function detectNative() {
+    if (detecting || !manager) return;
+    detecting = true;
+    try {
+      const reply = await bounded(manager.listBundles());
+      const entry = reply?.ok && Array.isArray(reply.value) ? reply.value.find(bundle => bundle?.name === 'dsh-whalewing') : undefined;
+      publish({ nativeVersions: entry?.updatable === true });
+    } catch { /* 只影响说明文字。 */ } finally { detecting = false; }
+  }
+
   async function stop() {
     if (state.phase !== 'installing' || !request || !manager) return;
     try { await manager.cancelInstall(request); } catch { /* 结果仍以 installBundle 的回复为准。 */ }
@@ -118,7 +136,7 @@ export function createUpdater(ctx, { notify, deadline = 30_000 }) {
   return {
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
     snapshot: () => state,
-    check, install, stop,
+    check, install, stop, detectNative,
     open(owner = state.owner) { if (state.result?.status === 'available' && state.phase !== 'installing') publish({ dialog: true, owner, error: null }); },
     close() { if (state.phase !== 'installing') publish({ dialog: false, error: null }); },
     t,

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { isExactProjection } from '../../src/session-projection.js';
 import { newsSkippedNotice } from '../../src/news-gate.js';
 import { runStatuses } from './contract.js';
+import { isScheduledDelivery } from '../../src/schedule-notice.js';
 
 export const runsKey = 'whalewingRuns';
 // 原生历史默认保留 30 天；按每天一次留足余量，同时限制每个会话页随带的大小。
@@ -12,7 +13,7 @@ const endings = { completed: 'completed', error: 'error', aborted: 'interrupted'
 
 const run = z.object({ messageId: z.string(), receivedAt: z.number(), seq: z.number(), state: z.enum(runStatuses) });
 const queue = z.object({ 'next-turn': z.array(z.string()), 'next-step': z.array(z.string()) });
-const isSchedule = message => message?.source?.kind === 'schedule' && typeof message.id === 'string';
+const isSchedule = isScheduledDelivery;
 
 function update(runs, pick, next) {
   let changed = false;

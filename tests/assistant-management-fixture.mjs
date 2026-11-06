@@ -7,11 +7,13 @@ import SessionProjections from '@deepseek-ai/dsh-session-projection';
 import CommandRuntime from '@deepseek-ai/dsh-commands';
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt';
 import ToolRuntime from '@deepseek-ai/dsh-tools';
+import * as NativeExecutor from '@deepseek-ai/dsh-tool-executor-native';
 import AgentRegistry from '@deepseek-ai/dsh-agent';
 import AgentLoop from '@deepseek-ai/dsh-agent-loop';
 import * as JsonlModule from '@deepseek-ai/dsh-session-persistence-jsonl';
 import SessionQuery from '@deepseek-ai/dsh-session-query';
 import Controller from '@deepseek-ai/dsh-api-session-controller';
+import Gateway from '@deepseek-ai/dsh-api-gateway';
 import Workspace from '@deepseek-ai/dsh-workspace';
 import Loader from '@deepseek-ai/cordis-plugin-loader';
 import Presets from '@deepseek-ai/dsh-agent-preset-registry';
@@ -58,7 +60,8 @@ export async function managementHarness(t) {
   ctx.agentDefaultModel.saveSelection = () => { throw new Error('禁止写全局默认'); };
   for (const plugin of [LlmRuntime, SessionStore, SessionProjections, CommandRuntime]) await ctx.plugin(plugin);
   await ctx.plugin(SystemPrompt, { includeHarnessIdentity: false, includeRuntimeContext: false });
-  for (const plugin of [ToolRuntime, AgentRegistry]) await ctx.plugin(plugin);
+  // DSH 0.2.2 起工具注册表和执行器分开，原生函数调用要单独挂执行器。
+  for (const plugin of [ToolRuntime, NativeExecutor, AgentRegistry]) await ctx.plugin(plugin);
   await ctx.plugin(AgentLoop, { agents: [] });
   await ctx.plugin(SessionPersistenceJsonl, { root: path.join(directory, 'sessions'), compression: 'none' });
   await ctx.plugin(SessionQuery);
@@ -70,6 +73,8 @@ export async function managementHarness(t) {
   await ctx.plugin(Presets, { default: 'standard' });
   // 这是无模式工具的局部装配夹具；不冒充官方 standard 预设的端到端验收。
   await ctx.agentPresets.register({ id: 'standard', plugins: [] });
+  // DSH 0.2.2 起会话控制器要读 Gateway 暂存的转发事件。
+  await ctx.plugin(Gateway);
   await ctx.plugin(Controller, { nativeOpen: false });
   const adapter = new Adapter();
   ctx.llm.registerAdapter(['fixture'], adapter);

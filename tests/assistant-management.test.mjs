@@ -25,7 +25,8 @@ async function setup(t, { mode = 'danger-full-access', manager = true } = {}) {
     assert.equal((await h.run({ expertId: id }, agent)).result.kind, 'success');
     await tick();
   };
-  const execute = (args = { action: 'list_plugins' }, agent = h.agent, signal = new AbortController().signal) => h.ctx.tools.execute({ name: 'plugin_manager', arguments: args, agent, callId: 'management-test', signal });
+  // DSH 0.2.2 起 tools.execute 按批执行；单次调用包成只有一条的批，取回这一条的结果。
+  const execute = (args = { action: 'list_plugins' }, agent = h.agent, signal = new AbortController().signal) => h.ctx.tools.execute({ calls: [{ id: 'management-test', name: 'plugin_manager', arguments: JSON.stringify(args) }], agent, signal }).then(batch => batch.results[0].result);
   const visible = (agent = h.agent) => h.ctx.tools.get('plugin_manager', agent);
   return { ...h, calls, select, execute, visible, dependencies, action: value => { action = value; }, assistant: h.mounted.service.registry.bases.get('assistant').fiber };
 }

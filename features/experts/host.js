@@ -370,12 +370,12 @@ export async function apply(ctx, config) {
         } catch (error) { return error.message; }
       });
       // 只记录实际组装结果；工具变更发生在组装之后时，pre-step 拒绝旧目录而不改写请求。
-      const observe = agent.ctx.on('system-prompt/assemble', async (_input, _context, next) => {
+      const observe = agent.ctx.on('system-prompt/assemble', async (_input, context, next) => {
         // PTC 在 wire 上只有 run_code，能力目录仍由同一工具注册表持有。
         policy.assembledCapabilities = ctx.tools.schemas(agent).map(tool => tool.name);
-        const assembly = await next();
-        policy.assembled = assembly.tools.map(tool => tool.name);
-        return assembly;
+        // DSH 0.2.2 起组装 waterfall 不再携带工具，工具在 waterfall 之后按这一步准入的工具集合补上。
+        policy.assembled = ctx.tools.schemas(agent, context?.toolSet).map(tool => tool.name);
+        return next();
       });
       const request = agent.ctx.on('agent/request', async (_input, next) => {
         const result = await next();

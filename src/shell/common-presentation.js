@@ -52,6 +52,7 @@ export const zh = {
   "rule_daily": "每天",
   "rule_weekly": "每周",
   "rule_cron": "Cron",
+  "rule_rrule": "自定义规则",
   "mutationDone": "操作已完成并刷新",
   "loading": "正在处理",
   "close": "关闭提示",

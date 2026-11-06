@@ -90,12 +90,12 @@ test('DSH 安装失败的原因说成一句话', () => {
 const subject = { kind: 'bundle', pkg: { name: 'dsh-whalewing' } };
 const available = { status: 'available', current: '0.2.1-rc.5.4', runtimeVersion: '0.2.1-rc.5', registry: 'https://registry.npmmirror.com/', version: '0.2.1-rc.5.5', requires: '0.2.1-rc.5', tarball: 'https://registry.npmmirror.com/dsh-whalewing/-/dsh-whalewing-0.2.1-rc.5.5.tgz', fallbacks: ['https://registry.npmjs.org/dsh-whalewing/-/dsh-whalewing-0.2.1-rc.5.5.tgz'], releaseUrl: 'https://github.com/gwen-liu/whalewing/releases/tag/v0.2.1-rc.5.5' };
 const section = f => f.render('plugins.detail.section', { subject, only: 'whalewing-update' });
-async function updateFixture({ result = available, installs = [] } = {}) {
+async function updateFixture({ result = available, installs = [], bundles = [] } = {}) {
   const calls = { check: 0, install: [], cancel: [] };
   const f = await fixture({
     workbenchRemote: { async checkUpdate(...args) { assert.equal(args.length, 0); calls.check++; return { ok: true, value: result }; } },
     pluginManager: {
-      async listBundles() { return { ok: true, value: [] }; },
+      async listBundles() { calls.list = (calls.list ?? 0) + 1; return { ok: true, value: bundles }; },
       async installBundle(spec, options) { calls.install.push([spec, options]); return installs.shift() ?? { ok: true, value: { application: 'restart-required', version: result.version } }; },
       async cancelInstall(requestId) { calls.cancel.push(requestId); return { ok: true, value: 'cancelled' }; },
     },
@@ -103,6 +103,30 @@ async function updateFixture({ result = available, installs = [] } = {}) {
   return { f, calls };
 }
 const toast = f => text(f.render('shell.overlay')).join(' ');
+const note = f => nodes(section(f)).find(node => node.props?.['data-whalewing-update-note']);
+
+// 需求§安装与更新（2026-11-06 用户定：DSH 0.2.2 的“版本”区块把鲸翼的版本都算作预发布、更新时先卸载，鲸翼保留自己的更新，只在详情页说明一句）
+test('按包名装的鲸翼：DSH 详情页有自己的“版本”区块，鲸翼这块说明它把鲸翼的版本算作预发布、在这里更新不卸载；装好后说明收起', async () => {
+  const { f, calls } = await updateFixture({ bundles: [{ name: 'other', updatable: true }, { name: 'dsh-whalewing', updatable: true }] });
+  section(f); f.flushEffects(); await tick();
+  assert.equal(calls.list, 1, '打开详情页读一次插件列表'); assert.equal(calls.check, 0, '只读插件列表，不联网检查');
+  assert.match(text(note(f)).join(''), /鲸翼的版本都算预发布，它不会提示鲸翼有新版本/); assert.match(text(note(f)).join(''), /不卸载鲸翼/);
+  await button(section(f), '检查更新').props.onClick(); await tick();
+  await button(section(f), '更新').props.onClick(); await tick();
+  assert.equal(calls.install[0][0], available.tarball, '仍由鲸翼装安装包地址，不走 DSH 先卸载再装的更新');
+  assert.equal(note(f), undefined, '装好后不再提示');
+  f.unmount();
+});
+
+test('安装包地址或本机目录装的鲸翼：DSH 没有“版本”区块，鲸翼这块不多说', async () => {
+  for (const bundles of [[{ name: 'dsh-whalewing', updatable: false }], []]) {
+    const { f } = await updateFixture({ bundles });
+    section(f); f.flushEffects(); await tick();
+    assert.equal(note(f), undefined);
+    f.unmount();
+  }
+});
+
 
 test('详情页检查更新：已是最新只说一句，不弹窗；不在别的插件页出现', async () => {
   const { f, calls } = await updateFixture({ result: { status: 'latest', current: '0.2.1-rc.5.4', runtimeVersion: '0.2.1-rc.5' } });

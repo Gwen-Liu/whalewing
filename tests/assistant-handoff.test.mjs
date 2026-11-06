@@ -18,7 +18,8 @@ async function setup(t, { mode = 'danger-full-access', approval } = {}) {
     await tick();
   };
   const visible = (agent = h.agent) => h.ctx.tools.get(handoffToolName, agent);
-  const execute = (args = brief, agent = h.agent) => h.ctx.tools.execute({ name: handoffToolName, arguments: args, agent, callId: 'handoff-test', signal: new AbortController().signal });
+  // DSH 0.2.2 起 tools.execute 按批执行；单次调用包成只有一条的批，取回这一条的结果。
+  const execute = (args = brief, agent = h.agent) => h.ctx.tools.execute({ calls: [{ id: 'handoff-test', name: handoffToolName, arguments: JSON.stringify(args) }], agent, signal: new AbortController().signal }).then(batch => batch.results[0].result);
   const ids = () => h.ctx.agents.list().map(agent => agent.id);
   return { ...h, select, visible, execute, ids, assistant: h.mounted.service.registry.bases.get('assistant').fiber };
 }

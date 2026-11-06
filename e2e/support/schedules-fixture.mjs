@@ -105,11 +105,14 @@ export function seedDeliveredTask({ home }, { title = '鲸翼测试-送达未知
   return { title, prompt, sessionId, taskId, scheduledAt, runHour, deliveries };
 }
 
-/** 读临时 DSH 定时服务里的任务（DSH 自己的存储，界面之外的事实）。 */
+/**
+ * 读临时 DSH 定时服务里的任务（DSH 自己的存储，界面之外的事实）。
+ * DSH 0.2.2 写的新格式把投递会话放在 target.sessionId；旧格式（上面预置的）在顶层 sessionId。两种都认，统一给出 sessionId。
+ */
 export function storedTasks(home) {
   const file = path.join(home, 'storages', 'schedule.json');
   if (!fs.existsSync(file)) return [];
-  return Object.values(JSON.parse(fs.readFileSync(file, 'utf8')).tables?.tasks ?? {});
+  return Object.values(JSON.parse(fs.readFileSync(file, 'utf8')).tables?.tasks ?? {}).map(task => ({ ...task, sessionId: task.sessionId ?? (task.target?.kind === 'session' ? task.target.sessionId : undefined) }));
 }
 
 /** 读侧栏工作区登记。 */

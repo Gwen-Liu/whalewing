@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { sessionSchedule } from '../src/schedule-compat.js';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
@@ -10,6 +11,7 @@ import Projections from '@deepseek-ai/dsh-session-projection';
 import Commands from '@deepseek-ai/dsh-commands';
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt';
 import Tools from '@deepseek-ai/dsh-tools';
+import * as NativeExecutor from '@deepseek-ai/dsh-tool-executor-native';
 import Agents from '@deepseek-ai/dsh-agent';
 import Loop from '@deepseek-ai/dsh-agent-loop';
 import * as JsonlModule from '@deepseek-ai/dsh-session-persistence-jsonl';
@@ -65,7 +67,8 @@ async function harness(t) {
   await ctx.plugin(Storage); await ctx.plugin(StorageJson, { root: path.join(directory, 'storage') }); await ctx.plugin(StorageDomain, { backend: 'json' });
   for (const plugin of [LlmRuntime, Sessions, Projections, Commands]) await ctx.plugin(plugin);
   await ctx.plugin(SystemPrompt, { includeHarnessIdentity: false, includeRuntimeContext: false });
-  for (const plugin of [Tools, Agents]) await ctx.plugin(plugin);
+  // DSH 0.2.2 起工具注册表和执行器分开，原生函数调用要单独挂执行器。
+  for (const plugin of [Tools, NativeExecutor, Agents]) await ctx.plugin(plugin);
   await ctx.plugin(Persistence, { root: path.join(directory, 'sessions'), compression: 'none' });
   await ctx.plugin(SessionQuery); await ctx.plugin(Loop, { agents: [] });
   ctx.llm.registerAdapter(['fixture'], adapter);
@@ -86,7 +89,7 @@ async function harness(t) {
   };
   const delivered = async id => (await ctx.schedule.catalog()).find(task => task.id === id)?.lastDelivery;
   const due = async (agent, prompt) => {
-    const task = await ctx.schedule.create(agent.id, { prompt, title: '隔离到点任务', after_seconds: 1 });
+    const task = await sessionSchedule(ctx.schedule).create(agent.id, { prompt, title: '隔离到点任务', after_seconds: 1 });
     await waitFor(() => delivered(task.id), '原生投递回执'); await agent.whenIdle();
     return task;
   };
@@ -98,7 +101,7 @@ async function harness(t) {
 test('真实到点、活动登记、JSONL冷读、混合输入、周期推进与核心退出', async t => {
   const h = await harness(t), { ctx, adapter } = h;
   const owned = await h.create('news'), news = owned.agent;
-  const recurring = await ctx.schedule.create(news.id, { title: '保留的周期资讯', prompt: '周期资讯输入', every_seconds: 60 });
+  const recurring = await sessionSchedule(ctx.schedule).create(news.id, { title: '保留的周期资讯', prompt: '周期资讯输入', every_seconds: 60 });
   await t.test('关闭后真实投递完成但模型为零，说明落盘', async () => {
     await h.due(news, '关闭状态不应发给模型');
     assert.equal(adapter.requests.length, 0);
@@ -159,7 +162,7 @@ test('真实到点、活动登记、JSONL冷读、混合输入、周期推进与
     assert.equal(row.status, 'active'); assert.equal(row.prompt, recurring.prompt);
     assert.ok(Date.parse(row.scheduledAt) > Date.parse(recurring.scheduledAt));
     assert.equal(adapter.requests.length, 4);
-    await ctx.schedule.delete({ id: recurring.id, sessionId: news.id });
+    await sessionSchedule(ctx.schedule).delete({ id: recurring.id, sessionId: news.id });
   });
   await t.test('核心卸载后钩子退出，原生投递仍工作', async () => {
     const before = notices(news.session.snapshotEvents()).length;
