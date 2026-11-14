@@ -51,6 +51,6 @@ PDF 加水印用随包的 Noto Sans SC 常用字子集（常用符号、GB2312 �
 
 ## 依赖与许可
 
-依赖装在 `.artifacts/whalewing-workbench/dependencies/utilities`，构建时内联进 Worker。`content/utilities/noto-font.json` 是原字体 `NotoSansSC-Regular.otf` 的常用字子集，由 `node scripts/noto-subset.mjs` 生成（需要 Python 与 fontTools 4.65.0，可用 `WHALEWING_FONTTOOLS_PYTHON` 指定解释器；加 `--check` 只核对不写入），同样输入逐字节一致。改字表后同步 `audited-source.json` 的指纹和 `tests/client-chunks.test.mjs` 的体积门槛。`scripts/utility-licenses.mjs` 按 `content/utilities/audited-source.json` 核对每个依赖的版本和文件指纹，许可原文汇总在 `content/utilities/THIRD_PARTY_NOTICES.txt`。新增依赖必须先登记，否则构建拒收。
+依赖装在 `.artifacts/whalewing-workbench/dependencies/utilities`，构建时内联进 Worker。`content/utilities/noto-font.json` 是原字体 `NotoSansSC-Regular.otf` 的常用字子集（原字体只在源码仓库，`content/utilities/.npmignore` 把它排除在安装包外），由 `node scripts/noto-subset.mjs` 生成（需要 Python 与 fontTools 4.65.0，可用 `WHALEWING_FONTTOOLS_PYTHON` 指定解释器；加 `--check` 只核对不写入），同样输入逐字节一致。改字表后同步 `audited-source.json` 的指纹和 `tests/client-chunks.test.mjs` 的体积门槛。`scripts/utility-licenses.mjs` 按 `content/utilities/audited-source.json` 核对每个依赖的版本和文件指纹，许可原文汇总在 `content/utilities/THIRD_PARTY_NOTICES.txt`。新增依赖必须先登记，否则构建拒收。
 
 都是 MIT、Apache-2.0 等宽松许可。音频只导出 WAV：MP3 编码库 `@breezystack/lamejs` 是 LGPL-3.0，2026-11-02 起不再随包。

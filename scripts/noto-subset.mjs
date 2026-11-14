@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 /**
  * 办公工坊中文字体子集：Word 转 PDF、PDF 加水印只用到 Noto Sans SC 的常用字。
  * 全字体 8.3 MB（Base64 后 11 MB）会整份内联进 Worker，裁成常用字后约 3.7 MB。
- * 原字体 NotoSansSC-Regular.otf 原样随包保留，本脚本可从它逐字节复现 noto-font.json。
+ * 原字体 NotoSansSC-Regular.otf 原样保留在源码仓库（content/utilities/.npmignore 把它排除在安装包外），本脚本可从它逐字节复现 noto-font.json。
  *
  * 用法：node scripts/noto-subset.mjs [--check]
  * 需要本机 Python 装有 fontTools 4.65.0（pip install fonttools==4.65.0）；

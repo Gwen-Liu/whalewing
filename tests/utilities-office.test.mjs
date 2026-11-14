@@ -41,6 +41,19 @@ test('文字型PDF提取文字，再转成可编辑DOCX', async () => {
   for (const expected of ['Delivery notes', 'KEEP_CONTENT', '001']) assert.ok(content.includes(expected), expected);
 });
 
+// 2026-11-15 用户定：安装包里去掉 8 MB 的完整原字体，源码仓库里留着复现子集；运行时只用子集。
+test('完整原字体不进安装包：content/utilities 整个目录随包，目录里的 .npmignore 排除原字体；子集和许可原文照常随包', async () => {
+  const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  // npm 只在子目录认 .npmignore（根目录的压不过 files），所以 files 里必须是整个目录，不能逐个文件列。
+  assert.ok(pkg.files.includes('content/utilities'));
+  assert.ok(!pkg.files.some(entry => entry.startsWith('content/utilities/')));
+  const ignored = (await readFile(new URL('../content/utilities/.npmignore', import.meta.url), 'utf8')).split(/\r?\n/).filter(line => line && !line.startsWith('#'));
+  assert.deepEqual(ignored, ['NotoSansSC-Regular.otf']);
+  const notice = await readFile(new URL('../content/utilities/THIRD_PARTY_NOTICES.txt', import.meta.url), 'utf8');
+  assert.match(notice, /完整原字体保留在源码仓库的 content\/utilities，不放进安装包/);
+  assert.doesNotMatch(await readFile(new URL('../src/utilities/pdf.js', import.meta.url), 'utf8'), /NotoSansSC-Regular/, '运行时不读原字体');
+});
+
 test('内置字体是固定字表与原字体的交集：常用简繁字和符号齐全，生僻字不在内', async () => {
   const bundled = fontCodePoints(Buffer.from(JSON.parse(await readFile(new URL('../content/utilities/noto-font.json', import.meta.url), 'utf8')).base64, 'base64'));
   const original = fontCodePoints(await readFile(new URL('../content/utilities/NotoSansSC-Regular.otf', import.meta.url)));
