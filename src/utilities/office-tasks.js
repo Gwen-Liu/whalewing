@@ -184,8 +184,9 @@ export async function officeTask(tool, files, options = {}, text = '') {
     return workbookOutput([{ name: '仅原表', rows: [header, ...left.slice(1).filter(row => !r.has(JSON.stringify(row)))] }, { name: '仅新表', rows: [header, ...right.slice(1).filter(row => !l.has(JSON.stringify(row)))] }, { name: '两表共有', rows: [header, ...left.slice(1).filter(row => r.has(JSON.stringify(row)))] }], '数据核对.xlsx', '按整行保存值核对，不把重复次数变化当作新增或删除');
   }
   if (tool === 'excel-headers') {
-    // 只读首行供界面选表和选列；真正关联时再按完整规则校验表头。
-    const tables = books.flatMap((book, f) => book.worksheets.map((sheet, s) => ({ id: `${f}/${s}`, label: `${inputs.length > 1 ? `${inputs[f].name} · ` : ''}${sheet.name}`.slice(0, 200), headers: Array.from({ length: Math.min(sheet.columnCount, 500) }, (_, c) => excelText(sheet.getCell(1, c + 1).value).slice(0, 200)) })));
+    // 只读首行供界面选表和选列；真正关联时再按完整规则校验表头。rows 是有内容的数据行数（不含表头那一行），
+    // 给小鲸的文件描述用（2026-11-14 定：只给行数，不给数据行）。
+    const tables = books.flatMap((book, f) => book.worksheets.map((sheet, s) => ({ id: `${f}/${s}`, label: `${inputs.length > 1 ? `${inputs[f].name} · ` : ''}${sheet.name}`.slice(0, 200), rows: Math.max(0, sheet.actualRowCount - 1), headers: Array.from({ length: Math.min(sheet.columnCount, 500) }, (_, c) => excelText(sheet.getCell(1, c + 1).value).slice(0, 200)) })));
     if (!tables.length || tables.length > 40) throw new Error('工作表数量须为 1–40');
     return { tables };
   }

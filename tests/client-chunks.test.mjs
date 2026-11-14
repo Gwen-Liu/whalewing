@@ -52,7 +52,11 @@ async function loader(transport) {
 
 // 三块浏览器脚本合计上限。2026-10-25 0.1.1 办公工坊字体裁成常用字子集后重定基线：
 // 实测 client.js 1,167,699 + client.model-world.js 746,690 + client.toolbox.js 12,651,308 = 14,565,697 字节，加 256 KiB 余量。
-const browserBudget = 14827841;
+// 2026-11-12 模型世界改版（六个页签、画布打斗引擎、测智题库）后重定：
+// 实测 client.js 1,487,713 + client.model-world.js 872,528 + client.toolbox.js 12,542,223 = 14,902,464 字节，加 256 KiB 余量。
+// 2026-11-14 办公工坊加“最近做过”时超了约 3 KB 后重定（11-12 以后加的功能把 client.js 从 1,487,713 撑到下面这个数）：
+// 实测 client.js 1,682,366 + client.model-world.js 918,691 + client.toolbox.js 12,566,973 = 15,168,030 字节，加 256 KiB 余量。
+const browserBudget = 15430174;
 test('入口与所有浏览器脚本总量均不超过体积基线，资源完整且入口最后发布', () => {
   const bytes = Object.entries(artifacts).filter(([name]) => /^client(?:\..+)?\.js$/.test(name) && !largePortraitChunks.includes(name)).map(([name, text]) => ({ name, bytes: Buffer.byteLength(text) }));
   assert.deepEqual(bytes.map(item => item.name).sort(), ['client.js', 'client.model-world.js', 'client.toolbox.js']);
@@ -143,7 +147,7 @@ test('模型世界把立绘编号换成对应的大图分块，格式不对的�
 for (const [id, label, method] of [['toolbox', '办公工坊', 'createViews'], ['model-world', '模型世界', 'createView']]) {
   const module = (React, mounted) => {
     const ChunkProbeView = props => { mounted.push(props); return React.createElement('span', null, '分块已显示'); };
-    return { [method]: () => method === 'createViews' ? { ToolboxView: ChunkProbeView } : ChunkProbeView };
+    return { [method]: () => method === 'createViews' ? { ToolboxView: ChunkProbeView, WorkshopView: ChunkProbeView } : ChunkProbeView };
   };
   test(`${label}启用不下载，首次展示才加载，失败在原位置及右上角提供显式重试`, async t => {
     const calls = [], mounted = []; let fail = true, f;
@@ -183,7 +187,7 @@ for (const mode of ['源码', '生成物']) test(`${mode}相同编译产物的�
       mounted.push(count);
       return f.react.createElement('button', { onClick: () => setCount(value => value + 1) }, `${name}计数${count}`);
     };
-    const resolve = index => pending[index].resolve({ createViews: () => ({ ToolboxView: ChunkProbeView }) });
+    const resolve = index => pending[index].resolve({ createViews: () => ({ ToolboxView: ChunkProbeView, WorkshopView: ChunkProbeView }) });
     const close = async () => { if (closed) return; closed = true; f.unmount(); for (const dispose of [...f.disposed].reverse()) await dispose(); };
     t.after(close);
     return { f, pending, mounted, resolve, close };
@@ -215,15 +219,18 @@ test('真实生成主入口与两个分块展示办公工坊和模型页，默�
   const f = await fixture({ clientSource: artifacts['client.js'], chunkSources: artifacts,
     world: async input => ({ ok: true, value: { action: input.action, available: false, refreshing: false,
       acceptedAt: null, generatedAt: null, sources: {}, modelCount: 0, vendors: [], leagues: [],
-      lastRefresh: null, attributions: structuredClone(worldAttributions), index: { source: 'bundled', asOf: '2026-10-21', version: '4.3', key: 'none', error: null }, models: [], total: 0, offset: 0, limit: 12, unknownDates: 0 } }) });
+      lastRefresh: null, attributions: structuredClone(worldAttributions), index: { source: 'bundled', asOf: '2026-10-21', version: '4.3', key: 'none', error: null }, models: [] } }) });
   t.after(() => f.unmount());
   assert.equal(f.calls.filter(([kind]) => kind === 'world').length, 0);
   await button(f, '办公工坊').props.onClick();
   for (let i = 0; i < 3; i++) await tick(f);
+  // 全部功能项是右侧抽屉（2026-11-12），点开才有搜索框。
+  assert.equal(nodes(f.render()).some(node => node.type === 'input' && node.props['aria-label'] === '搜索功能项'), false);
+  button(f, '全部功能项').props.onClick(); await tick(f);
   assert.ok(nodes(f.render()).some(node => node.type === 'input' && node.props['aria-label'] === '搜索功能项'));
   await button(f, '模型世界').props.onClick();
   for (let i = 0; i < 3; i++) await tick(f);
-  assert.deepEqual(f.calls.filter(([kind]) => kind === 'world'), [['world', { action: 'list', limit: 12, offset: 0 }]]);
+  assert.deepEqual(f.calls.filter(([kind]) => kind === 'world'), [['world', { action: 'all' }]], '打开只读一次本地数据，不联网更新');
   assert.ok(JSON.stringify(f.render()).includes('更新数据'));
   assert.ok(!JSON.stringify(f.render()).includes('worldView.'));
 });

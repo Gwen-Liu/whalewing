@@ -160,7 +160,7 @@ test('每日记忆和每周思考：名称和指令由插件给，每周思考�
   const weekly = await h.owner.manage({ action: 'create', sessionId: 'thinking', purpose: 'thinking', spec: { title: '员工改的名', prompt: '员工的指令', weekly: { time: '07:00:00', time_zone: 'Asia/Shanghai', weekdays: [1] } } });
   assert.deepEqual({ title: weekly.task.title, prompt: weekly.task.prompt }, builtInTask('thinking'), '员工传来的名称和指令不算数');
   assert.ok(thinkingTaskPrompt.startsWith('每周思考\n'));
-  for (const phrase of ['待你决定', '本周思考', '重要决定', '又解释了一遍', 'AI 对我的观察', 'validate', '不读 DSH 会话']) assert.ok(thinkingTaskPrompt.includes(phrase), phrase);
+  for (const phrase of ['待你决定', '本周思考', '本周案例', '不跳到不相干的领域', '塞回旧篇', '重要决定', '又解释了一遍', 'AI 对我的观察', 'validate', '不读 DSH 会话']) assert.ok(thinkingTaskPrompt.includes(phrase), phrase);
   assert.equal(automationPresentation(weekly.task.prompt).workspaceScope, undefined, '每周思考没有处理范围');
   h.purposes.set('thinking-2', 'thinking');
   await assert.rejects(h.owner.manage({ action: 'create', sessionId: 'thinking-2', purpose: 'thinking', spec: { weekly: { time: '07:00:00', time_zone: 'Asia/Shanghai', weekdays: [1] } } }), { code: 'SCHEDULE_EXISTS' });
@@ -556,4 +556,22 @@ test('目录混有迁移中的旧候选时保留逐项诊断与正常任务', as
   assert.equal(listing.tasks.length, 1); assert.equal(listing.tasks[0].id, 'valid');
   assert.equal(listing.legacyTasks.length, 0); assert.equal(listing.issues.length, 1);
   assert.equal(listing.issues[0].sessionId, 'legacy'); assert.match(listing.issues[0].message, /升级/);
+});
+
+test('自建任务挂到专家名下：先给任务会话选好专家再准备模型和提交计划；只有自建任务能挂', async () => {
+  const h = fixture();
+  h.dependencies.bindExpert = async (sessionId, expertId, title) => h.calls.push(['bind', sessionId, expertId, title]);
+  const contract = automationContract(z);
+  const input = contract.input.parse({ action: 'create', sessionId: 'auto', purpose: 'custom', expertId: 'custom-1', spec: { title: '每天看 DSH 新版本', prompt: '看官方发布页', daily: { time: '09:00:00', time_zone: 'Asia/Shanghai' } } });
+  const { task } = await h.owner.manage(input);
+  assert.equal(task.title, '每天看 DSH 新版本');
+  assert.equal(task.prompt, '看官方发布页', '员工写的指令原样保存');
+  const bind = h.calls.findIndex(call => Array.isArray(call) && call[0] === 'bind');
+  assert.deepEqual(h.calls[bind], ['bind', 'auto', 'custom-1', '每天看 DSH 新版本']);
+  assert.ok(bind < h.calls.indexOf('model') && h.calls.indexOf('model') < h.calls.indexOf('create'), h.calls.join(','));
+  assert.throws(() => contract.input.parse({ action: 'create', sessionId: 'thinking', purpose: 'thinking', expertId: 'custom-1', spec: { weekly: { time: '07:00:00', time_zone: 'Asia/Shanghai', weekdays: [1] } } }));
+  // 没挂专家的照旧，不调用挂接。
+  const plain = fixture();
+  plain.dependencies.bindExpert = async () => { throw new Error('不该挂专家'); };
+  await plain.create();
 });

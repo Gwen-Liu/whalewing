@@ -9,6 +9,6 @@ export function buildToolbox() {
   const views = buildSync({ ...options, entryPoints: ['src/utilities/views.js'], globalName: 'utilityViews' });
   const worker = buildSync({ ...options, entryPoints: ['src/utilities/worker.js'] });
   const license = utilityLicenseComment({ metafile: worker.metafile, workingDirectory: root }).replace(/[ \t]+$/gm, '');
-  const source = license + `window.__ModuleLoader__.load({ id: 'dsh-whalewing', chunk: 'client.toolbox.js', factory: (require) => {\n${views.outputFiles[0].text}\nconst workerSource = ${JSON.stringify(worker.outputFiles[0].text)};\nreturn { createViews: React => utilityViews.createUtilityViews(React, workerSource) };\n} });\n`;
+  const source = license + `window.__ModuleLoader__.load({ id: 'dsh-whalewing', chunk: 'client.toolbox.js', factory: (require) => {\n${views.outputFiles[0].text}\nconst workerSource = ${JSON.stringify(worker.outputFiles[0].text)};\nreturn { createViews: (React, services) => utilityViews.createUtilityViews(React, workerSource, services) };\n} });\n`;
   return { feature: 'toolbox', artifacts: { 'client.toolbox.js': source }, metafiles: [views.metafile, worker.metafile], resources: ['content/utilities'] };
 }

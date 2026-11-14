@@ -13,6 +13,10 @@ import { defaultNewsField, defaultTipsField, newsLimits } from '../features/card
 import { worldAttributions } from '../features/model-world/model-world.js';
 import { worldBoards } from '../features/model-world/contract.js';
 import { z } from 'zod';
+import { readFileSync, readdirSync } from 'node:fs';
+import { internalCommands } from '../src/internal-commands.js';
+import { dispatchCommand } from '../features/assistant/dispatch.js';
+import { jobCommand } from '../features/toolbox/jobs.js';
 
 test('缺失图节点只展示来源，来源读取失败保留说明，成功后定位真实笔记', async () => {
   const missing = { kind: 'missing', path: 'missing:name:未建立', title: '未建立', degree: 1, sources: [{ path: '40-知识/源.md', title: '源', line: 8 }] };
@@ -27,7 +31,7 @@ test('缺失图节点只展示来源，来源读取失败保留说明，成功�
     assert.equal(input.action, 'document'); assert.equal(input.path, '40-知识/源.md');
     return failRead ? { ok: false, error: { code: 'IO', message: '来源暂不可读' } } : { ok: true, value: { path: input.path, content: '真实原文', hash: 'h', readOnly: false, view: { type: 'text', value: '真实原文' }, links: [], backlinks: [] } };
   } });
-  await button(f.render(), '个人知识').props.onClick();
+  await button(f.render(), '知识积累').props.onClick();
   await nodes(f.render()).find(node => node.type?.name === 'GraphCanvas').props.onOpenNote(missing);
   assert.equal(requests.some(input => input.action === 'document'), false);
   assert.ok(nodes(f.render()).some(node => node.props.children.includes('此笔记尚不存在；这里只展示引用关系，不是实际文件')));
@@ -52,7 +56,7 @@ test('根级只读笔记保留阅读与导出，编辑保存删除和该笔记�
     if (input.action === 'document') return { ok: true, value: { path: input.path, content: '# 规则原文', hash: 'h', readOnly: true, view: { type: 'text', value: '规则原文' }, links: [], backlinks: [] } };
     assert.fail(input.action);
   } });
-  await button(f.render(), '个人知识').props.onClick();
+  await button(f.render(), '知识积累').props.onClick();
   await nodes(f.render()).find(node => node.type?.name === 'GraphCanvas').props.onOpenNote(root);
   assert.ok(nodes(f.render()).some(node => node.props.children.includes('此笔记仅供阅读，不在插件编辑、删除或恢复范围内')));
   for (const label of ['编辑', '保存', '移到可恢复区']) assert.equal(button(f.render(), label).props.disabled, true);
@@ -113,10 +117,38 @@ async function discuss(f, action) {
   const release = f.clients.assistant.mountAssistantInput(sessionId);
   try { await pending; } finally { release(); }
 }
+// 只有图标的按钮（比如知识积累左侧功能条、页签条上的）按 aria-label 认。
 function button(tree, label) {
-  const found = nodes(tree).find((node) => node.type === 'button' && (node.props.children.includes(label) || nodes(node).some(child => child.type === 'span' && child.props.children.includes(label))));
+  const found = nodes(tree).find((node) => node.type === 'button' && (node.props['aria-label'] === label || node.props.children.includes(label) || nodes(node).some(child => child.type === 'span' && child.props.children.includes(label))));
   assert.ok(found, `按钮 ${label} 存在`);
   return found;
+}
+/** 没钉在页头的功能要从“全部功能”里打开（2026-11-13 页头改版）：点开面板，点那一格；新页面画出来才算切完，所以点完先画一遍再等。 */
+async function openFromLauncher(f, label) {
+  button(f.render(), '全部功能').props.onClick();
+  const tile = nodes(f.render()).find(node => node.type === 'button' && node.props['data-feature'] && nodes(node).some(child => child.type === 'span' && child.props.children.includes(label)));
+  assert.ok(tile, `全部功能里有「${label}」`);
+  const pending = tile.props.onClick(); f.render(); await pending;
+}
+/** 知识积累 2026-11-11 起搜索框在左栏“搜索”页：切过去，敲关键词，回车。 */
+async function searchNotes(f, text) {
+  const tab = nodes(f.render()).find(node => node.type === 'button' && node.props.role === 'tab' && node.props.children.includes('搜索'));
+  assert.ok(tab, '左栏有“搜索”页');
+  tab.props.onClick();
+  const input = () => nodes(f.render()).find(node => node.type === 'input' && node.props['aria-label'] === '搜索笔记');
+  input().props.onChange({ target: { value: text } });
+  input().props.onKeyDown({ key: 'Enter' });
+  await new Promise(setImmediate);
+}
+/** 第三版专家团队页：从专家库点名字，在中间那栏打开这位专家；它的“···”菜单在那栏标题上。 */
+function openPane(f, name) {
+  nodes(f.render()).find(node => node.type === 'button' && String(node.props.className).includes('ww-roster-library')).props.onClick();
+  const open = nodes(f.render()).find(node => node.type === 'button' && node.props['aria-label'] === `打开${name}`);
+  assert.ok(open, `专家库里有${name}`);
+  open.props.onClick();
+  const pane = nodes(f.render()).find(node => node.type === 'section' && node.props['aria-label'] === `${name}说的话`);
+  assert.ok(pane, `中间那栏是${name}`);
+  return pane;
 }
 
 function taskField(f, label, value) {
@@ -142,25 +174,34 @@ const worldModel = (id, changes = {}) => ({ id, name: '合成模型 ' + id, vend
 function worldReply(input, models = [], changes = {}) {
   const at = '2026-10-12T00:00:00.000Z';
   const status = { action: input.action, available: true, refreshing: false, acceptedAt: at, generatedAt: at, sources: { 'models.dev': { fetchedAt: at, note: '可追溯公开来源', ok: true } }, modelCount: models.length, vendors: [{ id: 'vendor', name: 'Vendor', nameZh: '合成厂商', homepage: 'https://example.org' }], leagues: Object.entries(worldBoards).map(([id, name]) => ({ id, name })), lastRefresh: null, attributions: structuredClone(worldAttributions), index: { source: 'bundled', asOf: '2026-10-21', version: '4.3', key: 'none', error: null } };
-  return { ...status, ...(['list', 'timeline', 'ranking'].includes(input.action) ? { models, total: models.length, offset: input.offset || 0, limit: input.limit || 50, unknownDates: 0 } : input.action === 'detail' ? { model: models[0], vendor: status.vendors[0] } : input.action === 'compare' ? { models } : {}), ...changes };
+  return { ...status, ...(['list', 'timeline', 'ranking'].includes(input.action) ? { models, total: models.length, offset: input.offset || 0, limit: input.limit || 50, unknownDates: 0 } : input.action === 'detail' ? { model: models[0], vendor: status.vendors[0] } : input.action === 'compare' || input.action === 'all' ? { models } : {}), ...changes };
 }
 
-test('日报卡片只放标题与分类，传闻和媒体单独标注，点开卡片才在弹框里看说明与链接', async () => {
+// 2026-11-14 首页改版：今日资讯一次看一个领域，第一条是头条（带一句说明和“查看来源”），其余是快讯（一行一条，标题是按钮）。
+const newsTitles = tree => nodes(tree).filter(n => n.type === 'button' && typeof n.props.className === 'string' && n.props.className.startsWith('ww-read-t '));
+const newsTitleText = node => nodes(node).find(n => n.type === 'span').props.children.join('');
+const newsLead = tree => nodes(tree).find(n => n.type === 'article' && typeof n.props.className === 'string' && n.props.className.startsWith('ww-read-lead'));
+const newsRows = tree => nodes(tree).filter(n => n.type === 'li' && typeof n.props.className === 'string' && n.props.className.startsWith('ww-read-q'));
+const homeBoard = tree => nodes(tree).find(n => n.props?.className === 'ww-read');
+const newsTags = node => nodes(node).filter(n => n.type === 'span' && typeof n.props.className === 'string' && n.props.className.startsWith('ww-tag')).map(n => n.props.children.join(''));
+
+test('今日资讯：头条带分类、一句说明和“查看来源”，快讯只放标题和标注；传闻和媒体单独标注，点标题在弹框里看说明与链接', async () => {
   const legacy = newsSavedReport(), source = legacy.items[0].sources[0];
   const entry = (category, label, title, link) => ({ category, label, title, link, brief: title + '的说明', relevance: category === 'model' ? '可用于员工写方案' : '', eventKey: title, sources: [source] });
   const report = { ...legacy, status: 'complete', items: [entry('model', 'official', 'Anthropic 发布小模型「Claude Haiku 5.5」', 'https://www.anthropic.com/claude-haiku-5-5'), entry('model', 'leak', '「Claude Fable 5.5」被曝开启灰度测试', 'https://example.org/leak'), entry('opensource', 'media', '研究员开源本地语音识别模型「Phonon-2」', 'https://huggingface.co/x/Phonon-2')] };
   const f = await fixture({ news: async input => ({ ok: true, value: input.action === 'home' ? newsHomeResult([report]) : newsList() }) });
-  await button(f.render(), '知识卡片').props.onClick();
-  const tree = f.render(), all = nodes(tree), cards = all.filter(n => n.props?.className === 'ww-tile ww-news-tile');
-  assert.deepEqual(cards.map(card => nodes(card).find(n => n.props?.className === 'ww-tile-title').props.children.join('')), report.items.map(item => item.title));
-  assert.deepEqual(cards.map(card => nodes(card).find(n => n.props?.className === 'ww-tile-kicker').props.children.join('')), ['大模型', '大模型', '开源与工具']);
-  assert.ok(cards.every(card => nodes(card).some(n => n.props?.className === 'ww-tile-mono')), '每张资讯卡带来源徽记');
-  assert.deepEqual(cards.flatMap(card => nodes(card).filter(n => n.props?.className?.startsWith?.('ww-brief-flag'))).map(n => n.props.children.join('')), ['内测 / 传闻', '媒体报道']);
-  assert.equal(JSON.stringify(tree).includes('的说明'), false, '卡片上不显示说明');
-  assert.equal(all.some(n => n.type === 'a' && n.props.href === 'https://www.anthropic.com/claude-haiku-5-5'), false, '卡片上不放链接');
-  assert.equal(all.some(n => n.props?.className === 'ww-brief-more'), false, '不足四条没有展开按钮');
+  await button(f.render(), '每日阅读').props.onClick();
+  const tree = f.render(), all = nodes(tree), cards = newsTitles(tree), lead = newsLead(tree), rows = newsRows(tree);
+  assert.deepEqual(cards.map(newsTitleText), report.items.map(item => item.title), '不是照员工情况挑的一期，保持日报原来的顺序');
+  assert.deepEqual(newsTags(lead), ['头条', '大模型', '官方']);
+  assert.ok(JSON.stringify(lead).includes('Anthropic 发布小模型「Claude Haiku 5.5」的说明'), '头条带一句说明');
+  assert.equal(JSON.stringify(lead).includes('可用于员工写方案'), false, '没读《关于我》的一期，头条不写“和你的关系”');
+  assert.ok(nodes(lead).some(n => n.type === 'a' && n.props.href === 'https://www.anthropic.com/claude-haiku-5-5' && n.props.children.join('') === '查看来源'), '头条能直接打开来源');
+  assert.deepEqual(rows.map(newsTags), [['内测 / 传闻'], ['媒体报道']]);
+  assert.equal(rows.some(row => nodes(row).some(n => n.type === 'a')), false, '快讯行里不放链接');
+  assert.equal(nodes(homeBoard(tree)).some(n => n.props?.className === 'ww-brief-more' || n.type === 'details'), false, '首页没有展开按钮和折叠块');
   assert.ok(JSON.stringify(tree).includes('3 条'));
-  cards[0].props.onKeyDown({ key: 'Enter', preventDefault() {} });
+  cards[0].props.onClick();
   const dialog = nodes(f.render()).find(n => n.type === 'dialog');
   assert.equal(dialog.props['aria-label'], report.items[0].title);
   assert.ok(JSON.stringify(dialog).includes('Anthropic 发布小模型「Claude Haiku 5.5」的说明') && JSON.stringify(dialog).includes('可用于员工写方案'));
@@ -183,35 +224,31 @@ test('日报卡片只放标题与分类，传闻和媒体单独标注，点开�
   }
 });
 
-test('每个领域默认一行四张，展开再加一行，最多八条；旧版日报的重要性只在弹框里', async () => {
+test('今日资讯一期最多八条：头条一条加快讯七条，一屏列完、没有“展开”；旧版日报的重要性只在弹框里', async () => {
   const legacy = newsSavedReport(), item = legacy.items[0];
   const report = { ...legacy, status: 'complete', items: Array.from({ length: 10 }, (_, i) => ({ ...item, title: `旧版标题 ${i + 1}`, eventKey: `event-${i}` })) };
   const f = await fixture({ news: async input => ({ ok: true, value: input.action === 'home' ? newsHomeResult([report]) : newsList() }) });
-  await button(f.render(), '知识卡片').props.onClick();
-  const titles = () => nodes(f.render()).filter(n => n.props?.className === 'ww-tile ww-news-tile').map(card => nodes(card).find(n => n.props?.className === 'ww-tile-title').props.children.join(''));
-  const more = () => nodes(f.render()).find(n => n.props?.className === 'ww-brief-more');
-  assert.deepEqual(titles(), ['旧版标题 1', '旧版标题 2', '旧版标题 3', '旧版标题 4']);
-  assert.equal(nodes(f.render()).filter(n => n.props?.className === 'ww-shelf').some(shelf => nodes(shelf).some(n => n.type === 'details')), false, '卡片区不再有向下展开的折叠块');
+  await button(f.render(), '每日阅读').props.onClick();
+  assert.deepEqual(newsTitles(f.render()).map(newsTitleText), Array.from({ length: 8 }, (_, i) => `旧版标题 ${i + 1}`), '旧日报超过八条只显示前八条');
+  assert.equal(newsRows(f.render()).length, 7, '头条之外七条快讯');
+  assert.equal(nodes(homeBoard(f.render())).some(n => n.props?.className === 'ww-brief-more' || n.type === 'details'), false, '首页没有展开按钮和折叠块');
   assert.ok(JSON.stringify(f.render()).includes('8 条'));
-  assert.equal(more().props['aria-expanded'], false); assert.ok(JSON.stringify(more()).includes('展开另外 4 条'));
-  more().props.onClick();
-  assert.equal(titles().length, 8, '展开后两行，最多八条'); assert.equal(more().props['aria-expanded'], true);
-  more().props.onClick();
-  assert.equal(titles().length, 4, '收起回到一行');
-  nodes(f.render()).find(n => n.props?.className === 'ww-tile ww-news-tile').props.onClick();
+  assert.equal(JSON.stringify(newsLead(f.render())).includes('影响说明'), false, '重要性不放在首页');
+  newsTitles(f.render())[0].props.onClick();
   const dialog = JSON.stringify(nodes(f.render()).find(n => n.type === 'dialog'));
   for (const text of ['重要性', '影响说明', '可能工作影响（推断）', '来源', '1 / 8']) assert.ok(dialog.includes(text), text);
 });
 
 test('知识首页直接读取日报与学习卡片，配置仅在设置中读取且核心领域没有删除入口', async () => {
   const f = await fixture({ news: async input => ({ ok: true, value: input.action === 'home' ? newsHomeResult([newsSavedReport()]) : newsList() }) });
-  await button(f.render(), '知识卡片').props.onClick();
+  await button(f.render(), '每日阅读').props.onClick();
   assert.deepEqual(f.calls, [['news', { action: 'home' }]]);
   const text = JSON.stringify(f.render());
   for (const content of ['真实已保存标题', dailyBook.chapter.title, dailyTip.title, '10 月 12 日']) assert.ok(text.includes(content));
-  assert.equal(text.includes('来源支持的事实'), false, '资讯摘要只在弹框里');
+  assert.ok(JSON.stringify(newsLead(f.render())).includes('来源支持的事实'), '头条带一句说明');
+  for (const content of ['影响说明', '可能改善工作效率']) assert.equal(text.includes(content), false, '重要性和推断只在弹框里');
   for (const label of ['编辑领域', '启用每日资讯计划', '删除领域']) assert.equal(nodes(f.render()).some(n => n.type === 'button' && n.props.children.includes(label)), false);
-  await button(f.render(), '卡片设置').props.onClick();
+  await button(f.render(), '阅读设置').props.onClick();
   assert.deepEqual(f.calls.at(-1), ['news', { action: 'list' }]);
   assert.ok(button(f.render(), '编辑领域'));
   assert.equal(nodes(f.render()).some(n => n.type === 'button' && n.props.children.includes('删除领域')), false);
@@ -225,16 +262,17 @@ test('资讯编辑默认领域和新增来源只提交配置CAS，草稿跨标�
     if (input.action === 'list') return { ok: true, value: newsList(fields) };
     saved.push(input); const field = { ...input.field, id: input.id, revision: input.expectedRevision + 1, deleted: false }; fields = [field]; return { ok: true, value: { field } };
   } });
-  await button(f.render(), '知识卡片').props.onClick(); await button(f.render(), '卡片设置').props.onClick(); button(f.render(), '编辑领域').props.onClick();
+  await button(f.render(), '每日阅读').props.onClick(); await button(f.render(), '阅读设置').props.onClick(); button(f.render(), '编辑领域').props.onClick();
   taskField(f, '关注描述', '企业软件与 AI 工程');
   taskField(f, '来源名称', '员工明确添加的来源'); taskField(f, '公开 HTTPS 订阅地址', 'https://example.org/feed'); taskField(f, '来源性质', 'primary'); taskField(f, '来源地区', 'overseas');
   button(f.render(), '加入来源表单').props.onClick();
-  await button(f.render(), '专家团队').props.onClick(); await button(f.render(), '知识卡片').props.onClick();
+  await button(f.render(), '专家团队').props.onClick(); await button(f.render(), '每日阅读').props.onClick();
   assert.equal(taskField(f, '关注描述').props.value, '企业软件与 AI 工程');
   await button(f.render(), '保存修改').props.onClick();
   assert.equal(saved.length, 1); assert.equal(saved[0].expectedRevision, 0);
   assert.equal(saved[0].field.sources.at(-1).url, 'https://example.org/feed');
-  assert.equal(f.calls.some(([kind]) => ['automation', 'create', 'prompt', 'knowledge'].includes(kind)), false);
+  // 专家团队页会读一次定时任务目录（显示各专家的定时任务），只读，不算。
+  assert.equal(f.calls.some(([kind, input]) => ['create', 'prompt', 'knowledge'].includes(kind) || kind === 'automation' && input?.action !== 'catalog'), false);
 });
 
 test('资讯最后领域关闭先确认暂停，暂停后配置失败按owner回读且不补建计划', async () => {
@@ -247,7 +285,7 @@ test('资讯最后领域关闭先确认暂停，暂停后配置失败按owner回
     writes.push(input); assert.equal(input.confirmCancel, true); schedules = schedules.map(task => ({ ...task, status: 'paused' }));
     return { ok: false, error: { code: 'IO', message: '计划已暂停但领域保存失败' } };
   } });
-  await button(f.render(), '知识卡片').props.onClick(); await button(f.render(), '卡片设置').props.onClick(); button(f.render(), '编辑领域').props.onClick();
+  await button(f.render(), '每日阅读').props.onClick(); await button(f.render(), '阅读设置').props.onClick(); button(f.render(), '编辑领域').props.onClick();
   const checkbox = nodes(nodes(f.render()).find(node => node.type === 'label' && node.props.children.includes('纳入每日采集'))).find(node => node.type === 'input');
   checkbox.props.onChange({ target: { checked: false } }); await button(f.render(), '保存修改').props.onClick();
   assert.equal(writes.length, 0); assert.ok(JSON.stringify(f.render()).includes('请先暂停每日资讯'));
@@ -268,7 +306,7 @@ test('资讯领域冲突刷新保留编辑，删除领域历史通过正式histo
     if (conflict) { conflict = false; field = { ...field, revision: 2 }; return { ok: false, error: { code: 'CONFLICT', message: '另一处修改了领域' } }; }
     assert.equal(input.expectedRevision, 2); field = { ...input.field, id: input.id, revision: 3, deleted: false }; return { ok: true, value: { field } };
   } });
-  await button(f.render(), '知识卡片').props.onClick(); await button(f.render(), '卡片设置').props.onClick(); button(f.render(), '编辑领域').props.onClick(); taskField(f, '关注描述', '保留员工草稿');
+  await button(f.render(), '每日阅读').props.onClick(); await button(f.render(), '阅读设置').props.onClick(); button(f.render(), '编辑领域').props.onClick(); taskField(f, '关注描述', '保留员工草稿');
   await button(f.render(), '保存修改').props.onClick(); assert.equal(taskField(f, '关注描述').props.value, '保留员工草稿');
   await button(f.render(), '读取最新版本（保留草稿）').props.onClick(); await button(f.render(), '保存修改').props.onClick();
   const deleted = nodes(f.render()).find(node => node.type === 'div' && node.props.className === 'ww-row' && nodes(node).some(child => child.props.children.includes('已删除的领域')));
@@ -285,7 +323,7 @@ test('资讯日报从report读取真实期次、条数、来源错误和推断�
     assert.equal(input.action, 'report');
     return failed ? { ok: false, error: { code: 'IO', message: '日报读取失败' } } : { ok: true, value: { report } };
   } });
-  await button(f.render(), '知识卡片').props.onClick(); await button(f.render(), '卡片设置').props.onClick(); await button(f.render(), '读取本期日报').props.onClick();
+  await button(f.render(), '每日阅读').props.onClick(); await button(f.render(), '阅读设置').props.onClick(); await button(f.render(), '读取本期日报').props.onClick();
   assert.ok(JSON.stringify(f.render()).includes('2026/10/12'));
   nodes(f.render()).find(node => node.props?.className === 'ww-tile ww-news-tile').props.onClick();
   const item = nodes(f.render()).filter(node => node.type === 'dialog').at(-1);
@@ -335,78 +373,23 @@ test('模型世界首次无快照只本地读取，明确手动更新后展示�
   let available = false;
   const f = await fixture({ world: async input => { if (input.action === 'refresh') available = true; return { ok: true, value: available ? worldReply(input, [worldModel('one')]) : worldReply(input, [], { available: false, acceptedAt: null, generatedAt: null, modelCount: 0, vendors: [], leagues: [] }) }; } });
   assert.equal(tabLabels(f.render()).at(-1), '模型世界');
-  await worldReady(f); assert.deepEqual(f.calls, [['world', { action: 'list', limit: 12, offset: 0 }]]);
+  // 2026-11-12 改版：打开一次读全部型号（不联网），筛选排序都在界面里做。
+  await worldReady(f); assert.deepEqual(f.calls.filter(([kind]) => kind === 'world'), [['world', { action: 'all' }]]);
+  await worldNavigate(f, '实力榜');
   assert.ok(JSON.stringify(f.render()).includes(worldViewCopy.noSnapshot));
-  await button(f.render(), '更新数据').props.onClick();
-  assert.deepEqual(f.calls.filter(([kind]) => kind === 'world').map(([, input]) => input.action), ['list', 'refresh', 'list']);
-  assert.ok(worldAction(f, '浏览 合成厂商 的模型'));
+  await button(f.render(), '更新数据').props.onClick(); await settleView(f);
+  assert.deepEqual(f.calls.filter(([kind]) => kind === 'world').map(([, input]) => input.action), ['all', 'refresh', 'all']);
+  assert.ok(!JSON.stringify(f.render()).includes(worldViewCopy.noSnapshot));
+  await worldNavigate(f, '新模型');
+  assert.ok(JSON.stringify(f.render()).includes('合成模型 one'), '更新后新模型里看得到');
   assert.equal(f.calls.some(([kind]) => ['create', 'prompt', 'knowledge'].includes(kind)), false);
 });
 
-test('模型世界筛选与分页消费Host结果，未提交筛选不改当前页的查询条件', async () => {
-  const all = Array.from({ length: 14 }, (_, i) => worldModel('model-' + i)); const inputs = [];
-  const f = await fixture({ world: async input => { inputs.push(input); const filtered = input.query ? [all[3]] : all; const offset = input.offset || 0; return { ok: true, value: worldReply(input, filtered.slice(offset, offset + 12), { total: filtered.length, modelCount: all.length }) }; } });
-  await worldReady(f); worldAction(f, '浏览 合成厂商 的模型').props.onClick(); await new Promise(setImmediate);
-  taskField(f, '搜索模型或厂商', '员工未提交的筛选'); await button(f.render(), '下一页').props.onClick();
-  assert.deepEqual(inputs.at(-1), { action: 'list', vendorId: 'vendor', limit: 12, offset: 12 });
-  assert.ok(JSON.stringify(f.render()).includes('13–14 / 14'));
-  nodes(f.render()).find(node => node.type === 'form' && node.props.className === 'ww-mw-toolbar').props.onSubmit({ preventDefault() {} }); await new Promise(setImmediate);
-  assert.deepEqual(inputs.at(-1), { action: 'list', query: '员工未提交的筛选', vendorId: 'vendor', limit: 12, offset: 0 });
-  taskField(f, '全部能力', 'reasoning'); await new Promise(setImmediate);
-  assert.equal(inputs.at(-1).capability, 'reasoning'); assert.ok(JSON.stringify(f.render()).includes('合成模型 model-3')); assert.equal(nodes(f.render()).some(node => node.props.className === 'ww-mw-page'), false);
-});
-
-test('模型世界时间线按原精度显示日期和未知日期数，实力榜默认综合实力从高到低并可切换方向', async () => {
-  const month = worldModel('month'), day = worldModel('day', { releaseDate: '2026-10-11', releaseDatePrecision: 'day' }), year = worldModel('year', { releaseDate: '2025', releaseDatePrecision: 'year' }); const inputs = [];
-  const f = await fixture({ world: async input => { inputs.push(input); return { ok: true, value: worldReply(input, [day, month, year], { unknownDates: 1 }) }; } });
-  await worldReady(f, '发布时间线'); const value = JSON.stringify(f.render());
-  for (const text of ['2026-09', '2026-10-11', '2025', '1 个模型缺少发布日期']) assert.ok(value.includes(text));
-  assert.equal(value.includes('2026-09-01'), false);
-  await worldNavigate(f, '实力榜'); assert.equal(inputs.at(-1).league, 'overall'); assert.equal(inputs.at(-1).direction, 'desc');
-  assert.ok(JSON.stringify(worldSort(f).props.children).includes('从高到低'));
-  await worldSort(f).props.onClick(); assert.equal(inputs.at(-1).direction, 'asc'); assert.ok(nodes(f.render()).some(node => node.type === 'table'));
-  assert.ok(JSON.stringify(worldSort(f).props.children).includes('从低到高'));
-});
-
-test('模型世界详情只列已知字段，区分零与未知并保留价格单位，不展示字段来源', async () => {
-  const f = await fixture({ world: async input => ({ ok: true, value: worldReply(input, [worldModel('one')]) }) }); await worldReady(f, '发布时间线');
-  await worldAction(f, '详情 合成模型 one').props.onClick({ currentTarget: { isConnected: true } });
-  const dialog = nodes(f.render()).find(node => node.type === 'dialog'); assert.ok(dialog);
-  const cells = nodes(dialog).filter(node => ['dt', 'dd'].includes(node.type)); const values = new Map(); for (let i=0;i<cells.length;i+=2) values.set(cells[i].props.children[0],cells[i+1].props.children[0]);
-  assert.equal(values.get('上下文'), '0'); assert.equal(values.get('输入价格'), '$0'); assert.equal(values.has('最大输出'), false); assert.equal(values.has('输出价格'), false); assert.equal(values.get('工具调用'), '否');
-  const value=JSON.stringify(f.render()); for (const text of [worldViewCopy.priceUnit,...worldAttributions.map(item=>item.name)]) assert.ok(value.includes(text));
-  assert.equal(JSON.stringify(dialog).includes('models.dev'), false);
-});
-
-test('模型世界只选双模型，第三项拒收，缺少赛制保留参数但不判定胜负', async () => {
-  const models=Array.from({length:3},(_,i)=>worldModel('model-'+i,i===1?{scores:[],contextWindow:null,efforts:[],rating:{overall:null,tier:null,effort:null,composite:null,eci:null,reasoning:null,coding:null,agent:null,coverage:0}}:{}));
-  const f=await fixture({world:async input=>({ok:true,value:worldReply(input,input.action==='compare'?input.ids.map(id=>models.find(model=>model.id===id)):models)})}); await worldReady(f,'发布时间线');
-  worldAction(f,'加入对决 合成模型 model-0').props.onClick(); assert.equal(button(f.render(),'对决').props.disabled,true);
-  worldAction(f,'加入对决 合成模型 model-1').props.onClick(); assert.equal(worldAction(f,'加入对决 合成模型 model-2').props.disabled,true);
-  worldAction(f,'加入对决 合成模型 model-2').props.onClick(); await button(f.render(),'对决').props.onClick({currentTarget:{isConnected:true}});
-  assert.deepEqual(f.calls.at(-1),['world',{action:'compare',ids:['model-0','model-1']}]);
-  const dialog=nodes(f.render()).find(node=>node.type==='dialog'); assert.ok(JSON.stringify(dialog).includes(worldViewCopy.incomparable)); assert.equal(button(dialog,'开始对决').props.disabled,true);
-  button(dialog,'关闭').props.onClick(); button(f.render(),'清空').props.onClick(); assert.equal(nodes(f.render()).some(node=>node.props.className==='ww-mw-selected'),false);
-});
-
-test('模型世界刷新后查询失败保留原画面，原请求重试不再次联网刷新', async () => {
-  let failList=false; const inputs=[];
-  const f=await fixture({world:async input=>{inputs.push(input);if(input.action==='refresh'){failList=true;return {ok:true,value:worldReply(input,[worldModel('one')])};}if(failList)return {ok:false,error:{code:'IO',message:'刷新后本地读取失败'}};return {ok:true,value:worldReply(input,[worldModel('one')])};}});
-  await worldReady(f,'发布时间线'); await button(f.render(),'更新数据').props.onClick(); assert.ok(JSON.stringify(f.render()).includes('合成模型 one'));
-  failList=false;await button(f.render(),'重试').props.onClick();assert.equal(inputs.filter(input=>input.action==='refresh').length,1);assert.equal(inputs.at(-1).action,'timeline');
-});
-
-test('模型世界待请求禁用入口，取消或卸载后迟到结果不替换旧画面', async () => {
-  for(const unmount of [false,true]){const release=Promise.withResolvers();let blocked=false;
-    const f=await fixture({world:async input=>{if(blocked)await release.promise;return {ok:true,value:worldReply(input,[worldModel(blocked?'late':'original')])};}});await worldReady(f,'发布时间线');blocked=true;
-    const pending=button(f.render(),'更新数据').props.onClick();assert.equal(button(f.render(),'更新数据').props.disabled,true);
-    if(unmount)f.unmount();else button(f.render(),'取消').props.onClick();release.resolve();await pending;
-    const value=JSON.stringify(f.render());
-    if(unmount) { assert.equal(nodes(f.render()).find(node => node.props['data-tab'] === 'experts').props['aria-pressed'], true); }
-    else assert.ok(value.includes('合成模型 original'));
-    assert.equal(value.includes('合成模型 late'),false);
-    if(unmount) { blocked=false; const fresh=JSON.stringify(await worldReady(f,'发布时间线')); assert.ok(fresh.includes('合成模型 original')); assert.equal(fresh.includes('合成模型 late'),false); }
-  }
+test('模型世界持久恢复未知按后端原因展示，不声称确定没有保存', async () => {
+  const f = await fixture({ world: async input => ({ ok: true, value: worldReply(input, [worldModel('one')], { lastRefresh: { status: 'error', code: 'WORLD_STORAGE_UNKNOWN', message: '持久结果恢复未确认，请核对本地存储' } }) }) });
+  await worldReady(f);
+  const text = JSON.stringify(f.render()); assert.ok(text.includes('持久结果恢复未确认，请核对本地存储'));
+  assert.equal(text.includes('更新失败，保留旧快照'), false);
 });
 
 test('资讯与模型世界拒收错动作、错身份和非法来源，不抹掉已接受内容', async () => {
@@ -434,7 +417,7 @@ test('资讯新增领域与删除成功以宿主读回为准，空日报不自�
     if (input.action === 'save') { const field = { ...input.field, id: input.id, revision: 1, deleted: false }; fields.push(field); return { ok: true, value: { field } }; }
     assert.equal(input.action, 'remove'); const field = { ...fields.find(field => field.id === input.id), deleted: true, revision: 2 }; fields = fields.filter(field => field.id !== input.id); return { ok: true, value: { field } };
   } });
-  await button(f.render(), '知识卡片').props.onClick(); await button(f.render(), '卡片设置').props.onClick(); nodes(f.render()).find(node => node.type === 'button' && node.props.className === 'ww-card ww-add-card').props.onClick();
+  await button(f.render(), '每日阅读').props.onClick(); await button(f.render(), '阅读设置').props.onClick(); nodes(f.render()).find(node => node.type === 'button' && node.props.className === 'ww-card ww-add-card').props.onClick();
   taskField(f, '领域名称', '企业软件'); taskField(f, '关注描述', '企业研发相关公开新闻');
   taskField(f, '来源名称', '公开技术订阅'); taskField(f, '公开 HTTPS 订阅地址', 'https://example.org/rss'); taskField(f, '来源性质', 'primary'); taskField(f, '来源地区', 'domestic');
   button(f.render(), '加入来源表单').props.onClick(); await button(f.render(), '添加').props.onClick();
@@ -455,32 +438,15 @@ test('模型世界使用宿主主题，诊断和许可默认折叠且保持可�
  for(const item of worldAttributions)assert.ok(JSON.stringify(about).includes(item.name));assert.ok(JSON.stringify(about).includes('数据生成于'));
 });
 
-test('模型世界详情和对决进入顶层dialog，关闭回原按钮且不丢筛选和列表',async()=>{
- for(const kind of ['detail','compare']){const models=[worldModel('a'),worldModel('b')];const events=[];
- const f=await fixture({world:async input=>({ok:true,value:worldReply(input,input.action==='detail'?[models[0]]:models)})});await worldReady(f,'发布时间线');taskField(f,'搜索模型或厂商','未提交的筛选');
- const origin={isConnected:true,focus:()=>events.push('origin')};if(kind==='detail')await worldAction(f,'详情 合成模型 a').props.onClick({currentTarget:origin});else{for(const id of ['a','b'])worldAction(f,'加入对决 合成模型 '+id).props.onClick();await button(f.render(),'对决').props.onClick({currentTarget:origin});}
- const tree=f.render(),dialog=nodes(tree).find(node=>node.type==='dialog');assert.ok(dialog);assert.equal(nodes(tree).some(node=>node.props.className==='ww-world-result'),false);
- const dom={open:false,showModal(){this.open=true;events.push('showModal');},close(){this.open=false;events.push('close');}};dialog.props.ref.current=dom;nodes(dialog).find(node=>node.type==='h2').props.ref.current={focus:()=>events.push('title')};f.flushEffects();assert.deepEqual(events,['showModal','title']);
- button(dialog,'关闭').props.onClick();f.render();assert.deepEqual(events,['showModal','title','close','origin']);assert.equal(taskField(f,'搜索模型或厂商').props.value,'未提交的筛选');assert.equal(nodes(f.render()).filter(node=>node.props.className==='ww-mw-model-row').length,2);
- }
-});
-
-test('模型世界失败详情仍在独立窗口重试，关闭时原按钮移除则回筛选入口',async()=>{
- let fail=true;const events=[];const f=await fixture({world:async input=>input.action==='detail'&&fail?{ok:false,error:{code:'IO',message:'详情暂不可读'}}:{ok:true,value:worldReply(input,[worldModel('one')])}});await worldReady(f,'发布时间线');
- await worldAction(f,'详情 合成模型 one').props.onClick({currentTarget:{isConnected:false,focus:()=>events.push('removed')}});
- let dialog=nodes(f.render()).find(node=>node.type==='dialog');assert.ok(JSON.stringify(dialog).includes(shown('IO', '详情暂不可读')));dialog.props.ref.current={open:false,showModal(){this.open=true;},close(){this.open=false;}};nodes(dialog).find(node=>node.type==='h2').props.ref.current={focus:()=>events.push('title')};taskField(f,'搜索模型或厂商').props.ref.current={focus:()=>events.push('fallback')};f.flushEffects();
- fail=false;await button(dialog,'重试').props.onClick();dialog=nodes(f.render()).find(node=>node.type==='dialog');assert.ok(JSON.stringify(dialog).includes('合成模型 one'));f.flushEffects();assert.deepEqual(events,['title']);button(dialog,'关闭').props.onClick();f.render();assert.deepEqual(events,['title','fallback']);
-});
-
 test('办公工坊和AI网页按最终导航顺序稳定挂载，切换与刷新不创建会话或自动联网', async () => {
   const f = await fixture();
   const first = f.render();
-  assert.deepEqual(tabLabels(first), ['专家团队', 'AI 网页', '个人知识', '技能成长', '定时任务', '办公工坊', '知识卡片', '模型世界']);
-  assert.equal(nodes(first).some(node => ['ToolboxView', 'AiWebView'].includes(node.type?.name)), false);
+  assert.deepEqual(tabLabels(first), ['专家团队', 'AI 网页', '知识积累', '技能中心', '定时任务', '办公工坊', '每日阅读', '模型世界']);
+  assert.equal(nodes(first).some(node => ['WorkshopView', 'AiWebView'].includes(node.type?.name)), false);
   const opened = new Map();
   const calls = f.calls.length;
   // 保活从首次主动打开开始；隐藏实例保留同一组件与 key，未登记刷新不制造空操作。
-  for (const [label, name] of [['办公工坊', 'ToolboxView'], ['AI 网页', 'AiWebView'], ['办公工坊', 'ToolboxView']]) {
+  for (const [label, name] of [['办公工坊', 'WorkshopView'], ['AI 网页', 'AiWebView'], ['办公工坊', 'WorkshopView']]) {
     await button(f.render(), label).props.onClick(); await settleView(f);
     const tree = f.render(), current = nodes(tree).find(node => node.type?.name === name);
     if (!opened.has(name)) opened.set(name, current);
@@ -528,7 +494,8 @@ test('AI网页原反例：无mounted时仅点击准备standard中性工作台，
   const sidebar = browserService(), ready = Promise.withResolvers();
   const f = await fixture({ sidebarRight: sidebar.service, retainReady: ready.promise });
   f.render(); f.flushEffects(); await button(f.render(), 'AI 网页').props.onClick(); await browserCommit(f);
-  assert.equal(f.calls.length, 0); assert.equal(sidebar.leases.length, 0);
+  // 起始页是专家团队，它读一次定时任务目录（只读），不算。
+  assert.equal(f.calls.filter(([kind, input]) => !(kind === 'automation' && input?.action === 'catalog')).length, 0); assert.equal(sidebar.leases.length, 0);
   const pending = aiOpen(f)('https://chat.deepseek.com/');
   await browserCommit(f); assert.equal(sidebar.leases.length, 0); assert.equal(sidebar.opened.length, 0);
   assert.equal(f.calls.find(call => call[0] === 'create')[1].agentPreset, 'standard');
@@ -609,7 +576,8 @@ test('AI网页浏览器类型未注册时公开查询显示缺服务，不准备
   const sidebar = browserService(); const f = await fixture({ sidebarRight: sidebar.service, browserTabs: { get: () => undefined } });
   f.render(); f.flushEffects(); await button(f.render(), 'AI 网页').props.onClick(); await browserCommit(f);
   await assert.rejects(aiOpen(f)('https://chat.deepseek.com/'), /内置浏览器还没就绪/);
-  assert.equal(f.calls.length, 0); assert.deepEqual(sidebar.leases, []); assert.deepEqual(sidebar.opened, []);
+  // 起始页专家团队读一次定时任务目录（只读），不算。
+  assert.equal(f.calls.filter(([kind, input]) => !(kind === 'automation' && input?.action === 'catalog')).length, 0); assert.deepEqual(sidebar.leases, []); assert.deepEqual(sidebar.opened, []);
 });
 
 test('AI网页API只向准确mounted会话交付，缺失或换身份不补发', async () => {
@@ -633,23 +601,6 @@ test('同一个AI只占一个网页标签：已开着就切回去，被关掉后
   assert.equal(opened.length, 3); assert.deepEqual(focused, ['tab-1']);
   await f.clients['ai-web'].openBrowser('https://chat.deepseek.com/', 'session-one', 'deepseek');
   assert.deepEqual(focused, ['tab-1', 'tab-3']);
-});
-
-test('模型世界排序读取失败保留已接受方向，重试只读取待确认排序', async () => {
-  let fail = true;
-  const f = await fixture({ world: async input => input.direction === 'asc' && fail ? { ok: false, error: { code: 'IO', message: '读取失败' } } : { ok: true, value: worldReply(input, [worldModel('one')]) } });
-  await worldReady(f, '实力榜');
-  await worldSort(f).props.onClick();
-  assert.ok(JSON.stringify(worldSort(f).props.children).includes('从高到低'));
-  fail = false; await button(f.render(), '重试').props.onClick();
-  assert.ok(JSON.stringify(worldSort(f).props.children).includes('从低到高'));
-});
-
-test('模型世界持久恢复未知按后端原因展示，不声称确定没有保存', async () => {
-  const f = await fixture({ world: async input => ({ ok: true, value: worldReply(input, [worldModel('one')], { lastRefresh: { status: 'error', code: 'WORLD_STORAGE_UNKNOWN', message: '持久结果恢复未确认，请核对本地存储' } }) }) });
-  await worldReady(f);
-  const text = JSON.stringify(f.render()); assert.ok(text.includes('持久结果恢复未确认，请核对本地存储'));
-  assert.equal(text.includes('更新失败，保留旧快照'), false);
 });
 
 test('定时默认模板与组件缺失帮助不创建会话、不读取知识来源、不调用模型', async () => {
@@ -989,8 +940,20 @@ test('定时原生会话回执丢失与坏恢复缓存不触发第二身份或�
 
 test('真实模块工厂注册宿主和工作台 slots，纯渲染不创建会话', async () => {
   const f = await fixture();
-  assert.deepEqual([...f.entries.keys()].sort(), ['sidebar.panellist', 'main', 'whalewing.workbench.tab', 'whalewing.workbench.dock', 'browser.toolbar.actions', 'conversation.session.header.actions', 'conversation.input.left', 'conversation.hero.actions', 'conversation.hero.options', 'whalewing.assistant.conversation', 'tool.call.toolview', 'shell.overlay', 'plugins.detail.section'].sort());
-  assert.equal(f.entries.get('tool.call.toolview').options.key, 'whalewing_handoff');
+  assert.deepEqual([...f.entries.keys()].sort(), ['sidebar.panellist', 'main', 'whalewing.workbench.tab', 'whalewing.workbench.dock', 'browser.toolbar.actions', 'conversation.session.header.actions', 'conversation.input.left', 'conversation.hero.actions', 'conversation.hero.options', 'whalewing.assistant.conversation', 'whalewing.experts.conversation', 'tool.call.toolview', 'shell.overlay', 'conversation.chat.commandview', 'plugins.detail.section'].sort());
+  // 鲸翼只给程序用的命令在对话里不画（2026-11-14 真模型手测时会话顶上露出一行 JSON）。
+  const silent = f.registrations.get('conversation.chat.commandview');
+  assert.deepEqual(silent.map(entry => entry.options.key).sort(), [...internalCommands].sort());
+  assert.ok(silent.every(entry => entry.Component() === null));
+  // 名单和实际注册的内部命令对得上：小鲸派工、办公工坊的命令名从模块里取，index.js 和专家的按源码核对。
+  assert.ok(internalCommands.includes(dispatchCommand) && internalCommands.includes(jobCommand));
+  assert.match(readFileSync(new URL('../index.js', import.meta.url), 'utf8'), /name: 'whalewing', description:/);
+  assert.match(readFileSync(new URL('../features/experts/host.js', import.meta.url), 'utf8'), /const commandName = 'whalewing-expert';/);
+  const sources = ['src', 'features'].flatMap(folder => readdirSync(new URL(`../${folder}/`, import.meta.url), { recursive: true }).filter(name => name.endsWith('.js') && !/node_modules/.test(name)).map(name => new URL(`../${folder}/${name.replaceAll('\\', '/')}`, import.meta.url)));
+  const registered = [new URL('../index.js', import.meta.url), ...sources].reduce((count, file) => count + (readFileSync(file, 'utf8').match(/commands\.register\(/g) || []).length, 0);
+  assert.equal(registered, internalCommands.length, '新加了 DSH 命令：只给程序用的要加进 src/internal-commands.js');
+  // 小鲸的两张卡片：交给专家、建专家改专家。
+  assert.deepEqual(f.registrations.get('tool.call.toolview').map(entry => entry.options.key), ['whalewing_handoff', 'whalewing_expert_edit', 'whalewing_expert_schedule']);
   assert.equal(typeof f.entries.get('browser.toolbar.actions').Component, 'function');
   assert.equal(f.entries.get('browser.toolbar.actions').options.id, 'whalewing-ai-picker');
   assert.equal(f.entries.get('main').options.key, 'whalewing');
@@ -1107,7 +1070,7 @@ test('关联错误中的宿主已创建身份穿透，错误关联回执保留�
 
 test('首次进入个人知识直连文件服务，不准备会话或选择专家', async () => {
   const f = await fixture();
-  await button(f.render(), '个人知识').props.onClick();
+  await button(f.render(), '知识积累').props.onClick();
   assert.equal(f.calls.filter(([kind]) => kind === 'create').length, 0);
   assert.equal(f.calls.some(([kind]) => ['expert', 'open', 'projections', 'claim'].includes(kind)), false);
   assert.deepEqual(f.calls, [['knowledge', { action: 'status' }], ['knowledge', { action: 'graph', query: '', offset: 0 }]]);
@@ -1126,7 +1089,7 @@ test('检查弹窗写出属性链接结果和文风结果：用了不推荐词�
       if (input.action === 'validate') return { ok: true, value: { valid: true, issues: [], notes: 30, style } };
       return { ok: true, value: { initialized: true, root: 'fixture-vault' } };
     } });
-    await button(f.render(), '个人知识').props.onClick();
+    await button(f.render(), '知识积累').props.onClick();
     await button(f.render(), '检查属性与链接').props.onClick();
     const text = JSON.stringify(f.render());
     assert.ok(text.includes('知识检查'), '弹窗打开了');
@@ -1136,11 +1099,11 @@ test('检查弹窗写出属性链接结果和文风结果：用了不推荐词�
 
 test('知识页不受旧工作台未认领或会话服务失败阻塞，取消信号传到Remote', async () => {
   const f = await fixture({ projections: () => assert.fail('纯知识不读会话'), create: () => assert.fail('纯知识不创建会话') });
-  await button(f.render(), '个人知识').props.onClick();
+  await button(f.render(), '知识积累').props.onClick();
   assert.equal(button(f.render(), '新建笔记').props.disabled, false);
   let signal;
   const pending = await fixture({ knowledge: (input, received) => { signal = received; return new Promise((_resolve, reject) => received.addEventListener('abort', () => reject(received.reason), { once: true })); } });
-  const job = button(pending.render(), '个人知识').props.onClick();
+  const job = button(pending.render(), '知识积累').props.onClick();
   assert.ok(signal instanceof AbortSignal);
   button(pending.render(), '停止等待结果').props.onClick();
   assert.equal(signal.aborted, true);
@@ -1180,10 +1143,11 @@ test('资料预检失败不创建会话，讨论准备失败保留同一助手�
   assert.equal(f.calls.filter(([kind]) => kind === 'prompt').length, 0);
 });
 
-test('专家卡默认不登记知识来源，成功后进入原生主会话', async () => {
+test('专家团队页开始新任务默认不登记知识来源，在中间那栏打开、不跳走，还不在用的记成选用', async () => {
   const f = await fixture();
   await button(f.render(), '开始新任务').props.onClick();
-  assert.deepEqual(f.calls, [['create', { workspaceId: 'default-workspace' }], ['projections', 'new-session'], ['expert', 'new-session', { expertId: 'manager' }], ['projections', 'new-session'], ['projections', 'new-session'], ['open', 'new-session']]);
+  assert.deepEqual(f.calls, [['create', { workspaceId: 'default-workspace' }], ['projections', 'new-session'], ['expert', 'new-session', { expertId: 'development' }], ['projections', 'new-session'], ['projections', 'new-session'], ['roster', 'development', 'picked']]);
+  assert.ok(nodes(f.render()).some(node => node.type === 'section' && node.props['aria-label'] === '研发专家说的话'));
 });
 
 test('重复点击 pending 创建按钮不会创建第二个会话', async () => {
@@ -1211,10 +1175,9 @@ test('读取笔记、清空正文后的草稿仍受保护，冲突不覆盖草�
     if (payload.action === 'write') return { ok: true, value: { result: { kind: 'error', text: JSON.stringify({ code: 'conflict', message: '已修改' }) } } };
     assert.fail(`意外动作: ${payload.action}`);
   } });
-  await button(f.render(), '个人知识').props.onClick();
+  await button(f.render(), '知识积累').props.onClick();
   await button(f.render(), '刷新').props.onClick();
-  nodes(f.render()).find(node => node.type === 'input' && node.props.value === '').props.onChange({ target: { value: '已有' } });
-  nodes(f.render()).find(node => node.type === 'input' && node.props.value === '已有').props.onKeyDown({ key: 'Enter' }); await new Promise(setImmediate);
+  await searchNotes(f, '已有');
   await button(f.render(), '已有笔记').props.onClick();
   button(f.render(), '编辑').props.onClick();
   nodes(f.render()).find((node) => node.type === 'textarea').props.onChange({ target: { value: '' } });
@@ -1239,10 +1202,9 @@ test('保存后必须回读且检查 hash，未使用写前正文冒充最新内
     if (payload.action === 'write') { assert.equal(payload.expectedHash, 'old'); stored = payload.content; hash = 'new'; return success({ path: 'note.md', hash }); }
     assert.fail(`意外动作: ${payload.action}`);
   } });
-  await button(f.render(), '个人知识').props.onClick();
+  await button(f.render(), '知识积累').props.onClick();
   await button(f.render(), '刷新').props.onClick();
-  nodes(f.render()).find(node => node.type === 'input' && node.props.value === '').props.onChange({ target: { value: '已有' } });
-  nodes(f.render()).find(node => node.type === 'input' && node.props.value === '已有').props.onKeyDown({ key: 'Enter' }); await new Promise(setImmediate);
+  await searchNotes(f, '已有');
   await button(f.render(), '已有笔记').props.onClick();
   button(f.render(), '编辑').props.onClick();
   nodes(f.render()).find((node) => node.type === 'textarea').props.onChange({ target: { value: '新正文' } });
@@ -1262,7 +1224,7 @@ test('新建笔记提供本地日期五属性与同名标题，只生成可编�
     if (payload.action === 'search') return success({ notes: [] });
     assert.fail(`不应持久化新草稿: ${payload.action}`);
   } });
-  await button(f.render(), '个人知识').props.onClick();
+  await button(f.render(), '知识积累').props.onClick();
   await button(f.render(), '刷新').props.onClick();
   const before = actions.length;
   const now = new Date();
@@ -1278,6 +1240,9 @@ test('新建笔记提供本地日期五属性与同名标题，只生成可编�
   assert.equal(button(f.render(), '选用当前笔记').props.disabled, true);
   assert.equal(actions.length, before);
 });
+
+/** 技能中心页“我的”列表里某项技能那一行的按钮（行是 li，key 是技能 id）。 */
+const skillRow = (tree, id) => nodes(nodes(tree).find(node => node.type === 'li' && node.props.key === id)).find(node => node.type === 'button');
 
 /** UI 夹具保持列表诊断与正文读取独立，模拟 Host 的技能生命周期。 */
 async function skillFixture(state = 'active', rejectRollback = false, additional = []) {
@@ -1297,7 +1262,7 @@ async function skillFixture(state = 'active', rejectRollback = false, additional
     if (payload.action === 'restore') { record = { ...record, state: 'active' }; return reply(record); }
     assert.fail(`意外动作: ${payload.action}`);
   } });
-  await button(f.render(), '技能成长').props.onClick();
+  await button(f.render(), '技能中心').props.onClick();
   await button(f.render(), '刷新').props.onClick();
   await button(f.render(), 'fixture-skill').props.onClick();
   return { f, requests };
@@ -1305,9 +1270,9 @@ async function skillFixture(state = 'active', rejectRollback = false, additional
 
 test('技能列表和详情保留来源失效诊断，不仅显示已启用', async () => {
   const { f } = await skillFixture();
-  const issues = nodes(f.render()).filter((node) => node.props.children.includes('待处理: 来源内容已变化'));
-  assert.equal(issues.length, 2);
-  assert.ok(issues.some((node) => node.props.role === 'status'));
+  const status = nodes(f.render()).find((node) => node.type === 'span' && node.props.className === 'ww-kit-status');
+  assert.deepEqual(status.props.children, ['需要修复']); assert.equal(status.props.title, '来源内容已变化'); assert.equal(status.props['data-tone'], 'error');
+  assert.ok(nodes(f.render()).some((node) => node.props.role === 'status' && node.props.children.includes('需要修复：来源内容已变化')));
 });
 
 test('回退必须确认，使用active hash并回读旧版，不把restore当回退', async () => {
@@ -1358,7 +1323,7 @@ test('角色卡可将同一专家分别配标准或创造模式，原生列表�
     await button(f.render(), '开始新任务').props.onClick();
   }
   assert.deepEqual(f.calls.filter(([kind]) => kind === 'create'), [['create', { agentPreset: 'standard', workspaceId: 'default-workspace' }], ['create', { agentPreset: 'cordis', workspaceId: 'default-workspace' }]]);
-  assert.deepEqual(f.calls.filter(([kind, , data]) => kind === 'expert' && data.expertId).map(([, , data]) => data.expertId), ['manager', 'manager']);
+  assert.deepEqual(f.calls.filter(([kind, , data]) => kind === 'expert' && data.expertId).map(([, , data]) => data.expertId), ['development', 'development']);
   assert.equal(f.entries.has('conversation.hero.agentPreset'), false);
 });
 
@@ -1375,6 +1340,18 @@ test('官方无名模式复用宿主词典，自定义名称和未知模式保�
   const select = nodes(f.render()).find((node) => node.type === 'select' && node.props['aria-label'] === 'DSH 模式');
   assert.deepEqual(nodes(select).filter((node) => node.type === 'option').slice(1).map((node) => node.props.children[0]), expected);
   assert.equal(presets[0].name, undefined);
+});
+
+// 2026-11-14：提示每次弹出都带一整份外壳样式，会排到按需加载的办公工坊、模型世界样式后面，把它们同样分量的规则盖掉
+// （办公工坊开始页弹提示后标题变小、输入框变成等宽字）。鲸翼页面开着时样式已在页面里，提示不再带。
+test('鲸翼页面开着时右上角提示不再重复带外壳样式；页面没开着时照常带上', async () => {
+  const { f } = await skillFixture('disabled', true);
+  assert.ok(nodes(f.render()).some(node => node.type === 'style' && node.props['data-ww-page-css'] === ''), '页面里的那份样式有标记');
+  await button(f.render(), '恢复技能').props.onClick();
+  const styles = () => nodes(f.render('shell.overlay')).filter(node => node.type === 'style').length;
+  assert.equal(styles(), 1, '找不到页面里的样式时，提示自己带上');
+  f.document.querySelector = selector => selector === 'style[data-ww-page-css]' ? {} : null;
+  try { assert.equal(styles(), 0, '页面开着时不再带'); } finally { delete f.document.querySelector; }
 });
 
 test('恢复成功提示在下一次回退确认前清除，失败后可取消且旧提示不复现', async () => {
@@ -1424,8 +1401,8 @@ test('专用工作台只创建一次，跨标签和页面实例依靠正式投�
   assert.equal(f.workbenchSession.ensureWorkbench(), pending);
   const id = await pending;
   assert.equal(await f.workbenchSession.ensureWorkbench(), id);
-  await button(f.render(), '个人知识').props.onClick();
-  await button(f.render(), '技能成长').props.onClick();
+  await button(f.render(), '知识积累').props.onClick();
+  await button(f.render(), '技能中心').props.onClick();
   await button(f.render(), '定时任务').props.onClick();
   assert.equal(f.calls.filter(([kind]) => kind === 'create').length, 1);
   assert.equal(f.calls.some(([kind]) => kind === 'expert' || kind === 'open'), false);
@@ -1476,7 +1453,7 @@ test('知识初始化失败显示重试且从未建会话，旧库说明保持�
     if (input.action === 'search') return success({ notes: [] });
     assert.fail(input.action);
   } });
-  await button(f.render(), '个人知识').props.onClick();
+  await button(f.render(), '知识积累').props.onClick();
   assert.ok(nodes(f.render()).some((node) => node.props.role === 'alert' && node.props.children.includes(shown('ROOT', '目录不可写：fixture-vault'))));
   await button(f.render(), '重试').props.onClick();
   assert.equal(f.calls.filter(([kind]) => kind === 'create').length, 0);
@@ -1485,11 +1462,11 @@ test('知识初始化失败显示重试且从未建会话，旧库说明保持�
 
 test('切标签和刷新不会丢弃知识草稿', async () => {
   const f = await fixture();
-  await button(f.render(), '个人知识').props.onClick();
+  await button(f.render(), '知识积累').props.onClick();
   button(f.render(), '新建笔记').props.onClick();
   nodes(f.render()).find((node) => node.type === 'textarea').props.onChange({ target: { value: '未保存的草稿' } });
-  await button(f.render(), '技能成长').props.onClick();
-  await button(f.render(), '个人知识').props.onClick();
+  await button(f.render(), '技能中心').props.onClick();
+  await button(f.render(), '知识积累').props.onClick();
   await button(f.render(), '刷新').props.onClick();
   assert.equal(nodes(f.render()).find((node) => node.type === 'textarea').props.value, '未保存的草稿');
 });
@@ -1501,6 +1478,10 @@ test('原生slot专家选择显示名字职责，切换与清除均不改模式'
   const slot = 'conversation.session.header.actions';
   let tree = f.render(slot, props);
   assert.equal(f.entries.get(slot).options.order, -9);
+  // 第三版：小鲸在最上面，没在用的专家收在“更多专家”里，点开才列出来。
+  assert.equal(nodes(tree).some(node => node.type === 'small' && node.props.children.includes('修改工程')), false);
+  button(tree, '更多专家 · 专家库 1 位').props.onClick();
+  tree = f.render(slot, props);
   assert.ok(nodes(tree).some(node => node.type === 'small' && node.props.children.includes('修改工程')));
   const choice = nodes(tree).find(node => node.type === 'button' && nodes(node).some(child => child.type === 'strong' && child.props.children.includes('小鲸助手')));
   await choice.props.onClick();
@@ -1588,10 +1569,9 @@ test('笔记阅读区右侧栏列出目录、反链和出链，属性在大标�
     if (input.action === 'search') return { ok: true, value: { notes: [{ path: doc.path, title: '目标' }] } };
     if (input.action === 'document') { opened.push(input.path); return { ok: true, value: input.path === doc.path ? doc : { ...doc, path: input.path, properties: [], backlinks: [], totalBacklinks: 0 } }; }
     assert.fail(input.action);
-  }, expand: ['NoteSide'] });
-  await button(f.render(), '个人知识').props.onClick();
-  nodes(f.render()).find(node => node.type === 'input' && node.props.value === '').props.onChange({ target: { value: '目标' } });
-  nodes(f.render()).find(node => node.type === 'input' && node.props.value === '目标').props.onKeyDown({ key: 'Enter' }); await new Promise(setImmediate);
+  }, expand: ['SidePanel'] });
+  await button(f.render(), '知识积累').props.onClick();
+  await searchNotes(f, '目标');
   await button(f.render(), '目标').props.onClick();
   const byClass = (name, tree = f.render()) => nodes(tree).filter(node => String(node.props?.className || '').split(' ').includes(name));
   const words = node => nodes(node).flatMap(child => [child.props?.children].flat()).filter(value => typeof value === 'string' || typeof value === 'number').join('|');
@@ -1603,22 +1583,25 @@ test('笔记阅读区右侧栏列出目录、反链和出链，属性在大标�
   assert.equal(byClass('ww-unresolved').filter(node => node.type === 'button').length, 1);
   await byClass('ww-prop-link')[0].props.onClick();
   assert.equal(opened.at(-1), '20-项目/甲.md');
-  await button(f.render(), '返回上一篇').props.onClick();
-  // 窄的时候右侧栏收着，点工具条上的按钮浮出来：三页带数量，目录按标题级别缩进。
-  assert.equal(byClass('ww-note-side').length, 0);
+  await button(f.render(), '后退').props.onClick();
+  assert.equal(opened.at(-1), doc.path, '后退回到原来那篇');
+  // 够宽时右侧栏和正文并排、默认开着，页签条右头的按钮能收起再打开。
+  // 六页只放图标（名字在 aria-label 里），前三页角上挂着数量；目录按标题级别缩进。
+  const side = () => byClass('ww-note-side');
+  assert.equal(side().length, 1);
   byClass('ww-side-toggle')[0].props.onClick();
-  assert.equal(byClass('ww-note-side').length, 1);
-  assert.deepEqual(nodes(f.render()).filter(node => node.props?.role === 'tab').map(words), ['目录|3', '反链|3', '出链|2']);
+  assert.equal(side().length, 0);
+  byClass('ww-side-toggle')[0].props.onClick();
+  const sideTab = label => nodes(side()[0]).find(node => node.props?.role === 'tab' && node.props['aria-label'] === label);
+  assert.deepEqual(nodes(side()[0]).filter(node => node.props?.role === 'tab').map(node => [node.props['aria-label'], words(node)]), [['目录', '3'], ['反链', '3'], ['出链', '2'], ['标签', ''], ['属性', ''], ['局部图谱', '']]);
   assert.deepEqual(byClass('ww-side-outline')[0].props.children.map(node => [words(node), node.props.style.paddingInlineStart]), [['目标', '10px'], ['观点', '24px'], ['细节', '38px']]);
   // 反链按笔记归组，同一行只列一次；属性里的反链标出属性名。点摘要打开那篇笔记。
-  nodes(f.render()).find(node => node.props?.role === 'tab' && words(node).startsWith('反链')).props.onClick();
+  sideTab('反链').props.onClick();
   assert.deepEqual(byClass('ww-side-group').map(words), ['日记|2|提到目标', '甲|1|属性 · moc']);
   await byClass('ww-side-snippet')[0].props.onClick();
   assert.equal(opened.at(-1), '60-时间线/日记.md');
-  assert.equal(byClass('ww-note-side').length, 0, '窄的时候跳转后侧栏自动收起');
-  await button(f.render(), '返回上一篇').props.onClick();
-  byClass('ww-side-toggle')[0].props.onClick();
-  nodes(f.render()).find(node => node.props?.role === 'tab' && words(node).startsWith('出链')).props.onClick();
+  await button(f.render(), '后退').props.onClick();
+  sideTab('出链').props.onClick();
   assert.deepEqual(byClass('ww-side-links')[0].props.children.map(words), ['缺的笔记|未创建', '甲|20-项目']);
 });
 
@@ -1632,9 +1615,8 @@ test('保存已回读时关系或列表失败仍更新哈希，下一次保存�
     if (input.action === 'write') { assert.equal(input.expectedHash, hash); stored = input.content; hash = String(++writes); return { ok: true, value: { path: input.path, hash } }; }
     assert.fail(input.action);
   } });
-  await button(f.render(), '个人知识').props.onClick();
-  nodes(f.render()).find(node => node.type === 'input' && node.props.value === '').props.onChange({ target: { value: '正常' } });
-  nodes(f.render()).find(node => node.type === 'input' && node.props.value === '正常').props.onKeyDown({ key: 'Enter' }); await new Promise(setImmediate);
+  await button(f.render(), '知识积累').props.onClick();
+  await searchNotes(f, '正常');
   await button(f.render(), '正常').props.onClick();
   button(f.render(), '编辑').props.onClick();
   for (const text of ['第一次修改', '第二次修改']) {
@@ -1657,9 +1639,8 @@ test('已提交但正文读回失败明确提示且提供恢复回读，不当�
     if (input.action === 'document') return brokenRead ? { ok: false, error: { code: 'IO', message: '暂时失去文件访问' } } : { ok: true, value: { path: '40-知识/正常.md', content: committed ? '已提交正文' : '旧正文', hash: committed ? 'new' : 'old', view: { type: 'text', value: '正文' }, links: [], backlinks: [] } };
     assert.fail(input.action);
   } });
-  await button(f.render(), '个人知识').props.onClick();
-  nodes(f.render()).find(node => node.type === 'input' && node.props.value === '').props.onChange({ target: { value: '正常' } });
-  nodes(f.render()).find(node => node.type === 'input' && node.props.value === '正常').props.onKeyDown({ key: 'Enter' }); await new Promise(setImmediate);
+  await button(f.render(), '知识积累').props.onClick();
+  await searchNotes(f, '正常');
   await button(f.render(), '正常').props.onClick();
   button(f.render(), '编辑').props.onClick();
   nodes(f.render()).find(node => node.type === 'textarea').props.onChange({ target: { value: '已提交正文' } });
@@ -1695,7 +1676,7 @@ for (const action of ['write', 'restore']) test(`${action}首次提交后回读�
     assert.fail(input.action);
   } });
   const inputFor = label => nodes(f.render()).find(node => node.type === 'label' && node.props.children.includes(label)).props.children.find(node => node?.type === 'input');
-  await button(f.render(), '个人知识').props.onClick();
+  await button(f.render(), '知识积累').props.onClick();
   // 两种操作都从 note=null 开始，不借用已有笔记对象来取得恢复身份。
   if (action === 'write') {
     button(f.render(), '新建笔记').props.onClick();
@@ -1714,7 +1695,7 @@ for (const action of ['write', 'restore']) test(`${action}首次提交后回读�
   assert.equal(button(f.render(), '恢复').props.disabled, true);
   assert.equal(button(f.render(), '读取最新内容').props.disabled, false);
   await button(f.render(), '读取最新内容').props.onClick();
-  await button(f.render(), '查找笔记').props.onClick();
+  await searchNotes(f, '恢复');
   assert.equal(button(f.render(), '读取最新内容').props.disabled, false);
   brokenRead = false;
   await button(f.render(), '读取最新内容').props.onClick();
@@ -1730,6 +1711,118 @@ for (const action of ['write', 'restore']) test(`${action}首次提交后回读�
 });
 
 
+/** 知识积累 2026-11-11 起的页签：每个页签的标题和是否选中。 */
+const knowledgeTabs = tree => nodes(tree).filter(node => node.type === 'button' && node.props.className === 'ww-kn-tab-main').map(node => `${node.props['aria-selected'] ? '*' : ''}${nodes(node).find(child => child.type === 'span').props.children.join('')}`);
+const knowledgeFixture = async (extra = {}) => {
+  const docs = { '40-知识/甲.md': '甲的正文', '40-知识/乙.md': '乙的正文更长一些', '40-知识/丙.md': '丙' };
+  const requests = [];
+  const f = await fixture({ ...extra, knowledge: async input => {
+    requests.push(input);
+    if (input.action === 'status') return { ok: true, value: { initialized: true, root: 'vault', limits: { maxGraphNodes: 200 } } };
+    if (input.action === 'graph') return { ok: true, value: { ...emptyGraph(), nodes: [{ kind: 'note', readOnly: false, path: '40-知识/甲.md', title: '甲', degree: 0 }], total: 1 } };
+    if (input.action === 'search') return { ok: true, value: { notes: Object.keys(docs).map(path => ({ path, title: path.split('/').at(-1).replace('.md', '') })), total: 3, truncated: false } };
+    if (input.action === 'overview') return { ok: true, value: { notes: Object.keys(docs).map((path, i) => ({ path, title: path.split('/').at(-1).replace('.md', ''), aliases: i === 2 ? ['第三篇'] : [], created: `2026-11-0${i + 1}` })), tags: [{ name: '读书', count: 2, notes: ['40-知识/甲.md', '40-知识/乙.md'] }], properties: [{ name: 'type', count: 3 }] } };
+    if (input.action === 'document') return { ok: true, value: { path: input.path, content: docs[input.path], hash: input.path, view: { type: 'text', value: docs[input.path] }, links: [], backlinks: [], totalBacklinks: 0 } };
+    if (input.action === 'write') { docs[input.path] = input.content; return { ok: true, value: { path: input.path, hash: input.path } }; }
+    assert.fail(`意外动作: ${input.action}`);
+  } });
+  await button(f.render(), '知识积累').props.onClick();
+  return { f, requests, docs };
+};
+
+test('知识积累的页签：图里点开的笔记另开页签，笔记页签里打开的在原处换、能后退前进，Ctrl 点击另开', async () => {
+  const { f } = await knowledgeFixture();
+  assert.deepEqual(knowledgeTabs(f.render()), ['*关系图谱']);
+  await nodes(f.render()).find(node => node.type?.name === 'GraphCanvas').props.onOpenNote({ path: '40-知识/甲.md' });
+  assert.deepEqual(knowledgeTabs(f.render()), ['关系图谱', '*甲']);
+  // 状态栏：反向链接几个、正文多少字（不算空白和属性区）。
+  assert.deepEqual(nodes(f.render()).find(node => node.props?.className === 'ww-kn-status').props.children.map(node => node.props.children[0]), ['0 个反向链接', '4 字']);
+  await searchNotes(f, '笔记');
+  await button(f.render(), '乙').props.onClick({});
+  assert.deepEqual(knowledgeTabs(f.render()), ['关系图谱', '*乙'], '在笔记页签里打开的在原处换');
+  assert.equal(button(f.render(), '前进').props.disabled, true);
+  await button(f.render(), '后退').props.onClick();
+  assert.deepEqual(knowledgeTabs(f.render()), ['关系图谱', '*甲']);
+  await button(f.render(), '前进').props.onClick();
+  assert.deepEqual(knowledgeTabs(f.render()), ['关系图谱', '*乙']);
+  await button(f.render(), '丙').props.onClick({ ctrlKey: true });
+  assert.deepEqual(knowledgeTabs(f.render()), ['关系图谱', '乙', '*丙'], 'Ctrl 点击另开页签，开在当前页签后面');
+  // 切回关系图谱不重读也不丢图；再点开已经开着的那篇就切过去，不重复开。
+  await nodes(f.render()).find(node => node.props?.className === 'ww-kn-tab-main' && node.props['aria-selected'] === false && nodes(node).some(child => child.props?.children?.includes?.('关系图谱'))).props.onClick();
+  assert.deepEqual(knowledgeTabs(f.render()), ['*关系图谱', '乙', '丙']);
+  await nodes(f.render()).find(node => node.type?.name === 'GraphCanvas').props.onOpenNote({ path: '40-知识/乙.md' });
+  assert.deepEqual(knowledgeTabs(f.render()), ['关系图谱', '*乙', '丙']);
+});
+
+test('知识积累的页签：关掉有没保存修改的页签先居中确认，取消不动；关到最后留一个空白页签，里面能新建、快速切换、打开图谱', async () => {
+  const { f } = await knowledgeFixture({ expand: ['EmptyTab'] });
+  await nodes(f.render()).find(node => node.type?.name === 'GraphCanvas').props.onOpenNote({ path: '40-知识/甲.md' });
+  button(f.render(), '编辑').props.onClick();
+  nodes(f.render()).find(node => node.type === 'textarea').props.onChange({ target: { value: '改了没保存' } });
+  assert.ok(nodes(f.render()).some(node => node.props?.className === 'ww-kn-dot'), '页签上标出没保存');
+  assert.equal(button(f.render(), '关系图谱').props.disabled, true, '有草稿时不能切去图谱');
+  button(f.render(), '关掉“甲”').props.onClick();
+  const dialog = () => nodes(f.render()).find(node => node.type === 'dialog' && node.props['aria-label'] === '放弃草稿');
+  assert.ok(dialog(), '居中确认');
+  button(dialog(), '取消').props.onClick();
+  assert.equal(nodes(f.render()).find(node => node.type === 'textarea').props.value, '改了没保存');
+  button(f.render(), '关掉“甲”').props.onClick();
+  button(dialog(), '放弃当前草稿').props.onClick();
+  assert.deepEqual(knowledgeTabs(f.render()), ['*关系图谱']);
+  button(f.render(), '关掉“关系图谱”').props.onClick();
+  assert.deepEqual(knowledgeTabs(f.render()), ['*新页签']);
+  assert.equal(button(f.render(), '关掉这个页签').props.disabled, true, '只剩一个空白页签时不用再关');
+  await button(f.render(), '打开关系图谱').props.onClick();
+  assert.deepEqual(knowledgeTabs(f.render()), ['新页签', '*关系图谱']);
+  button(f.render(), '开新页签').props.onClick();
+  button(f.render(), '新建一篇笔记').props.onClick();
+  assert.equal(knowledgeTabs(f.render()).at(-1).startsWith('*'), true);
+  assert.match(nodes(f.render()).find(node => node.type === 'textarea').props.value, /type: capture/);
+});
+
+test('右栏的标签和属性看整个知识库，用到时才读；点标签列出带它的笔记，能在图里只看这个标签', async () => {
+  const { f, requests } = await knowledgeFixture({ expand: ['SidePanel'] });
+  assert.equal(requests.some(input => input.action === 'overview'), false, '没打开标签、属性页时不读');
+  nodes(f.render()).find(node => node.props?.role === 'tab' && node.props['aria-label'] === '标签').props.onClick();
+  f.render(); f.flushEffects(); await new Promise(setImmediate);
+  const facets = () => nodes(f.render()).filter(node => String(node.props?.className || '').includes('ww-side-facet'));
+  assert.deepEqual(facets().map(node => nodes(node).find(child => child.type === 'strong').props.children[0]), ['#读书']);
+  facets()[0].props.onClick();
+  assert.ok(button(f.render(), '甲') && button(f.render(), '乙'));
+  await button(f.render(), '在关系图谱里只看这个标签').props.onClick();
+  assert.equal(JSON.parse(f.storage.get('whalewing.graphSettings.v1')).search, 'tag:读书');
+  nodes(f.render()).find(node => node.props?.role === 'tab' && node.props['aria-label'] === '属性').props.onClick();
+  assert.deepEqual(facets().map(node => nodes(node).find(child => child.type === 'strong').props.children[0]), ['type']);
+  assert.equal(requests.filter(input => input.action === 'overview').length, 1, '知识库没改过就不重读');
+});
+
+test('快速切换：Ctrl O 打开，敲名字按名字开头、名字里、别名排序，回车在原处打开，Ctrl 回车另开页签；没有这篇就新建到收件箱', async () => {
+  const { f } = await knowledgeFixture({ expand: ['QuickSwitcher'] });
+  f.render(); f.flushEffects();
+  const keydown = event => [...(f.windowEvents.get('keydown') || [])].forEach(fn => fn({ preventDefault() {}, ...event }));
+  keydown({ key: 'o', ctrlKey: true });
+  f.render(); f.flushEffects(); await new Promise(setImmediate);
+  const input = () => nodes(f.render()).find(node => node.type === 'input' && node.props['aria-label'] === '敲笔记名，回车打开');
+  const options = () => nodes(f.render()).filter(node => node.props?.role === 'option').map(node => `${node.props['aria-selected'] ? '*' : ''}${nodes(node).find(child => child.type === 'span').props.children[0]}`);
+  assert.ok(input(), 'Ctrl O 打开了快速切换');
+  assert.deepEqual(options(), ['*丙', '乙', '甲'], '没输入时新建的在前');
+  input().props.onChange({ target: { value: '第三' } });
+  assert.deepEqual(options(), ['*丙', '新建《第三》'], '别名也能找到；名字对不上时最后一项是新建');
+  input().props.onChange({ target: { value: '乙' } });
+  await input().props.onKeyDown({ key: 'Enter', preventDefault() {} }); await new Promise(setImmediate);
+  assert.deepEqual(knowledgeTabs(f.render()), ['关系图谱', '*乙']);
+  keydown({ key: 'O', metaKey: true }); f.render(); f.flushEffects(); await new Promise(setImmediate);
+  input().props.onChange({ target: { value: '甲' } });
+  input().props.onKeyDown({ key: 'Enter', ctrlKey: true, preventDefault() {} }); await new Promise(setImmediate);
+  assert.deepEqual(knowledgeTabs(f.render()), ['关系图谱', '乙', '*甲']);
+  keydown({ key: 'o', ctrlKey: true }); f.render(); f.flushEffects(); await new Promise(setImmediate);
+  input().props.onChange({ target: { value: '新的想法' } });
+  assert.deepEqual(options(), ['*新建《新的想法》']);
+  input().props.onKeyDown({ key: 'Enter', preventDefault() {} });
+  assert.equal(nodes(f.render()).find(node => node.type === 'input' && node.props.value === '10-收件箱/新的想法.md')?.props.readOnly, false);
+  assert.match(nodes(f.render()).find(node => node.type === 'textarea').props.value, /# 新的想法/);
+});
+
 test('知识目录只显示标题，按目录懒加载并在卸载时取消读取', async () => {
   let signal;
   const f = await fixture({ knowledge: async (input, current) => {
@@ -1739,7 +1832,7 @@ test('知识目录只显示标题，按目录懒加载并在卸载时取消读�
     assert.equal(input.action, 'browse'); signal = current;
     return { ok: true, value: { directory: '', folders: [{ path: '40-知识', name: '40-知识' }], notes: [{ path: '首页.md', title: '首页', excerpt: '正文禁止出现在目录' }], offset: 0, total: 1, truncated: false } };
   } });
-  await button(f.render(), '个人知识').props.onClick();
+  await button(f.render(), '知识积累').props.onClick();
   const directory = nodes(f.render()).find(node => typeof node.type === 'function' && node.type.name === 'Directory');
   const render = f.isolate(directory); render(); f.flushEffects(); await new Promise(setImmediate);
   const tree = render();
@@ -1803,6 +1896,34 @@ test('小鲸空资料仍可启动，固定标准模式，停靠悬浮收起不�
   f.unmount(); assert.equal(f.calls.filter(([kind]) => kind === 'release').length, 1);
 });
 
+test('小鲸面板上的“派出去的事”：有派出去的任务才显示，等审批的点“去审批”回到专家团队页打开那个任务', async () => {
+  const f = await fixture({ expand: ['DispatchStrip'] });
+  await button(f.render(), '开始与小鲸协作').props.onClick();
+  const render = () => f.render('main', { SessionProvider: 'SessionProvider', renderSlot: name => ({ type: name, props: { children: [] } }) });
+  render(); f.flushEffects(); await new Promise(setImmediate);
+  const strip = () => nodes(render()).find(node => node.type === 'details' && node.props.className === 'ww-dispatch-strip');
+  assert.equal(strip(), undefined, '没有派出去的事时不显示');
+  const current = f.ctx.sessions.list.getSnapshot();
+  const dispatch = status => ({ title: '修登录', from: 'assistant', status, reply: '', turns: 1 });
+  f.ctx.sessions.list.set({ ...current, byId: { ...current.byId,
+    'task-1': { id: 'task-1', title: '研发专家 · 修登录', updatedAt: Date.now(), blank: false, projectionValues: { whalewingDispatch: dispatch('waiting') } } } });
+  assert.equal(strip(), undefined, '专家团队页左栏已经写了谁在干什么，不再列');
+  await button(render(), '技能中心').props.onClick();
+  const shown = strip();
+  assert.ok(shown);
+  assert.equal(shown.props.open, false, '别的页上默认收成一行');
+  const approve = nodes(shown).find(node => node.type === 'button' && node.props['aria-label'] === '去审批：研发专家 · 修登录');
+  assert.ok(approve);
+  const before = f.calls.length;
+  approve.props.onClick();
+  // 和对话里的派工卡片一样回到专家团队页，不在主区打开（2026-11-14 改）。
+  assert.equal(f.calls.slice(before).some(([kind]) => kind === 'open'), false);
+  assert.equal(f.ctx.get('whalewingWorkbench').internal.clients.experts.viewRequest()?.task, 'task-1', '请专家团队页在中间那栏打开这件任务');
+  // 归档了就不列。
+  f.ctx.workspaces.list.set({ ...f.ctx.workspaces.list.getSnapshot(), archivedSessionIds: ['task-1'] });
+  assert.equal(strip(), undefined);
+});
+
 test('专家新增默认跟随系统，必填项先校验，冲突保留输入和选择', async () => {
   const requests = [];
   const f = await fixture({ experts: async input => {
@@ -1811,7 +1932,7 @@ test('专家新增默认跟随系统，必填项先校验，冲突保留输入�
     if (input.action === 'catalog') return { ok: true, value: { models: [{ id: 'deepseek-official', name: 'DeepSeek', models: [{ id: 'deepseek-flash', name: 'DeepSeek v4.1 flash' }] }], defaultModel: { provider: 'deepseek-official', model: 'deepseek-flash' }, skills: [{ name: 'existing-skill', description: '可复用方法' }], mcpServers: [], issues: [] } };
     return { ok: false, error: { code: 'conflict', message: '配置已有新版本' } };
   } });
-  nodes(f.render()).find(node => node.type === 'button' && node.props.className === 'ww-card ww-add-card').props.onClick();
+  button(f.render(), '自己填写').props.onClick();
   const editor = nodes(f.render()).find(node => typeof node.type === 'function' && node.type.name === 'ExpertEditor');
   const render = f.isolate(editor); render(); f.flushEffects(); await new Promise(setImmediate);
   await button(render(), '创建专家').props.onClick();
@@ -1842,7 +1963,7 @@ test('新增专家可从模板库或导入的模板文件开始，只保留当�
     if (input.action === 'catalog') return { ok: true, value: { models: [], defaultModel: null, skills: [{ name: 'existing-skill', description: '可复用方法' }], mcpServers: [], issues: [] } };
     return { ok: true, value: { expert: { ...input.expert, id: input.id, revision: 1, builtin: false } } };
   } });
-  nodes(f.render()).find(node => node.type === 'button' && node.props.className === 'ww-card ww-add-card').props.onClick();
+  button(f.render(), '自己填写').props.onClick();
   const render = f.isolate(nodes(f.render()).find(node => node.type.name === 'ExpertEditor'));
   render(); f.flushEffects(); await new Promise(setImmediate);
   const value = label => nodes(nodes(render()).find(node => node.type === 'label' && node.props.children.includes(label))).find(node => ['input', 'textarea'].includes(node.type)).props.value;
@@ -1893,7 +2014,7 @@ test('专家新增已提交但列表读回失败，后续保存复用返回身�
     saved = { ...input.expert, id: input.id || 'custom-one', revision: input.expectedRevision + 1, builtin: false };
     return { ok: true, value: { expert: saved } };
   } });
-  nodes(f.render()).find(node => node.type === 'button' && node.props.className === 'ww-card ww-add-card').props.onClick();
+  button(f.render(), '自己填写').props.onClick();
   const render = f.isolate(nodes(f.render()).find(node => node.type.name === 'ExpertEditor'));
   render(); f.flushEffects(); await new Promise(setImmediate);
   for (const [label, value] of [['专家名字', '同一专家'], ['一句话介绍', '工作'], ['系统提示词（必填）', '完成工作']]) {
@@ -1925,7 +2046,7 @@ for (const type of ['jpeg', 'webp']) test(`新增${type}头像规范化且回执
       saved = { ...input.expert, avatar: 'data:image/png;base64,cG5n', id: input.id, revision: input.expectedRevision + 1, builtin: false };
       return writes.length === 1 ? { ok: false, error: { code: 'transport', message: '回执丢失' } } : { ok: true, value: { expert: saved } };
     } });
-    nodes(f.render()).find(node => node.type === 'button' && node.props.className === 'ww-card ww-add-card').props.onClick();
+    button(f.render(), '自己填写').props.onClick();
     const render = f.isolate(nodes(f.render()).find(node => node.type.name === 'ExpertEditor'));
     render(); f.flushEffects(); await new Promise(setImmediate);
     for (const [label, value] of [['专家名字', '带头像专家'], ['一句话介绍', '工作'], ['系统提示词（必填）', '员工原提示词']]) {
@@ -2094,7 +2215,7 @@ test('目录组件统一计数folder-only与mixed分页，跨页不重复并保�
     assert.equal(input.offset, 4);
     return { ok: true, value: { ...common, folders: [], notes: [{ path: 'e.md', title: '笔记E' }], truncated: false } };
   } });
-  await button(f.render(), '个人知识').props.onClick();
+  await button(f.render(), '知识积累').props.onClick();
   const render = f.isolate(nodes(f.render()).find(node => node.type.name === 'Directory'));
   const settle = async () => { render(); f.flushEffects(); await new Promise(setImmediate); return render(); };
   let tree = await settle();
@@ -2128,7 +2249,7 @@ test('目录延迟与失败期间保留旧页但禁止翻页，重试只请求�
     if (input.offset === 0) return { ok: true, value: { directory: '', offset: 0, total: 4, folders: [{ path: 'folder', name: '第一页目录' }], notes: [{ path: 'one.md', title: '第一页笔记' }], truncated: true } };
     return new Promise(resolve => { settlePage = resolve; });
   } });
-  await button(f.render(), '个人知识').props.onClick();
+  await button(f.render(), '知识积累').props.onClick();
   const render = f.isolate(nodes(f.render()).find(node => node.type.name === 'Directory'));
   render(); f.flushEffects(); await new Promise(setImmediate);
   button(render(), '下一页').props.onClick(); render(); f.flushEffects();
@@ -2177,12 +2298,11 @@ for (const domain of ['expert', 'skill']) test(`${domain}冲突不取得知识�
     skillLibrary: async () => ({ ok: false, error: { code: 'CONFLICT', message: '技能hash已被修改' } }),
   });
   if (domain === 'expert') {
-    const card = nodes(f.render()).find(node => node.type === 'article' && node.props.className === 'ww-card');
-    button(card, '恢复原版').props.onClick();
+    button(openPane(f, '研发专家'), '恢复原版').props.onClick();
     const confirmation = nodes(f.render()).find(node => node.type === 'dialog' && JSON.stringify(node).includes('选择要换回原版的内容：'));
     await button(confirmation, '恢复原版').props.onClick();
-  } else await button(f.render(), '技能成长').props.onClick();
-  await button(f.render(), '个人知识').props.onClick();
+  } else await button(f.render(), '技能中心').props.onClick();
+  await button(f.render(), '知识积累').props.onClick();
   assert.ok(f.calls.some(item => item[0] === 'knowledge' && item[1].action === 'graph'));
   assert.equal(button(f.render(), '关系图谱').props.disabled, false);
 });
@@ -2198,7 +2318,7 @@ for (const code of ['READBACK', 'CONFLICT']) test(`恢复其它路径的${code}�
     if (input.action === 'document') return { ok: true, value: { path: input.path, content: '实际正文', hash: 'actual', view: { type: 'text', value: '实际正文' }, links: [], backlinks: [] } };
     assert.fail(input.action);
   } });
-  await button(f.render(), '个人知识').props.onClick();
+  await button(f.render(), '知识积累').props.onClick();
   const field = nodes(f.render()).find(node => node.type === 'label' && node.props.children.includes('要恢复的笔记路径'));
   nodes(field).find(node => node.type === 'input').props.onChange({ target: { value: '10-收件箱/恢复目标.md' } });
   await button(f.render(), '恢复').props.onClick();
@@ -2219,19 +2339,21 @@ test('保存与文档回读之间的外改保护未编辑正文，明确回读�
     if (input.action === 'write') { content = external ? '外部新正文' : input.content; hash = external ? 'external' : 'saved'; return { ok: true, value: { path: input.path, hash: 'saved' } }; }
     assert.fail(input.action);
   } });
-  await button(f.render(), '个人知识').props.onClick();
+  await button(f.render(), '知识积累').props.onClick();
   await nodes(f.render()).find(node => node.type?.name === 'GraphCanvas').props.onOpenNote({ path: 'a.md' });
   button(f.render(), '编辑').props.onClick();
   await button(f.render(), '保存').props.onClick();
   assert.equal(button(f.render(), '关系图谱').props.disabled, true);
   assert.equal(button(f.render(), '读取最新内容').props.disabled, false);
-  await button(f.render(), '个人知识').props.onClick(); assert.equal(graphRequests, 1);
+  await button(f.render(), '知识积累').props.onClick(); assert.equal(graphRequests, 1);
   assert.equal(nodes(f.render()).find(node => node.type === 'textarea').props.value, '原正文');
   await button(f.render(), '读取最新内容').props.onClick();
   external = false; button(f.render(), '编辑').props.onClick();
   await button(f.render(), '保存').props.onClick();
   assert.equal(button(f.render(), '关系图谱').props.disabled, false);
-  await button(f.render(), '个人知识').props.onClick(); assert.equal(graphRequests, 2);
+  // 2026-11-11 起页签保留：重新进入还在这篇笔记的页签，不重读图；点功能条的“关系图谱”才切过去重读。
+  await button(f.render(), '知识积累').props.onClick(); assert.equal(graphRequests, 1);
+  await button(f.render(), '关系图谱').props.onClick(); assert.equal(graphRequests, 2);
 });
 
 test('变窄只收起dock，显式float与气泡宽屏恢复不受干扰，原生会话引用保持', async () => {
@@ -2259,6 +2381,79 @@ test('变窄只收起dock，显式float与气泡宽屏恢复不受干扰，原�
   f.unmount(); assert.equal(listeners.size, 0);
 });
 
+test('停靠后开始协作、收起再打开都保持停靠并记住，窄屏打开临时悬浮', async () => {
+  const media = { matches: false, addEventListener() {}, removeEventListener() {} };
+  const f = await fixture({ matchMedia: () => media });
+  const render = () => f.render('main', { SessionProvider: 'SessionProvider', renderSlot: name => ({ type: name, props: { children: [] } }) });
+  const aside = () => nodes(render()).find(node => node.type === 'aside');
+  render(); f.flushEffects();
+  button(render(), '打开小鲸助手').props.onClick();
+  assert.match(aside().props.className, /ww-assistant-float/);
+  button(render(), '停靠').props.onClick();
+  assert.match(aside().props.className, /ww-assistant-dock/);
+  assert.equal(f.browser.localStorage.getItem('whalewing.assistantForm.v1'), 'dock');
+  await button(render(), '开始与小鲸协作').props.onClick(); render(); f.flushEffects(); await new Promise(setImmediate);
+  assert.ok(nodes(render()).find(node => node.type === 'SessionProvider'));
+  assert.match(aside().props.className, /ww-assistant-dock/);
+  button(render(), '收起助手').props.onClick();
+  assert.equal(aside().props.hidden, true);
+  button(render(), '打开小鲸助手').props.onClick();
+  assert.match(aside().props.className, /ww-assistant-dock/);
+  button(render(), '收起助手').props.onClick();
+  media.matches = true;
+  button(render(), '打开小鲸助手').props.onClick();
+  assert.match(aside().props.className, /ww-assistant-float/);
+  assert.equal(f.browser.localStorage.getItem('whalewing.assistantForm.v1'), 'dock');
+  f.unmount();
+});
+
+test('上次停靠的，点开气泡直接停靠打开，本机存储读不了就悬浮', async () => {
+  const docked = await fixture();
+  docked.browser.localStorage.setItem('whalewing.assistantForm.v1', 'dock');
+  docked.render(); docked.flushEffects();
+  // 进鲸翼小鲸只留气泡，不自己打开（2026-11-10）；点开照上次停靠，到别的页收起再打开也是停靠。
+  assert.equal(nodes(docked.render()).find(node => node.type === 'aside').props.hidden, true);
+  button(docked.render(), '打开小鲸助手').props.onClick();
+  assert.match(nodes(docked.render()).find(node => node.type === 'aside').props.className, /ww-assistant-dock/);
+  await button(docked.render(), '技能中心').props.onClick();
+  button(docked.render(), '收起助手').props.onClick();
+  button(docked.render(), '打开小鲸助手').props.onClick();
+  assert.match(nodes(docked.render()).find(node => node.type === 'aside').props.className, /ww-assistant-dock/);
+  const blocked = await fixture();
+  blocked.browser.localStorage.getItem = () => { throw new Error('浏览器禁用了本机存储'); };
+  blocked.browser.localStorage.setItem = () => { throw new Error('浏览器禁用了本机存储'); };
+  blocked.render(); blocked.flushEffects();
+  button(blocked.render(), '打开小鲸助手').props.onClick();
+  assert.match(nodes(blocked.render()).find(node => node.type === 'aside').props.className, /ww-assistant-float/);
+  button(blocked.render(), '停靠').props.onClick();
+  assert.match(nodes(blocked.render()).find(node => node.type === 'aside').props.className, /ww-assistant-dock/);
+});
+
+test('能不能停靠看鲸翼工作区实际多宽，不按窗口：工作区窄了停靠的收回，这时打开用悬浮', async () => {
+  const observers = [];
+  const f = await fixture({ assistantForm: 'dock' });
+  f.browser.ResizeObserver = class { constructor(callback) { this.callback = callback; observers.push(this); } observe(element) { this.element = element; } disconnect() { this.stopped = true; } };
+  const workspace = { width: 1200, getBoundingClientRect() { return { width: this.width }; } };
+  const aside = () => nodes(f.render()).find(node => node.type === 'aside');
+  aside().props.ref.current = { closest: selector => selector === '.ww-workspace' ? workspace : null };
+  f.flushEffects();
+  assert.equal(observers[0].element, workspace, '量的是工作区，不是整个窗口');
+  assert.equal(aside().props.hidden, true, '进来只有气泡');
+  button(f.render(), '打开小鲸助手').props.onClick();
+  assert.match(aside().props.className, /ww-assistant-dock/, '工作区够宽，点开照上次停靠');
+  // 拉窗口过程中一瞬变窄又变回来（DSH 左栏跟着收起），不收。
+  const settle = () => { for (const [id, timer] of [...f.timers]) if (timer.delay === 300) { f.timers.delete(id); timer.fn(); } };
+  workspace.width = 600; observers[0].callback(); workspace.width = 1200; observers[0].callback();
+  assert.equal([...f.timers.values()].filter(timer => timer.delay === 300).length, 1, '只等最后一次');
+  settle();
+  assert.match(aside().props.className, /ww-assistant-dock/, '宽度停下来时够宽，照旧停靠');
+  workspace.width = 600; observers[0].callback(); settle();
+  assert.equal(aside().props.hidden, true, '工作区窄了，停靠的收回小圆球');
+  button(f.render(), '打开小鲸助手').props.onClick();
+  assert.match(aside().props.className, /ww-assistant-float/, '窄的时候打开用悬浮');
+  f.unmount(); assert.equal(observers[0].stopped, true);
+});
+
 
 test('目录同offset刷新失败也禁止旧页翻页，重试成功才恢复导航', async () => {
   const offsets = [];
@@ -2271,7 +2466,7 @@ test('目录同offset刷新失败也禁止旧页翻页，重试成功才恢复�
     if (failed) return { ok: false, error: { code: 'offline', message: '同页刷新失败' } };
     return { ok: true, value: { directory: '', offset: input.offset, total: 3, folders: [{ path: 'folder', name: '目录' }], notes: [{ path: 'note.md', title: '笔记' }], truncated: true } };
   } });
-  await button(f.render(), '个人知识').props.onClick();
+  await button(f.render(), '知识积累').props.onClick();
   const component = nodes(f.render()).find(node => node.type.name === 'Directory');
   const render = f.isolate(component);
   render(); f.flushEffects(); await new Promise(setImmediate);
@@ -2408,8 +2603,8 @@ test('编辑技能将同名所选状态与已读hash交给小鲸，不复制正�
       if (input.action === 'read') { reads.push(input); return { ok: true, value: { entry: records.find(item => item.id === input.id) } }; }
       assert.fail(`意外动作 ${input.action}`);
     } });
-    await button(f.render(), '技能成长').props.onClick();
-    const choice = nodes(f.render()).find(node => node.type === 'button' && node.props.key === selected.id);
+    await button(f.render(), '技能中心').props.onClick();
+    const choice = skillRow(f.render(), selected.id);
     await choice.props.onClick();
     await discuss(f, button(f.render(), '与小鲸编辑技能').props.onClick);
     const request = { question: [...f.inputs.values()][0].state.getSnapshot().draft };
@@ -2423,8 +2618,9 @@ test('编辑技能将同名所选状态与已读hash交给小鲸，不复制正�
 });
 
 test('内置专家只有编辑和恢复原版（改过才出现），自定义仍可删除，恢复确认后等待版本读回', async () => {
-  const custom = { ...roles[1], id: 'custom-test', builtin: false };
-  let data = [{ ...roles[0], customized: ['prompt'], baseUpdated: [] }, roles[1], custom];
+  const custom = { ...roles[1], id: 'custom-test', name: '自建专家', builtin: false };
+  const plain = { ...roles[1], id: 'testing', name: '测试专家' };
+  let data = [roles[0], { ...roles[1], customized: ['prompt'], baseUpdated: [] }, plain, custom];
   const changes = [];
   const f = await fixture({ experts: async input => {
     if (input.action === 'list') return { ok: true, value: { experts: data, deleted: [] } };
@@ -2433,32 +2629,31 @@ test('内置专家只有编辑和恢复原版（改过才出现），自定义�
     data = data.map(item => item.id === input.id ? expert : item);
     return { ok: true, value: { expert } };
   } });
-  const cards = nodes(f.render()).filter(node => node.type === 'article' && node.props.className === 'ww-card');
-  assert.equal(nodes(cards[0]).some(node => node.type === 'button' && node.props.children.includes('删除专家')), false);
-  assert.ok(button(cards[0], '恢复原版'));
-  assert.equal(nodes(cards[1]).some(node => node.type === 'button' && node.props.children.includes('恢复原版')), false);
-  assert.ok(button(cards[2], '删除专家'));
-  button(cards[0], '恢复原版').props.onClick();
+  assert.ok(button(openPane(f, '自建专家'), '删除专家'));
+  assert.equal(nodes(openPane(f, '测试专家')).some(node => node.type === 'button' && node.props.children.includes('恢复原版')), false);
+  const pane = openPane(f, '研发专家');
+  assert.equal(nodes(pane).some(node => node.type === 'button' && node.props.children.includes('删除专家')), false);
+  button(pane, '恢复原版').props.onClick();
   assert.equal(changes.length, 0);
   const confirmation = nodes(f.render()).find(node => node.type === 'dialog' && JSON.stringify(node).includes('选择要换回原版的内容：'));
   await button(confirmation, '恢复原版').props.onClick();
-  assert.deepEqual(changes, [{ action: 'restore', id: 'manager', expectedRevision: 0 }]);
-  assert.equal(f.clients.experts.experts().experts.find(item => item.id === 'manager').revision, 1);
+  assert.deepEqual(changes, [{ action: 'restore', id: 'development', expectedRevision: 0 }]);
+  assert.equal(f.clients.experts.experts().experts.find(item => item.id === 'development').revision, 1);
 });
 
-test('提炼留在技能页并复用小鲸原生会话，已有草稿保持且不创建专家工作区任务', async () => {
+test('“与小鲸一起创建”留在技能页并复用小鲸原生会话，已有草稿保持且不创建专家工作区任务', async () => {
   const f = await fixture();
   const a = await mountedAssistant(f);
   const input = f.inputFor(a.reference.sessionId); input.state.set({ ...input.state.getSnapshot(), draft: '手写未发送的问题' });
-  await button(a.render(), '技能成长').props.onClick();
-  await button(a.render(), '与小鲸讨论提炼').props.onClick(); await a.tick();
+  await button(a.render(), '技能中心').props.onClick();
+  await button(a.render(), '与小鲸一起创建').props.onClick(); await a.tick();
   const current = nodes(a.render()).find(node => node.type === 'SessionProvider').props.session;
   assert.equal(current, a.reference); assert.ok(input.state.getSnapshot().draft.startsWith('手写未发送的问题\n\n'));
   assert.equal(f.calls.filter(item => item[0] === 'create').length, 1);
   assert.equal(f.calls.some(item => item[0] === 'open'), false);
-  assert.ok(button(a.render(), '技能成长').props['aria-pressed']);
+  assert.ok(button(a.render(), '技能中心').props['aria-pressed']);
   assert.equal(f.calls.some(item => item[0] === 'prompt' || item[0] === 'knowledge'), false);
-  assert.match(input.state.getSnapshot().draft, /讨论如何从已有知识提炼/);
+  assert.match(input.state.getSnapshot().draft, /一起创建一项个人技能/);
   f.unmount();
 });
 
@@ -2516,13 +2711,18 @@ test('技能库无会话即可列出并按精确来源读取同名项，系统�
     requests.push(input);
     return { ok: true, value: input.action === 'list' ? { entries, offset: 0, total: 2, truncated: false } : { entry: entries.find(item => item.id === input.id) || null } };
   } });
-  await button(f.render(), '技能成长').props.onClick();
-  await nodes(f.render()).find(node => node.type === 'button' && node.props.key === entries[0].id).props.onClick();
+  await button(f.render(), '技能中心').props.onClick();
+  // 改过的内置技能只列改过的那一行，原件不单列。
+  assert.equal(skillRow(f.render(), entries[0].id), undefined);
+  await skillRow(f.render(), entries[1].id).props.onClick();
   assert.equal(nodes(f.render()).some(node => node.type === 'button' && node.props.children.includes('删除用户技能')), false);
+  assert.ok(button(f.render(), '恢复系统原件'));
   await button(f.render(), '编辑技能').props.onClick();
   const editor = nodes(f.render()).find(node => node.type?.name === 'SkillEditor');
   assert.equal(editor.props.entry.id, 'a/SKILL.md'); assert.equal(editor.props.entry.content, '个人修改');
-  assert.deepEqual(requests.map(item => item.action), ['list', 'read', 'read']);
+  assert.deepEqual(requests.map(item => item.action), ['list', 'read']);
+  // 原件那一项按精确来源读，读出的是原件，没有删除入口。
+  assert.equal((await f.clients.skills.skillRequest({ action: 'read', id: entries[0].id })).entry.content, '原件');
   assert.equal(f.calls.some(item => ['create', 'open', 'attach', 'command'].includes(item[0])), false);
 });
 
@@ -2535,7 +2735,7 @@ test('技能编辑使用原件及覆盖hash，规范化回执按canonical内容�
     if (input.action === 'update') { writes.push(input); actual = { ...original, hash: 'new', content: 'owner metadata\n新稿' }; }
     return { ok: true, value: { entry: actual } };
   } });
-  await button(f.render(), '技能成长').props.onClick(); await button(f.render(), 'a').props.onClick(); await button(f.render(), '编辑技能').props.onClick();
+  await button(f.render(), '技能中心').props.onClick(); await button(f.render(), 'a').props.onClick(); await button(f.render(), '编辑技能').props.onClick();
   const node = nodes(f.render()).find(node => node.type?.name === 'SkillEditor'); node.props.onSaved = value => { saved = value; };
   const render = f.isolate(node); render(); f.flushEffects();
   nodes(render()).find(node => node.type === 'textarea').props.onChange({ target: { value: '新稿' } });
@@ -2553,7 +2753,7 @@ test('技能未知写入回执保留稿件并阻止重复写，显式加载恢�
     if (input.action === 'update') { writes++; actual = { ...actual, hash: 'committed', content: 'owner normalized' }; throw new Error('回执断开'); }
     return { ok: true, value: { entry: actual } };
   } });
-  await button(f.render(), '技能成长').props.onClick(); await button(f.render(), 'a').props.onClick(); await button(f.render(), '编辑技能').props.onClick();
+  await button(f.render(), '技能中心').props.onClick(); await button(f.render(), 'a').props.onClick(); await button(f.render(), '编辑技能').props.onClick();
   const node = nodes(f.render()).find(node => node.type?.name === 'SkillEditor'); node.props.onSaved = () => { saves++; };
   const render = f.isolate(node); render(); f.flushEffects();
   nodes(render()).find(node => node.type === 'textarea').props.onChange({ target: { value: '保留的草稿' } });
@@ -2574,7 +2774,7 @@ test('新增技能固定员工输入身份且经实际read回读，不创建会�
     return { ok: true, value: { entry: actual } };
   } });
   // 新建按钮不要求先读列表或进入会话。
-  const base = await fixture(); await button(base.render(), '技能成长').props.onClick(); button(base.render(), '新增技能').props.onClick();
+  const base = await fixture(); await button(base.render(), '技能中心').props.onClick(); button(base.render(), '创建技能').props.onClick();
   const editor = nodes(base.render()).find(node => node.type?.name === 'SkillEditor');
   let saved; editor.props.api = f.clients.skills; editor.props.onSaved = value => { saved = value; };
   const render = base.isolate(editor); render(); base.flushEffects();
@@ -2589,7 +2789,7 @@ test('新增技能固定员工输入身份且经实际read回读，不创建会�
 async function newSkillEditor(skillLibrary) {
   const requests = [], notices = [], state = {};
   const f = await fixture({ skillLibrary: async input => { requests.push(input); return skillLibrary(input); } });
-  const base = await fixture(); await button(base.render(), '技能成长').props.onClick(); button(base.render(), '新增技能').props.onClick();
+  const base = await fixture(); await button(base.render(), '技能中心').props.onClick(); button(base.render(), '创建技能').props.onClick();
   const editor = nodes(base.render()).find(node => node.type?.name === 'SkillEditor');
   Object.assign(editor.props, { api: f.clients.skills, onSaved: value => { state.saved = value; }, notify: (message, options) => notices.push({ message, kind: options?.kind }) });
   const render = base.isolate(editor); render(); base.flushEffects();
@@ -2663,7 +2863,7 @@ for (const [label, failure] of [['没收到宿主答复', 'lost'], ['宿主报�
 
 // 需求§界面通用约定（2026-10-28 用户确认：编辑抽屉里有改动时，Esc、点遮罩、×、“取消”都先居中确认放弃；没改动直接关）
 test('技能抽屉没改动时“取消编辑”直接关；填了标识再关先弹“放弃修改”，取消则留着，确认才关', async () => {
-  const base = await fixture(); await button(base.render(), '技能成长').props.onClick(); button(base.render(), '新增技能').props.onClick();
+  const base = await fixture(); await button(base.render(), '技能中心').props.onClick(); button(base.render(), '创建技能').props.onClick();
   const editor = nodes(base.render()).find(node => node.type?.name === 'SkillEditor');
   let closed = 0; editor.props.onClose = () => { closed++; };
   const render = base.isolate(editor); render(); base.flushEffects();
@@ -2688,8 +2888,8 @@ test('书架管理分组：新分组名填了没加时关闭先确认放弃，�
     if (input.action === 'list') return { ok: true, value: { library: shelf } };
     throw new Error('不该发出 ' + input.action);
   } });
-  await button(f.render(), '知识卡片').props.onClick();
-  await button(f.render(), '打开书架').props.onClick();
+  await button(f.render(), '每日阅读').props.onClick();
+  await button(f.render(), '书架').props.onClick();
   const manage = nodes(f.render()).find(node => node.type === 'button' && node.props['aria-label'] === '管理分组');
   assert.ok(manage, '有管理分组按钮'); manage.props.onClick();
   taskField(f, '分组名称', '还没加的分组');
@@ -2707,9 +2907,11 @@ test('书架管理分组：新分组名填了没加时关闭先确认放弃，�
 test('图谱消费独立factory及主题事件，筛选分页仍由知识服务持有', async () => {
   const graph = { version: 2, nodes: [{ kind: 'note', readOnly: false, path: 'a.md', title: 'A', degree: 3 }], edges: [], total: 1, offset: 0, truncated: false, omittedEdges: 0, unresolved: 0 };
   const f = await fixture({ knowledge: async input => ({ ok: true, value: input.action === 'status' ? { initialized: true, root: 'vault', limits: { maxGraphNodes: 200 } } : input.action === 'graph' ? graph : { notes: [], total: 0, truncated: false } }) });
-  await button(f.render(), '个人知识').props.onClick(); await button(f.render(), '关系图谱').props.onClick();
+  await button(f.render(), '知识积累').props.onClick(); await button(f.render(), '关系图谱').props.onClick();
   const node = nodes(f.render()).find(node => node.type?.name === 'GraphCanvas');
-  assert.deepEqual(node.props.graph, graph); assert.equal(node.props.resetLabel, '重置视图');
+  // 画布拿到的是按图谱设置算出来的那张图（2026-11-10 起）：点和线跟知识服务给的一致。
+  const same = (shown, source) => assert.deepEqual([shown.nodes.map(item => item.path), shown.edges], [source.nodes.map(item => item.path), source.edges]);
+  same(node.props.graph, graph); assert.equal(node.props.resetLabel, '重置视图');
   assert.equal(node.props.loadingLabel(1, 5), '正在准备图谱 1/5');
   assert.equal(node.props.canvasErrorLabel, '当前环境尚未提供 Canvas 图谱支持');
   assert.equal(node.props.dataErrorLabel, '图谱包含未返回的节点，请重新读取图谱');
@@ -2741,7 +2943,7 @@ test('图谱Remote边界复用唯一graphResult，拒收旧版degree和其它动
 
 test('坏图谱不进入画布，原位短错误保留重新读取入口', async () => {
   const f = await fixture({ knowledge: async input => ({ ok: true, value: input.action === 'status' ? { initialized: true, root: 'vault', limits: { maxGraphNodes: 200 } } : input.action === 'graph' ? { nodes: [{ path: 'a.md', title: '旧Host' }], edges: [], total: 1, offset: 0, truncated: false, omittedEdges: 0, unresolved: 0 } : { notes: [], total: 0, truncated: false } }) });
-  await button(f.render(), '个人知识').props.onClick(); await button(f.render(), '关系图谱').props.onClick();
+  await button(f.render(), '知识积累').props.onClick(); await button(f.render(), '关系图谱').props.onClick();
   assert.equal(nodes(f.render()).some(node => node.type?.name === 'GraphCanvas'), false);
   assert.ok(nodes(f.render()).some(node => node.props.children.includes('图谱数据与当前界面不匹配，请完全退出并重新打开 DSH')));
   assert.equal(button(f.render(), '关系图谱').props.disabled, false);
@@ -2781,7 +2983,7 @@ test('技能删除与系统覆盖重置均确认、CAS写入及读回，原件�
       changes.push(input); actual = null;
       return { ok: true, value: action === 'reset' ? { id: chosen.id, reset: true, baseId: original.id } : { id: chosen.id, removed: true } };
     } });
-    await button(f.render(), '技能成长').props.onClick(); await button(f.render(), 'my-skill').props.onClick();
+    await button(f.render(), '技能中心').props.onClick(); await button(f.render(), 'my-skill').props.onClick();
     const label = action === 'reset' ? '恢复系统原件' : '删除用户技能';
     button(f.render(), label).props.onClick(); assert.equal(changes.length, 0);
     const confirm = nodes(f.render()).find(node => node.type === 'dialog' && JSON.stringify(node).includes(action === 'reset' ? '清除个人修改并恢复系统原件？' : '删除这项用户技能？'));
@@ -2793,24 +2995,23 @@ test('技能删除与系统覆盖重置均确认、CAS写入及读回，原件�
   }
 });
 
-test('技能分页延迟与失败不移动权威页及返回栈，成功重试后只前进一页', async () => {
-  let resolve, calls = 0;
+test('“我的”技能一次读完所有页；读到一半失败时保留上次的列表，重试后整份换新', async () => {
+  let failSecond = false;
+  const offsets = [];
   const first = { id: 'one/SKILL.md', name: 'one', description: '', origin: 'user', hash: '1', actions: ['read'], discovery: 'available' };
   const second = { ...first, id: 'two/SKILL.md', name: 'two' };
   const f = await fixture({ skillLibrary: async input => {
-    if (input.offset === 1) { calls++; if (calls === 1) return new Promise(done => { resolve = done; }); if (calls === 2) return { ok: false, error: { message: '暂时失去读取权限' } }; }
+    offsets.push(input.offset ?? 0);
+    if (input.offset === 1 && failSecond) return { ok: false, error: { message: '暂时失去读取权限' } };
     return { ok: true, value: { entries: input.offset === 1 ? [second] : [first], offset: input.offset || 0, total: 2, truncated: input.offset !== 1 } };
   } });
-  await button(f.render(), '技能成长').props.onClick();
-  const pending = button(f.render(), '下一页').props.onClick();
-  assert.equal(button(f.render(), '下一页').props.disabled, true); assert.equal(button(f.render(), '上一页').props.disabled, true);
-  resolve({ ok: false, error: { message: '目录响应失败' } }); await pending;
-  assert.ok(button(f.render(), 'one')); assert.equal(button(f.render(), '上一页').props.disabled, true);
-  await button(f.render(), '下一页').props.onClick();
-  assert.ok(button(f.render(), 'one')); assert.equal(button(f.render(), '上一页').props.disabled, true);
-  await button(f.render(), '下一页').props.onClick();
-  assert.ok(button(f.render(), 'two')); assert.equal(button(f.render(), '上一页').props.disabled, false);
-  await button(f.render(), '上一页').props.onClick(); assert.ok(button(f.render(), 'one'));
+  await button(f.render(), '技能中心').props.onClick();
+  assert.deepEqual(offsets, [0, 1]);
+  assert.ok(skillRow(f.render(), 'one/SKILL.md')); assert.ok(skillRow(f.render(), 'two/SKILL.md'));
+  failSecond = true;
+  await button(f.render(), '刷新').props.onClick();
+  assert.ok(skillRow(f.render(), 'one/SKILL.md')); assert.ok(skillRow(f.render(), 'two/SKILL.md'), '读失败时保留上次的列表');
+  assert.equal(nodes(f.render()).some(node => node.type === 'button' && ['上一页', '下一页'].some(label => node.props.children.includes(label))), false);
 });
 
 test('浮窗键盘移动支持非枚举DOMRect，标题内按钮不触发拖动', async () => {
@@ -2836,7 +3037,7 @@ test('系统技能首次editId尚不存在仍可编辑原件，保存成为经�
     if (input.action === 'update') { writes.push(input); override = { ...base, id: base.editId, origin: 'override', baseId: base.id, baseHash: base.hash, hash: 'override', content: 'canonical\n个人修改', actions: ['read', 'update', 'reset'] }; return { ok: true, value: { entry: override } }; }
     return { ok: true, value: { entry: input.id === base.id ? base : override } };
   } });
-  await button(f.render(), '技能成长').props.onClick(); await button(f.render(), 'a').props.onClick(); await button(f.render(), '编辑技能').props.onClick();
+  await button(f.render(), '技能中心').props.onClick(); await button(f.render(), 'a').props.onClick(); await button(f.render(), '编辑技能').props.onClick();
   const editor = nodes(f.render()).find(node => node.type?.name === 'SkillEditor');
   assert.equal(editor.props.entry, base); editor.props.onSaved = value => { adopted = value; };
   const render = f.isolate(editor); render(); f.flushEffects();
@@ -2854,8 +3055,8 @@ test('系统编辑不接管同名user或其它原件覆盖，入口与未知回�
       assert.ok(['list', 'read'].includes(input.action));
       return { ok: true, value: input.action === 'list' ? { entries: [base, other], offset: 0, total: 2, truncated: false } : { entry: input.id === base.id ? base : other } };
     } });
-    await button(f.render(), '技能成长').props.onClick();
-    await nodes(f.render()).find(node => node.type === 'button' && node.props.key === base.id).props.onClick();
+    await button(f.render(), '技能中心').props.onClick();
+    await skillRow(f.render(), base.id).props.onClick();
     await button(f.render(), '编辑技能').props.onClick();
     assert.equal(nodes(f.render()).some(node => node.type?.name === 'SkillEditor'), false);
     assert.ok(nodes(f.render()).some(node => node.props.role === 'alert'));
@@ -2872,7 +3073,7 @@ test('首次原件编辑未知回执保留草稿，显式恢复只采用有效�
       if (input.action === 'update') { if (committed) actual = { ...base, id: base.editId, origin: 'override', baseId: base.id, baseHash: base.hash, hash: 'written', content: 'canonical 修改' }; throw new Error('保存响应异常'); }
       return { ok: true, value: { entry: input.id === base.id ? base : actual } };
     } });
-    await button(f.render(), '技能成长').props.onClick(); await button(f.render(), 'a').props.onClick(); await button(f.render(), '编辑技能').props.onClick();
+    await button(f.render(), '技能中心').props.onClick(); await button(f.render(), 'a').props.onClick(); await button(f.render(), '编辑技能').props.onClick();
     const editor = nodes(f.render()).find(node => node.type?.name === 'SkillEditor'); editor.props.onSaved = () => assert.fail('未知回执不自动认成功');
     const render = f.isolate(editor); render(); f.flushEffects();
     nodes(render()).find(node => node.type === 'textarea').props.onChange({ target: { value: '保留的修改' } });
@@ -2889,7 +3090,7 @@ test('技能A与B讨论分别合入同一原生草稿，重复点击不重插且
   const sends = [];
   const f = await fixture({ skillLibrary: async input => ({ ok: true, value: input.action === 'list' ? { entries: records, total: 2, offset: 0, truncated: false } : { entry: records.find(item => item.id === input.id) } }), prompt: async request => { sends.push(request); assert.fail('讨论入口不得提交模型问题'); } });
   const render = () => f.render('main', { SessionProvider: 'SessionProvider', renderSlot: name => ({ type: name, props: { children: [] } }) });
-  await button(render(), '技能成长').props.onClick(); await button(render(), 'A').props.onClick(); await discuss(f, button(render(), '与小鲸编辑技能').props.onClick);
+  await button(render(), '技能中心').props.onClick(); await button(render(), 'A').props.onClick(); await discuss(f, button(render(), '与小鲸编辑技能').props.onClick);
   const reference = nodes(render()).find(node => node.type === 'SessionProvider').props.session;
   const input = f.inputFor(reference.sessionId);
   assert.ok(input.state.getSnapshot().draft.includes('hash-A'));
@@ -2908,8 +3109,8 @@ test('等待原生输入期间取消或卸载不晚到插入，会话保留至�
   let ready;
   const f = await fixture({ retainReady: new Promise(resolve => { ready = resolve; }) });
   f.render(); f.flushEffects();
-  await button(f.render(), '技能成长').props.onClick();
-  const pending = button(f.render(), '与小鲸讨论提炼').props.onClick();
+  await button(f.render(), '技能中心').props.onClick();
+  const pending = button(f.render(), '与小鲸一起创建').props.onClick();
   await new Promise(setImmediate);
   f.render(); f.flushEffects();
   if (cancel === 'stop') button(f.render(), '停止等待结果').props.onClick(); else f.unmount();
@@ -2925,23 +3126,23 @@ test('等待原生输入期间取消或卸载不晚到插入，会话保留至�
 test('技能入库状态消费正式契约并明确区分实际会话使用，覆盖提示仅描述库内关系', async () => {
   const value = skillLibraryContract(z).result.parse({ entries: [{ id: 'catalogue/SKILL.md', name: 'catalogue', description: '我的技能', origin: 'user', hash: 'content-hash', actions: ['read', 'update', 'remove'], discovery: 'catalogued' }], offset: 0, total: 1, truncated: false });
   const f = await fixture({ skillLibrary: async input => { assert.equal(input.action, 'list'); return { ok: true, value }; } });
-  await button(f.render(), '技能成长').props.onClick();
-  assert.ok(nodes(f.render()).some(node => node.type === 'small' && node.props.children.includes(' · 已入库')));
+  await button(f.render(), '技能中心').props.onClick();
   const locale = f.dictionaries.get('whalewing');
   assert.equal(locale.zh.catalogued, '已入库'); assert.equal(locale.en.catalogued, 'In library');
   assert.equal(locale.zh.shadowed, '库内存在同名优先项'); assert.match(locale.en.shadowed, /in the library/);
   assert.match(locale.zh.skillHelp, /不代表当前对话已使用/); assert.match(locale.en.skillHelp, /does not mean this conversation has used/);
-  assert.ok(nodes(f.render()).some(node => node.type === 'small' && node.props.title === locale.zh.skillHelp));
+  assert.ok(nodes(f.render()).some(node => node.type === 'span' && node.props.className === 'ww-kit-status' && node.props.title === locale.zh.skillHelp));
   assert.equal(f.calls.some(item => item[0] === 'create' || item[0] === 'prompt'), false);
 });
 
 test('目录分隔支持拖动键盘与容器夹取，取消恢复起点且离开和卸载释放捕获及观察器', async () => {
   const f = await fixture(); const observers = [];
   f.browser.ResizeObserver = class { constructor(callback) { this.callback = callback; observers.push(this); } observe(element) { this.element = element; } disconnect() { this.disconnected = true; } };
-  await button(f.render(), '个人知识').props.onClick();
+  await button(f.render(), '知识积累').props.onClick();
   const split = () => nodes(f.render()).find(node => node.props.className === 'ww-knowledge-split');
   const separator = () => nodes(f.render()).find(node => node.props.role === 'separator');
-  const container = { clientWidth: 800 }; split().props.ref.current = container; f.flushEffects();
+  // 知识区宽度先扣掉左侧功能条（44px），不到 1000 时右栏不停靠，所以 844 宽时目录可用的正好是原来的 800。
+  const container = { clientWidth: 844 }; split().props.ref.current = container; f.flushEffects();
   assert.equal(separator().props['aria-orientation'], 'vertical'); assert.equal(separator().props.tabIndex, 0);
   assert.equal(separator().props['aria-valuemin'], 120); assert.equal(separator().props['aria-valuemax'], 552);
   const captures = new Set(); let focused = 0;
@@ -2958,12 +3159,12 @@ test('目录分隔支持拖动键盘与容器夹取，取消恢复起点且离�
   key('Home'); assert.equal(separator().props['aria-valuenow'], 120);
   separator().props.onPointerDown(event(120)); separator().props.onPointerMove(event(-200)); separator().props.onPointerUp(event(-200));
   assert.equal(separator().props['aria-valuenow'], 120); assert.equal(captures.size, 0);
-  key('End'); separator().props.onPointerDown(event(552)); container.clientWidth = 300; observers[0].callback();
-  assert.equal(separator().props['aria-valuemax'], 142); assert.equal(separator().props['aria-valuenow'], 142); assert.equal(captures.size, 0);
-  separator().props.onPointerDown(event(142)); separator().props.onPointerMove(event(110)); key('Escape'); assert.equal(separator().props['aria-valuenow'], 142);
-  await button(f.render(), '技能成长').props.onClick(); f.render(); assert.equal(observers[0].disconnected, true);
-  await button(f.render(), '个人知识').props.onClick(); split().props.ref.current = container; f.flushEffects();
-  separator().props.onPointerDown(event(142)); f.unmount();
+  key('End'); separator().props.onPointerDown(event(552)); container.clientWidth = 700; observers[0].callback();
+  assert.equal(separator().props['aria-valuemax'], 408); assert.equal(separator().props['aria-valuenow'], 408); assert.equal(captures.size, 0);
+  separator().props.onPointerDown(event(408)); separator().props.onPointerMove(event(380)); key('Escape'); assert.equal(separator().props['aria-valuenow'], 408);
+  await button(f.render(), '技能中心').props.onClick(); f.render(); assert.equal(observers[0].disconnected, true);
+  await button(f.render(), '知识积累').props.onClick(); split().props.ref.current = container; f.flushEffects();
+  separator().props.onPointerDown(event(408)); f.unmount();
   assert.equal(captures.size, 0); assert.equal(observers.at(-1).disconnected, true);
   const css = nodes(f.render()).find(node => node.type === 'style').props.children[0];
   assert.match(css, /grid-template-columns:var\(--ww-directory-width,195px\) 8px minmax\(0,1fr\)/);
@@ -2982,7 +3183,7 @@ test('个人知识默认全库图，刷新保留阅读与编辑，往返标签�
     if (input.action === 'write') { if (conflict) return { ok: false, error: { code: 'conflict', message: '已修改' } }; content = input.content; hash = 'new'; return { ok: true, value: { path: input.path, hash } }; }
     assert.fail(input.action);
   } });
-  await button(f.render(), '个人知识').props.onClick();
+  await button(f.render(), '知识积累').props.onClick();
   const canvas = nodes(f.render()).find(node => node.type?.name === 'GraphCanvas'); assert.equal(canvas.props.label, '关系图谱');
   await canvas.props.onOpenNote({ path: 'a.md' });
   const before = requests.filter(item => item.action === 'graph').length;
@@ -2990,15 +3191,14 @@ test('个人知识默认全库图，刷新保留阅读与编辑，往返标签�
   assert.ok(nodes(f.render()).some(node => node.props.className === 'ww-reader'));
   button(f.render(), '编辑').props.onClick(); nodes(f.render()).find(node => node.type === 'textarea').props.onChange({ target: { value: '保留草稿' } });
   await button(f.render(), '保存').props.onClick();
-  await button(f.render(), '技能成长').props.onClick(); assert.equal(button(f.render(), '技能成长').props['aria-pressed'], true);
-  await button(f.render(), '个人知识').props.onClick(); await button(f.render(), '个人知识').props.onClick(); await button(f.render(), '刷新').props.onClick();
+  await button(f.render(), '技能中心').props.onClick(); assert.equal(button(f.render(), '技能中心').props['aria-pressed'], true);
+  await button(f.render(), '知识积累').props.onClick(); await button(f.render(), '知识积累').props.onClick(); await button(f.render(), '刷新').props.onClick();
   assert.equal(nodes(f.render()).find(node => node.type === 'textarea').props.value, '保留草稿');
   assert.equal(button(f.render(), '读取最新内容').props.disabled, false);
   assert.equal(requests.filter(item => item.action === 'graph').length, before);
   assert.equal(button(f.render(), '关系图谱').props.disabled, true);
-  assert.equal(button(f.render(), '当前笔记关系图').props.disabled, true);
   conflict = false; await button(f.render(), '保存').props.onClick();
-  await button(f.render(), '个人知识').props.onClick();
+  await button(f.render(), '关系图谱').props.onClick();
   assert.deepEqual(requests.at(-1), { action: 'graph', query: '', offset: 0 });
   assert.ok(nodes(f.render()).some(node => node.type?.name === 'GraphCanvas'));
 });
@@ -3012,13 +3212,14 @@ test('图谱加载失败保留原画面与原分页请求，重试成功再更�
     if (input.action === 'graph') { requests.push(input); if (failed) return { ok: false, error: { code: 'offline', message: '图谱暂时不可读' } }; return { ok: true, value: graph }; }
     assert.fail(input.action);
   } });
-  await button(f.render(), '个人知识').props.onClick();
+  await button(f.render(), '知识积累').props.onClick();
   failed = true; await button(f.render(), '下一页').props.onClick();
-  assert.deepEqual(nodes(f.render()).find(node => node.type?.name === 'GraphCanvas').props.graph, graph);
+  const canvasGraph = nodes(f.render()).find(node => node.type?.name === 'GraphCanvas').props.graph;
+  assert.deepEqual([canvasGraph.nodes.map(item => item.path), canvasGraph.edges], [graph.nodes.map(item => item.path), graph.edges]);
   assert.ok(nodes(f.render()).some(node => node.props.role === 'alert' && node.props.children.includes(shown('offline', '图谱暂时不可读'))));
   failed = false; await button(f.render(), '重试').props.onClick();
   assert.deepEqual(requests.at(-1), requests.at(-2)); assert.equal(requests.at(-1).offset, 1);
-  await button(f.render(), '个人知识').props.onClick(); assert.deepEqual(requests.at(-1), { action: 'graph', query: '', offset: 0 });
+  await button(f.render(), '知识积累').props.onClick(); assert.deepEqual(requests.at(-1), { action: 'graph', query: '', offset: 0 });
 });
 
 test('图谱占满中央区域且无红框信息栏，只有部分范围才显示紧凑范围提示', async () => {
@@ -3029,7 +3230,7 @@ test('图谱占满中央区域且无红框信息栏，只有部分范围才显�
     if (input.action === 'graph') return { ok: true, value: graph };
     assert.fail(input.action);
   } });
-  await button(f.render(), '个人知识').props.onClick();
+  await button(f.render(), '知识积累').props.onClick();
   const region = () => nodes(f.render()).find(node => node.props.className === 'ww-graph-workspace');
   assert.ok(region(), '图谱使用填满中央分栏的独立区域');
   assert.equal(nodes(region()).some(node => ['h2', 'input'].includes(node.type)), false);
@@ -3060,16 +3261,20 @@ test('搜索截断仅提示实际搜索列表，完整656节点图谱与空关�
   } });
   const hint = () => nodes(f.render()).some(node => node.props.children.includes('当前仅展示部分结果，请缩小关键词范围'));
   const search = () => nodes(f.render()).find(node => node.type === 'input' && node.props.placeholder === '搜索笔记…');
-  await button(f.render(), '个人知识').props.onClick();
+  const leftTab = label => nodes(f.render()).find(node => node.type === 'button' && node.props.role === 'tab' && node.props.children.includes(label));
+  const enter = async () => { search().props.onKeyDown({ key: 'Enter' }); await new Promise(setImmediate); };
+  await button(f.render(), '知识积累').props.onClick();
   assert.equal(nodes(f.render()).find(node => node.type?.name === 'GraphCanvas').props.graph.nodes.length, 656);
   assert.ok(nodes(f.render()).some(node => node.type?.name === 'Directory'));
   assert.equal(hint(), false, '默认search的100条不是正在显示的图谱或文件树范围');
-  search().props.onChange({ target: { value: '笔记' } }); await button(f.render(), '查找笔记').props.onClick();
+  leftTab('搜索').props.onClick();
+  search().props.onChange({ target: { value: '笔记' } }); await enter();
   assert.equal(nodes(f.render()).some(node => node.type?.name === 'Directory'), false);
   assert.ok(button(f.render(), '笔记0')); assert.equal(hint(), true);
-  truncated = false; await button(f.render(), '查找笔记').props.onClick(); assert.equal(hint(), false);
-  truncated = true; await button(f.render(), '查找笔记').props.onClick(); assert.equal(hint(), true);
+  truncated = false; await enter(); assert.equal(hint(), false);
+  truncated = true; await enter(); assert.equal(hint(), true);
   search().props.onChange({ target: { value: '   ' } }); assert.equal(hint(), false);
+  leftTab('文件').props.onClick();
   assert.ok(nodes(f.render()).some(node => node.type?.name === 'Directory'));
   graph = { ...graph, nodes: graph.nodes.slice(0, 100), truncated: true, omittedEdges: 20 };
   await button(f.render(), '刷新').props.onClick();
@@ -3095,19 +3300,19 @@ for (const failureSource of ['refresh', 'skills']) test(`未改正文保存冲�
       assert.fail(input.action);
     },
   });
-  await button(f.render(), '个人知识').props.onClick();
+  await button(f.render(), '知识积累').props.onClick();
   await nodes(f.render()).find(node => node.type?.name === 'GraphCanvas').props.onOpenNote({ path: 'a.md' });
   button(f.render(), '编辑').props.onClick();
   await button(f.render(), '保存').props.onClick();
   assert.equal(button(f.render(), '关系图谱').props.disabled, true);
   const before = requests.filter(input => input.action === 'graph').length;
-  offline = true; await button(f.render(), failureSource === 'refresh' ? '刷新' : '技能成长').props.onClick();
-  offline = false; await button(f.render(), '个人知识').props.onClick();
+  offline = true; await button(f.render(), failureSource === 'refresh' ? '刷新' : '技能中心').props.onClick();
+  offline = false; await button(f.render(), '知识积累').props.onClick();
   assert.equal(requests.filter(input => input.action === 'graph').length, before, '普通查询失败不能清除尚未解决的保存冲突');
   assert.equal(nodes(f.render()).find(node => node.type === 'textarea').props.value, '未改动正文');
   assert.equal(button(f.render(), '关系图谱').props.disabled, true);
   await button(f.render(), '刷新').props.onClick();
-  await button(f.render(), '技能成长').props.onClick(); await button(f.render(), '个人知识').props.onClick();
+  await button(f.render(), '技能中心').props.onClick(); await button(f.render(), '知识积累').props.onClick();
   assert.equal(button(f.render(), '关系图谱').props.disabled, true, '成功查询也不能解除冲突');
   resolveOffline = true;
   await button(f.render(), '读取最新内容').props.onClick(); await button(f.render(), '保存').props.onClick();
@@ -3116,7 +3321,7 @@ for (const failureSource of ['refresh', 'skills']) test(`未改正文保存冲�
   rejectSave = false;
   await button(f.render(), failureSource === 'refresh' ? '读取最新内容' : '保存').props.onClick();
   assert.equal(button(f.render(), '关系图谱').props.disabled, false);
-  await button(f.render(), '个人知识').props.onClick();
+  await button(f.render(), '关系图谱').props.onClick();
   assert.equal(requests.filter(input => input.action === 'graph').length, before + 1);
 });
 
@@ -3181,11 +3386,11 @@ test('缺定时服务以刷新为主恢复，旧版设置为次入口且保留�
 test('知识首页失败保留既有卡片，设置草稿收起和重新进入仍保存且不暗中采集', async () => {
   let fail = false;
   const f = await fixture({ news: async input => input.action === 'home' ? fail ? { ok: false, error: { code: 'IO', message: '卡片读取失败' } } : { ok: true, value: newsHomeResult([newsSavedReport()]) } : { ok: true, value: newsList() } });
-  await button(f.render(), '知识卡片').props.onClick(); fail = true;
+  await button(f.render(), '每日阅读').props.onClick(); fail = true;
   await button(f.render(), '刷新').props.onClick(); assert.ok(JSON.stringify(f.render()).includes('真实已保存标题'));
-  fail = false; await button(f.render(), '卡片设置').props.onClick(); button(f.render(), '编辑领域').props.onClick(); taskField(f, '关注描述', '仍未提交的领域草稿');
-  await button(f.render(), '返回知识卡片').props.onClick(); assert.ok(JSON.stringify(f.render()).includes(dailyBook.chapter.title));
-  await button(f.render(), '卡片设置').props.onClick(); assert.equal(taskField(f, '关注描述').props.value, '仍未提交的领域草稿');
+  fail = false; await button(f.render(), '阅读设置').props.onClick(); button(f.render(), '编辑领域').props.onClick(); taskField(f, '关注描述', '仍未提交的领域草稿');
+  await button(f.render(), '返回每日阅读').props.onClick(); assert.ok(JSON.stringify(f.render()).includes(dailyBook.chapter.title));
+  await button(f.render(), '阅读设置').props.onClick(); assert.equal(taskField(f, '关注描述').props.value, '仍未提交的领域草稿');
   assert.equal(f.calls.some(([kind, input]) => kind === 'news' && ['save', 'remove'].includes(input.action) || ['create', 'prompt'].includes(kind)), false);
 });
 
@@ -3395,11 +3600,16 @@ test('插件隐藏重复原生任务入口只持有可逆租约，卸载归还�
  const f=await fixture();assert.deepEqual(f.navigation,['hide']);for(const cleanup of f.disposed)if(typeof cleanup==='function')await cleanup();assert.deepEqual(f.navigation,['hide','restore']);
 });
 
-// —— 知识卡片书房改版：首页书桌、AI 使用技巧卡、书架页、常看选择抽屉与替换弹窗 ——
+// —— 每日阅读：首页的接着读和今日一招、书架页、常看选择抽屉与替换弹窗 ——
+// 2026-11-14 首页改版：常看书在“接着读”里每本一行（ww-read-bookrow），行里左边一个按钮打开下一章，行尾是“…”菜单；
+// 打开一本书会顺带读它的划线（reading），这些用例只看书架和首页的读写，认最后一次调用时把它略过。
 const shelfBook = (n, changes = {}) => ({ ...libraryBook, id: `00000000-0000-4000-8000-00000000001${n}`, title: `书${n}`, author: `作者${n}`, chapters: 10, daily: false, groups: [], addedAt: `2026-10-2${n}T02:00:00.000Z`, progress: { last: 0, next: 0 }, ...changes });
 const deskBook = (book, changes = {}) => ({ id: book.id, title: book.title, author: book.author, cover: Boolean(book.cover), chapters: book.chapters, finished: false, chapter: { index: book.progress.next, title: `${book.title} 第 ${book.progress.next + 1} 章`, excerpt: `${book.title} 的摘要`, chars: 9000 }, next: [], ...changes });
-const desks = tree => nodes(tree).filter(node => typeof node.props?.className === 'string' && node.props.className.startsWith('ww-desk-card'));
-const menuItems = node => nodes(nodes(node).find(child => child.type?.name === 'ActionMenu')).filter(child => child.type === 'button').map(child => child.props.children.join(''));
+const desks = tree => nodes(tree).filter(node => node.props?.className === 'ww-read-bookrow');
+const deskOpen = row => nodes(row).find(node => node.props?.className === 'ww-read-bookopen');
+const lastCall = f => f.calls.filter(([kind]) => kind !== 'reading').at(-1);
+// 书架页的“…”菜单在夹具里不展开（认 ActionMenu 组件），首页的跟着首页组件一起展开了（认浮层 ww-menu-surface），两种都认。
+const menuItems = node => nodes(nodes(node).find(child => child.type?.name === 'ActionMenu') ?? nodes(node).find(child => child.props?.className === 'ww-menu-surface')).filter(child => child.type === 'button').map(child => child.props.children.join(''));
 const pinCalls = f => f.calls.filter(([kind, input]) => kind === 'library' && input.action === 'pins').map(([, input]) => input);
 /** 书架宿主替身：按契约实现 list / update / pins / remove，pins 按 expected 做冲突校验；首页学习数据从同一份书架算出（常看书按书名排）。elsewhere 模拟别处先改了常看。 */
 function shelfHost(initial, options = {}) {
@@ -3436,7 +3646,7 @@ function shelfHost(initial, options = {}) {
   return host;
 }
 
-test('今日学习：一本常看是加宽卡，整卡打开下一章并按章阅读，“接下来”打开所点的章，“查看全部”打开即展开目录；关闭阅读器重读首页', async () => {
+test('接着读：只有一本常看时下面列“接下来”几章，整行打开下一章并按章阅读，“接下来”打开所点的章，“查看全部”打开即展开目录；关闭阅读器重读首页', async () => {
   const titles = ['前言', '1 软件需求全景图', '2 日常需求分析', '3 目标/愿景分析'];
   const reading = index => ({ reading: { book: libraryBook, toc: titles.map(title => ({ title, chars: 9000 })), chapter: { index, title: titles[index], view: { type: 'root', line: 1, children: [
     { type: 'heading', level: 2, line: 1, children: [{ type: 'text', value: titles[index], line: 1 }] },
@@ -3448,22 +3658,25 @@ test('今日学习：一本常看是加宽卡，整卡打开下一章并按章�
     if (input.action === 'image') return { ok: true, value: { image: { mime: 'image/png', data: 'AAAA' } } };
     throw new Error('unexpected library action');
   } });
-  await button(f.render(), '知识卡片').props.onClick();
+  await button(f.render(), '每日阅读').props.onClick();
   const tree = f.render(), text = JSON.stringify(tree);
-  for (const content of ['2 日常需求分析', '日常需求分析的摘要。', '第 3 / 18 章', '约 26 分钟', '11%', '读第 3 章 →', '接下来', '3 目标/愿景分析', '查看全部 18 章', '写长文档前先让 AI 列提纲', '常看 1 / 2 本 · 书架 2 本', '真实已保存标题']) assert.ok(text.includes(content), content);
+  for (const content of ['2 日常需求分析', '第 3 / 18 章 · 约 26 分钟', '读到 11% · 划线 0 条', '第 4 章', '3 目标/愿景分析', '查看全部 18 章', '写长文档前先让 AI 列提纲', '常看 1 / 2 本 · 书架 2 本', '真实已保存标题']) assert.ok(text.includes(content), content);
+  assert.equal(text.includes('日常需求分析的摘要。'), false, '首页不放章节摘要');
   const [card] = desks(tree);
   assert.equal(desks(tree).length, 1);
-  assert.equal(card.props.className, 'ww-desk-card ww-desk-wide', '只有一本常看时用加宽卡');
-  assert.equal(nodes(tree).some(node => node.props?.className === 'ww-desk-add'), false, '不放空位占位卡');
-  assert.equal(nodes(card).find(node => node.type?.name === 'ActionMenu').props.label, '有效需求分析 · 更多操作');
+  assert.equal(nodes(tree).filter(node => node.props?.className === 'ww-read-nextrow').length, 1, '只有一本常看时列“接下来”');
+  assert.equal(nodes(tree).some(node => node.props?.className === 'ww-read-add'), false, '不放空位占位卡');
+  assert.equal(nodes(card).find(node => node.props?.className === 'ww-menu-surface').props['aria-label'], '有效需求分析 · 更多操作');
   assert.deepEqual(menuItems(card), ['换一本', '再加一本常看', '取消常看', '在书架中查看'], '“…”常显，换一本在第一项');
   assert.equal(nodes(tree).some(node => node.type === 'dialog'), false, '正文只在点开后出现');
-  const main = nodes(card).find(node => node.props?.className === 'ww-desk-main');
-  assert.equal(main.props.role, 'button');
-  assert.equal(nodes(main).some(node => node.type === 'button'), false, '整卡按钮里不嵌按钮，“接下来”另成一组');
+  const main = deskOpen(card);
+  assert.equal(main.type, 'button');
+  assert.equal(main.props['aria-label'], '读《有效需求分析》第 3 章：2 日常需求分析');
+  assert.equal(nodes(main).slice(1).some(node => node.type === 'button'), false, '整行按钮里不嵌按钮，“接下来”另成一组');
   const before = f.calls.length;
   await main.props.onClick();
-  assert.deepEqual(f.calls.at(-1), ['library', { action: 'open', id: libraryBook.id, chapter: 2 }], '首页打开定位到下一章');
+  assert.deepEqual(lastCall(f), ['library', { action: 'open', id: libraryBook.id, chapter: 2 }], '首页打开定位到下一章');
+  assert.deepEqual(f.calls.at(-1), ['reading', { action: 'highlights', book: libraryBook.id }], '打开这本书时读一次它的划线');
   let reader = nodes(f.render()).find(node => node.type === 'dialog' && node.props['aria-label'] === libraryBook.title);
   assert.ok(reader, '按章阅读器以书名为标题');
   assert.ok(JSON.stringify(reader).includes('章节正文内容'));
@@ -3495,11 +3708,11 @@ test('今日学习：一本常看是加宽卡，整卡打开下一章并按章�
   assert.ok(JSON.stringify(next).includes('3 目标/愿景分析'), '章末接着是下一章');
   assert.ok(JSON.stringify(reader).includes('停一下再往下滚，进入下一章'), '章末说明继续往下滚也能进入下一章');
   await next.props.onClick();
-  assert.deepEqual(f.calls.at(-1), ['library', { action: 'open', id: libraryBook.id, chapter: 3 }]);
+  assert.deepEqual(lastCall(f), ['library', { action: 'open', id: libraryBook.id, chapter: 3 }]);
   // ← → 换章。
   nodes(f.render()).find(node => node.type === 'dialog' && node.props['aria-label'] === libraryBook.title).props.onKeyDown({ key: 'ArrowLeft', target: { closest: () => null }, preventDefault() {} });
   await new Promise(setImmediate);
-  assert.deepEqual(f.calls.at(-1), ['library', { action: 'open', id: libraryBook.id, chapter: 2 }], '← 回到上一章');
+  assert.deepEqual(lastCall(f), ['library', { action: 'open', id: libraryBook.id, chapter: 2 }], '← 回到上一章');
   // 读到一半关掉：位置记在本机；再从首页打开同一章，回到原处。
   await new Promise(setImmediate); await new Promise(setImmediate);
   assert.ok(JSON.stringify(nodes(f.render()).find(node => node.props?.className === 'ww-book-progress')).includes(titles[2]), '已换到上一章');
@@ -3511,58 +3724,57 @@ test('今日学习：一本常看是加宽卡，整卡打开下一章并按章�
   nodes(f.render()).find(node => node.type === 'dialog').props.onCancel({ preventDefault() {} });
   await new Promise(setImmediate); f.flushEffects();
   assert.deepEqual((({ chapter, ratio }) => ({ chapter, ratio }))(JSON.parse(memory.get('whalewing.reader')).books[libraryBook.id]), { chapter: 2, ratio: 0.5 });
-  await nodes(f.render()).find(node => node.props?.className === 'ww-desk-main').props.onClick();
+  await deskOpen(desks(f.render())[0]).props.onClick();
   ({ scroll } = attach({ scrollTop: 0, scrollHeight: 1000, clientHeight: 400 }));
   f.flushEffects();
   assert.equal(scroll.props.ref.current.scrollTop, 300, '回到上次读到的地方');
   nodes(f.render()).find(node => node.type === 'dialog').props.onCancel({ preventDefault() {} });
   await new Promise(setImmediate);
   if (previousStorage) Object.defineProperty(globalThis, 'localStorage', previousStorage); else delete globalThis.localStorage;
-  await nodes(f.render()).find(node => node.props?.className === 'ww-desk-next-row').props.onClick();
-  assert.deepEqual(f.calls.at(-1), ['library', { action: 'open', id: libraryBook.id, chapter: 3 }]);
+  await nodes(f.render()).find(node => node.props?.className === 'ww-read-nextrow').props.onClick();
+  assert.deepEqual(lastCall(f), ['library', { action: 'open', id: libraryBook.id, chapter: 3 }]);
   // 关闭阅读器回到首页原位，重读首页学习数据。
   const homes = () => f.calls.filter(([kind, input]) => kind === 'news' && input.action === 'home').length, read = homes();
   nodes(f.render()).find(node => node.type === 'dialog' && node.props['aria-label'] === libraryBook.title).props.onCancel({ preventDefault() {} });
   await new Promise(setImmediate);
   assert.equal(homes(), read + 1);
   assert.equal(nodes(f.render()).some(node => node.type === 'dialog'), false);
-  await nodes(f.render()).find(node => node.props?.className === 'ww-desk-next-row').props.onClick();
-  assert.deepEqual(f.calls.at(-1), ['library', { action: 'open', id: libraryBook.id, chapter: 3 }], '“接下来”打开所点的那一章');
+  await nodes(f.render()).find(node => node.props?.className === 'ww-read-nextrow').props.onClick();
+  assert.deepEqual(lastCall(f), ['library', { action: 'open', id: libraryBook.id, chapter: 3 }], '“接下来”打开所点的那一章');
   nodes(f.render()).find(node => node.type === 'dialog').props.onCancel({ preventDefault() {} });
   await new Promise(setImmediate);
   // “查看全部 18 章”：打开当前章，窄窗里目录本来收起，这时直接展开。
   const previousWidth = Object.getOwnPropertyDescriptor(globalThis, 'innerWidth');
   Object.defineProperty(globalThis, 'innerWidth', { configurable: true, value: 700 });
-  await nodes(f.render()).find(node => node.props?.className === 'ww-desk-main').props.onClick();
+  await deskOpen(desks(f.render())[0]).props.onClick();
   assert.equal(nodes(f.render()).find(node => node.props?.className === 'ww-book-toggle').props['aria-expanded'], false, '窄窗默认收起目录');
   nodes(f.render()).find(node => node.type === 'dialog').props.onCancel({ preventDefault() {} });
   await new Promise(setImmediate);
   await button(f.render(), '查看全部 18 章').props.onClick();
-  assert.deepEqual(f.calls.at(-1), ['library', { action: 'open', id: libraryBook.id, chapter: 2 }]);
+  assert.deepEqual(lastCall(f), ['library', { action: 'open', id: libraryBook.id, chapter: 2 }]);
   reader = nodes(f.render()).find(node => node.type === 'dialog' && node.props['aria-label'] === libraryBook.title);
   assert.equal(nodes(reader).find(node => node.props?.className === 'ww-book-toggle').props['aria-expanded'], true, '“查看全部”打开即展开目录');
   assert.ok(nodes(reader).some(node => node.type === 'nav' && node.props.className === 'ww-book-toc'));
   if (previousWidth) Object.defineProperty(globalThis, 'innerWidth', previousWidth); else delete globalThis.innerWidth;
-  assert.equal(f.calls.slice(before).some(([kind]) => !['library', 'news'].includes(kind)), false, '阅读不调用外站或模型');
+  assert.equal(f.calls.slice(before).some(([kind]) => !['library', 'news', 'reading'].includes(kind)), false, '阅读不调用外站或模型');
   f.unmount();
 });
 
-test('AI 使用技巧卡整卡进入技巧历史并定位当天首页那条，近 14 天刻度补齐空日；停用时进卡片设置打开它的编辑抽屉，删除后不显示且书桌变宽', async () => {
+test('今日一招的 AI 技巧卡：“往期”进技巧历史并定位当天首页那条，近 14 天刻度补齐空日；停用时进阅读设置打开它的编辑抽屉，删除后只剩鲸翼的用法', async () => {
   let learning = {};
   const tipsField = { ...structuredClone(defaultTipsField), revision: 1 };
   const f = await fixture({ news: async input => ({ ok: true, value: input.action === 'home' ? newsHomeResult([], learning) : newsList([structuredClone(defaultNewsField), tipsField]) }) });
-  await button(f.render(), '知识卡片').props.onClick();
-  const card = () => nodes(f.render()).find(node => node.props?.className === 'ww-tile ww-tip-card');
+  await button(f.render(), '每日阅读').props.onClick();
+  const card = () => nodes(f.render()).find(node => node.props?.className === 'ww-read-tipcard' && JSON.stringify(node).includes('AI 技巧'));
   const cells = () => nodes(card()).filter(node => node.type === 'i' && node.props['data-day']);
   assert.equal(cells().length, 14, '近 14 天每天一格，空日补齐');
   assert.deepEqual(cells().map(cell => cell.props['data-day']), [...Array(11).fill('none'), 'partial', 'none', 'issued']);
   assert.deepEqual(cells().map(cell => Boolean(cell.props['data-today'])), [...Array(13).fill(false), true]);
-  assert.equal(card().props['aria-label'], 'AI 使用技巧，10 月 12 日 · 星期一，写长文档前先让 AI 列提纲。近 14 天整理了 2 期。打开技巧历史');
-  assert.equal(card().props.role, 'button');
-  assert.equal(nodes(card()).some(node => ['button', 'a'].includes(node.type)), false, '整卡只有一个可点目标');
-  for (const content of ['10/12', '查看往期 →', '宝玉', '近 14 天']) assert.ok(JSON.stringify(card()).includes(content), content);
+  assert.equal(card().type, 'article', '技巧卡不再整卡可点，动作各有按钮');
+  assert.deepEqual(nodes(card()).filter(node => node.type === 'button').map(node => node.props.children.join('')), ['让小鲸试一下', '存一条', '往期']);
+  for (const content of ['写长文档前先让 AI 列提纲', '先给结构，再逐节展开。', '宝玉', '近 14 天']) assert.ok(JSON.stringify(card()).includes(content), content);
   const before = f.calls.length;
-  card().props.onClick();
+  button(card(), '往期').props.onClick();
   const tips = () => nodes(f.render()).find(node => node.type?.name === 'TipsPage');
   assert.deepEqual(tips().props.focus, { date: '2026-10-12', index: 1 }, '定位到当天首页那条');
   assert.deepEqual(tips().props.field, { name: 'AI 使用技巧', enabled: true, deleted: false });
@@ -3571,39 +3783,41 @@ test('AI 使用技巧卡整卡进入技巧历史并定位当天首页那条，�
   await button(f.render(), '刷新').props.onClick();
   assert.equal(tips().props.reloadKey, 1, '外壳刷新只让技巧历史重读');
   assert.equal(f.calls.length, before);
-  await button(f.render(), '专家团队').props.onClick(); await button(f.render(), '知识卡片').props.onClick();
+  await button(f.render(), '专家团队').props.onClick(); await button(f.render(), '每日阅读').props.onClick();
   assert.ok(tips(), '切页签回来仍停在技巧历史');
   assert.equal(tips().props.reloadKey, 1, '回到页签不重读技巧历史');
   tips().props.onBack();
   assert.ok(card(), '面包屑回到首页');
-  // 今天的技巧还没出：日期仍写今天，今天那一格空心，整卡仍进技巧历史。
+  // 今天的技巧还没出：卡上写什么时候整理好，不画刻度，“往期”仍进技巧历史。
   learning = { tip: null };
   await button(f.render(), '刷新').props.onClick();
-  assert.ok(JSON.stringify(card()).includes('今天的技巧 08:00 后整理好') && JSON.stringify(card()).includes('10/12'));
-  assert.deepEqual([cells().at(-1).props['data-day'], cells().at(-1).props['data-today']], ['issued', true]);
-  card().props.onClick();
+  assert.ok(JSON.stringify(card()).includes('今天的技巧 08:00 后整理好'));
+  assert.equal(cells().length, 0);
+  button(card(), '往期').props.onClick();
   assert.equal(tips().props.focus, null);
   tips().props.onBack();
-  // 领域停用：标题位写已停用，点卡片进卡片设置并直接打开 ai-tips 的编辑抽屉。
+  // 领域停用：标题位写已停用，点“到阅读设置开启”进阅读设置并直接打开 ai-tips 的编辑抽屉。
   learning = { tipField: { name: 'AI 使用技巧', enabled: false, deleted: false } };
   await button(f.render(), '刷新').props.onClick();
-  assert.ok(JSON.stringify(card()).includes('AI 使用技巧已停用') && JSON.stringify(card()).includes('到卡片设置开启'));
+  assert.ok(JSON.stringify(card()).includes('AI 使用技巧已停用'));
   assert.equal(cells().length, 0);
-  await card().props.onClick();
+  await button(card(), '到阅读设置开启').props.onClick();
   assert.deepEqual(f.calls.at(-1), ['news', { action: 'list' }]);
   assert.ok(nodes(f.render()).some(node => node.type === 'dialog' && node.props['aria-label'] === '编辑领域'));
   assert.equal(taskField(f, '领域名称').props.value, 'AI 使用技巧');
-  // 卡片设置里 ai-tips 领域的“查看历史日报”也进技巧历史页。
+  // 阅读设置里 ai-tips 领域的“查看历史日报”也进技巧历史页。
   const field = nodes(f.render()).find(node => node.type === 'article' && node.props.key === 'ai-tips');
   button(field, '查看历史日报').props.onClick();
   assert.ok(tips());
   assert.equal(f.calls.at(-1)[1].action, 'list', '不再用弹窗读历史日报');
   tips().props.onBack();
-  // 领域删除：整张技巧卡不显示，书桌区变宽。
+  // 领域删除：AI 技巧卡不显示，今日一招只剩“鲸翼的用法”那一张，也就不用切换。
   learning = { tipField: null };
   await button(f.render(), '刷新').props.onClick();
   assert.equal(card(), undefined);
-  assert.equal(nodes(f.render()).find(node => node.props?.className?.startsWith?.('ww-desk-row')).props.className, 'ww-desk-row ww-desk-solo');
+  const left = nodes(f.render()).filter(node => node.props?.className === 'ww-read-tipcard');
+  assert.equal(left.length, 1); assert.ok(JSON.stringify(left[0]).includes('鲸翼的用法') && JSON.stringify(left[0]).includes('随鲸翼带的，不用模型'));
+  assert.equal(nodes(f.render()).some(node => node.type === 'button' && node.props.className === 'ww-chip' && node.props.children.includes('AI 技巧')), false);
   f.unmount();
 });
 
@@ -3611,11 +3825,11 @@ test('零本常看只放占位卡：书架有书时打开选择抽屉，勾满�
   const a = shelfBook(1, { title: '极简项目管理', author: '郭致星' }), b = shelfBook(2, { title: '有效需求分析', author: '徐锋' }), c = shelfBook(3, { title: '用户故事地图', author: 'Jeff Patton' });
   const host = shelfHost([a, b, c]);
   const f = await fixture({ news: host.news, library: host.library });
-  await button(f.render(), '知识卡片').props.onClick();
+  await button(f.render(), '每日阅读').props.onClick();
   const text = JSON.stringify(f.render());
   assert.ok(text.includes('还没有常看书 · 书架 3 本'));
   for (const title of [a.title, b.title, c.title]) assert.equal(text.includes(title), false, '占位卡里不出现任何书');
-  const add = nodes(f.render()).find(node => node.props?.className === 'ww-desk-add');
+  const add = nodes(f.render()).find(node => node.props?.className === 'ww-read-add');
   assert.equal(add.props['aria-label'], '添加常看书籍，打开选择抽屉');
   assert.ok(JSON.stringify(add).includes('从书架选一到两本，首页每天接着读下一章'));
   await add.props.onClick();
@@ -3640,8 +3854,8 @@ test('零本常看只放占位卡：书架有书时打开选择抽屉，勾满�
   await button(drawer(), '保存常看书籍').props.onClick();
   assert.deepEqual(pinCalls(f), [{ action: 'pins', ids: [a.id, c.id], expected: [] }]);
   assert.equal(drawer(), undefined);
-  assert.deepEqual(f.calls.at(-1), ['news', { action: 'home' }], '保存后首页书桌原位刷新');
-  assert.deepEqual(desks(f.render()).map(card => card.props.key), [a.id, c.id], '两本并排，按书名排');
+  assert.deepEqual(f.calls.at(-1), ['news', { action: 'home' }], '保存后首页的接着读原位刷新');
+  assert.deepEqual(desks(f.render()).map(card => card.props.key), [a.id, c.id], '两本各一行，按书名排');
   assert.ok(JSON.stringify(f.render()).includes('常看书籍已保存'));
   assert.ok([...f.timers.values()].some(timer => timer.delay === 4000), '带撤销的提示 4 秒收起');
   await button(f.render(), '撤销').props.onClick();
@@ -3652,9 +3866,9 @@ test('零本常看只放占位卡：书架有书时打开选择抽屉，勾满�
   f.unmount();
   // 书架为空（S3b）：占位卡写“书架里还没有书”，点了进书架，焦点落在导入卡。
   const empty = shelfHost([]), g = await fixture({ news: empty.news, library: empty.library });
-  await button(g.render(), '知识卡片').props.onClick();
+  await button(g.render(), '每日阅读').props.onClick();
   assert.ok(JSON.stringify(g.render()).includes('书架还是空的'));
-  const blank = nodes(g.render()).find(node => node.props?.className === 'ww-desk-add');
+  const blank = nodes(g.render()).find(node => node.props?.className === 'ww-read-add');
   assert.ok(JSON.stringify(blank).includes('书架里还没有书') && JSON.stringify(blank).includes('导入电子书，或从在线书目下载开放许可的书'));
   await blank.props.onClick();
   assert.deepEqual(g.calls.at(-1), ['library', { action: 'list' }]);
@@ -3663,16 +3877,16 @@ test('零本常看只放占位卡：书架有书时打开选择抽屉，勾满�
   g.unmount();
 });
 
-test('两本常看并排；“换一本”打开抽屉勾着当前两本，别处改过时重读并提示、勾选换成最新；改了再关先确认放弃，不提交', async () => {
+test('两本常看各一行、不列“接下来”；“换一本”打开抽屉勾着当前两本，别处改过时重读并提示、勾选换成最新；改了再关先确认放弃，不提交', async () => {
   const a = shelfBook(1, { title: '极简项目管理', daily: true }), b = shelfBook(2, { title: '有效需求分析', daily: true }), c = shelfBook(3, { title: '用户故事地图' });
   const host = shelfHost([a, b, c]);
   const f = await fixture({ news: host.news, library: host.library });
-  await button(f.render(), '知识卡片').props.onClick();
+  await button(f.render(), '每日阅读').props.onClick();
   assert.ok(JSON.stringify(f.render()).includes('常看 2 / 2 本 · 书架 3 本'));
   const cards = desks(f.render());
-  assert.deepEqual(cards.map(card => card.props.className), ['ww-desk-card', 'ww-desk-card']);
+  assert.equal(cards.length, 2);
   assert.deepEqual(menuItems(cards[0]), ['换一本', '取消常看', '在书架中查看'], '两本时没有“再加一本常看”');
-  assert.equal(nodes(f.render()).some(node => node.props?.className === 'ww-desk-next'), false, '标准书卡不列“接下来”');
+  assert.equal(nodes(f.render()).some(node => node.props?.className === 'ww-read-next'), false, '两本时不列“接下来”');
   await button(cards[0], '换一本').props.onClick();
   const drawer = () => nodes(f.render()).find(node => node.type === 'dialog' && node.props['aria-label'] === '选择常看书籍');
   const box = title => nodes(nodes(drawer()).filter(node => node.props?.className === 'ww-pin-row').find(item => JSON.stringify(item).includes(title))).find(node => node.type === 'input');
@@ -3687,7 +3901,7 @@ test('两本常看并排；“换一本”打开抽屉勾着当前两本，别�
   assert.ok(drawer(), '冲突时抽屉留着');
   assert.deepEqual([box(a.title).props.checked, box(b.title).props.checked, box(c.title).props.checked], [false, true, false], '勾选更新为最新');
   assert.equal(button(drawer(), '保存常看书籍').props.disabled, true);
-  assert.equal(desks(f.render()).length, 1, '首页书桌按最新常看原位刷新');
+  assert.equal(desks(f.render()).length, 1, '首页的接着读按最新常看原位刷新');
   box(c.title).props.onChange();
   button(drawer(), '取消').props.onClick();
   const confirm = nodes(f.render()).filter(node => node.type === 'dialog').at(-1);
@@ -3707,11 +3921,11 @@ test('首页“取消常看”立即生效并可撤销；“在书架中查看�
   const a = shelfBook(1, { title: '极简项目管理', daily: true, progress: { last: 4, next: 5 }, chapters: 12 }), b = shelfBook(2, { title: '有效需求分析', daily: true, progress: { last: 2, next: 3 }, chapters: 18 }), c = shelfBook(3, { title: '用户故事地图' });
   const host = shelfHost([a, b, c]);
   const f = await fixture({ news: host.news, library: host.library });
-  await button(f.render(), '知识卡片').props.onClick();
+  await button(f.render(), '每日阅读').props.onClick();
   await button(desks(f.render())[0], '取消常看').props.onClick();
   assert.deepEqual(f.calls.filter(([kind]) => kind === 'library').at(-1), ['library', { action: 'update', id: a.id, daily: false }]);
   assert.deepEqual(f.calls.at(-1), ['news', { action: 'home' }]);
-  assert.deepEqual(desks(f.render()).map(card => card.props.className), ['ww-desk-card ww-desk-wide'], '剩一本收成加宽卡');
+  assert.deepEqual(desks(f.render()).map(card => card.props.key), [b.id], '只剩另一本');
   assert.ok(JSON.stringify(f.render()).includes('已取消常看《极简项目管理》'));
   assert.ok([...f.timers.values()].some(timer => timer.delay === 4000));
   await button(f.render(), '撤销').props.onClick();
@@ -3723,7 +3937,7 @@ test('首页“取消常看”立即生效并可撤销；“在书架中查看�
   const flashed = nodes(view()).filter(node => node.type === 'article' && node.props['data-flash']);
   assert.deepEqual(flashed.map(node => node.props.title), [b.title], '要找的那本描边提示');
   const nav = nodes(view()).find(node => node.props?.className === 'ww-crumbs');
-  for (const content of ['知识卡片', '书架', '3']) assert.ok(JSON.stringify(nav).includes(content), content);
+  for (const content of ['每日阅读', '书架', '3']) assert.ok(JSON.stringify(nav).includes(content), content);
   const band = nodes(view()).find(node => node.props?.className === 'ww-pin-band');
   for (const content of ['常看', '2 / 2', '首页每天接着读这两本', '读到第 6 / 12 章 · 极简项目管理 第 6 章', '42%', '读到第 4 / 18 章', '17%']) assert.ok(JSON.stringify(band).includes(content), content);
   const slots = nodes(band).filter(node => node.props?.className === 'ww-pin-slot');
@@ -3742,7 +3956,7 @@ test('首页“取消常看”立即生效并可撤销；“在书架中查看�
   // 点栏位从上次读到的章打开；关闭阅读器重读书架，常看栏和书格进度原位更新。
   const slot = nodes(view()).find(node => node.props?.className === 'ww-pin-slot');
   await nodes(slot).find(node => node.props?.className === 'ww-pin-main').props.onClick();
-  assert.deepEqual(f.calls.at(-1), ['library', { action: 'open', id: b.id, chapter: 3 }]);
+  assert.deepEqual(lastCall(f), ['library', { action: 'open', id: b.id, chapter: 3 }]);
   const lists = () => f.calls.filter(([kind, input]) => kind === 'library' && input.action === 'list').length, listed = lists();
   nodes(f.render()).find(node => node.type === 'dialog').props.onCancel({ preventDefault() {} });
   await new Promise(setImmediate);
@@ -3759,8 +3973,8 @@ test('常看已满时设第三本弹出替换弹窗：不预选，选中后主�
   const a = shelfBook(1, { title: '极简项目管理', daily: true, progress: { last: 5, next: 5 }, chapters: 12 }), b = shelfBook(2, { title: '有效需求分析', daily: true }), c = shelfBook(3, { title: '用户故事地图' });
   const host = shelfHost([a, b, c]);
   const f = await fixture({ news: host.news, library: host.library });
-  await button(f.render(), '知识卡片').props.onClick();
-  await button(f.render(), '打开书架').props.onClick();
+  await button(f.render(), '每日阅读').props.onClick();
+  await button(f.render(), '书架').props.onClick();
   const card = title => nodes(f.render()).find(node => node.type === 'article' && node.props.className === 'ww-library-book' && node.props.title === title);
   assert.deepEqual(menuItems(card(c.title)), ['阅读', '设为常看', '编辑', '从书架删除']);
   assert.deepEqual(menuItems(card(a.title)), ['阅读', '取消常看', '编辑', '从书架删除']);
@@ -3812,9 +4026,9 @@ test('书架头行：查找按书名作者即时过滤，无结果可清除；�
   const a = shelfBook(1, { title: '极简项目管理', author: '郭致星', progress: { last: 2, next: 3 } }), b = shelfBook(2, { title: '有效需求分析', author: '徐锋', progress: { last: 9, next: 10 } }), c = shelfBook(3, { title: '用户故事地图', author: 'Jeff Patton' });
   const host = shelfHost([a, b, c]), storage = new Map();
   const f = await fixture({ news: host.news, library: host.library, storage });
-  await button(f.render(), '知识卡片').props.onClick();
+  await button(f.render(), '每日阅读').props.onClick();
   assert.equal(storage.size, 0, '首页不写本机存储');
-  await button(f.render(), '打开书架').props.onClick();
+  await button(f.render(), '书架').props.onClick();
   const view = () => nodes(f.render()).find(node => node.props?.className === 'ww-library');
   const order = () => nodes(view()).filter(node => node.type === 'article' && node.props.className === 'ww-library-book').map(node => node.props.title);
   const control = (type, test) => nodes(view()).find(node => node.type === type && test(node.props));
@@ -3846,12 +4060,12 @@ test('书架头行：查找按书名作者即时过滤，无结果可清除；�
   assert.equal(control('button', props => props.className === 'ww-library-dir').props.title, '读得多的在前');
   f.unmount();
   const g = await fixture({ news: host.news, library: host.library, storage });
-  await button(g.render(), '知识卡片').props.onClick(); await button(g.render(), '打开书架').props.onClick();
+  await button(g.render(), '每日阅读').props.onClick(); await button(g.render(), '书架').props.onClick();
   assert.deepEqual(nodes(g.render()).filter(node => node.type === 'article' && node.props.className === 'ww-library-book').map(node => node.props.title), [b.title, a.title, c.title], '下次打开沿用本机记下的排序');
   g.storage.set('whalewing:cards:library-sort', '{"field":"bogus"}');
   g.unmount();
   const h = await fixture({ news: host.news, library: host.library, storage });
-  await button(h.render(), '知识卡片').props.onClick(); await button(h.render(), '打开书架').props.onClick();
+  await button(h.render(), '每日阅读').props.onClick(); await button(h.render(), '书架').props.onClick();
   assert.deepEqual(nodes(h.render()).filter(node => node.type === 'article' && node.props.className === 'ww-library-book').map(node => node.props.title), [c.title, b.title, a.title], '本机记录不合法时回到默认');
   h.unmount();
 });
@@ -3863,9 +4077,9 @@ test('显示书的地方一律用 BookCover：有原封面读 cover 缩略图，
     assert.equal(input.action, 'image'); assert.equal(input.name, 'cover');
     return input.id === withCover.id ? { ok: true, value: { image: { mime: 'image/webp', data: 'Q09WRVI=' } } } : { ok: false, error: { code: 'LIBRARY_MISSING', message: '封面不见了' } };
   } });
-  await button(f.render(), '知识卡片').props.onClick();
+  await button(f.render(), '每日阅读').props.onClick();
   const covers = () => nodes(f.render()).filter(node => typeof node.props?.className === 'string' && node.props.className.startsWith('ww-cover ww-cover-'));
-  assert.deepEqual(covers().map(cover => cover.props.className), ['ww-cover ww-cover-l', 'ww-cover ww-cover-l']);
+  assert.deepEqual(covers().map(cover => cover.props.className), ['ww-cover ww-cover-xs', 'ww-cover ww-cover-xs'], '首页一本一行，用小封面');
   assert.ok(JSON.stringify(covers()[0]).includes('极简项目管理') && JSON.stringify(covers()[0]).includes('郭致星'), '没有封面：书名和作者生成');
   assert.equal(nodes(covers()[1]).some(node => node.type === 'strong'), false, '原封面读取中不先闪生成封面');
   f.flushEffects(); await new Promise(setImmediate);
@@ -3878,7 +4092,7 @@ test('显示书的地方一律用 BookCover：有原封面读 cover 缩略图，
   f.unmount();
 });
 
-test('首页一次性提示与异常书卡：旧数据收成两本时提示 8 秒带“打开书架”；书架读不出来换成纸面提示卡；副本丢失的书不可点，只能取消常看或删除', async () => {
+test('首页一次性提示与异常书行：旧数据收成两本时提示 8 秒带“打开书架”；书架读不出来换成一句提示加“重新读取”；副本丢失的书不可点，只能取消常看或删除', async () => {
   let learning = { books: [], daily: 0, notice: { kept: ['极简项目管理', '有效需求分析'], released: 3 } };
   const missing = { id: '00000000-0000-4000-8000-000000000009', title: '人月神话', author: 'Brooks', cover: false, chapters: 19, finished: false, missing: true, next: [] };
   const lost = shelfBook(9, { id: missing.id, title: '人月神话', daily: true });
@@ -3887,7 +4101,7 @@ test('首页一次性提示与异常书卡：旧数据收成两本时提示 8 �
     if (input.action === 'remove') return { ok: true, value: { removed: input.id, library: { groups: [], books: [] } } };
     throw new Error('unexpected library action ' + input.action);
   } });
-  await button(f.render(), '知识卡片').props.onClick();
+  await button(f.render(), '每日阅读').props.onClick();
   assert.ok(JSON.stringify(f.render()).includes('常看书籍改为最多两本：保留《极简项目管理》《有效需求分析》，其余 3 本仍在书架'));
   assert.ok([...f.timers.values()].some(timer => timer.delay === 8000), '一次性提示停留 8 秒');
   await button(f.render(), '打开书架').props.onClick();
@@ -3895,9 +4109,9 @@ test('首页一次性提示与异常书卡：旧数据收成两本时提示 8 �
   await nodes(f.render()).find(node => node.props?.className === 'ww-crumb').props.onClick();
   learning = { books: [], daily: 0, issue: '读取 library.json 失败' };
   await button(f.render(), '刷新').props.onClick();
-  const issue = nodes(f.render()).find(node => node.props?.className === 'ww-desk-issue');
+  const issue = nodes(f.render()).find(node => node.type === 'p' && node.props.className === 'ww-read-blank' && node.props.role === 'status');
   assert.ok(JSON.stringify(issue).includes('书架没读出来：读取 library.json 失败'));
-  assert.equal(nodes(f.render()).some(node => node.props?.className === 'ww-desk-add'), false, '读取失败不显示占位卡');
+  assert.equal(nodes(f.render()).some(node => node.props?.className === 'ww-read-add'), false, '读取失败不显示占位卡');
   assert.ok(nodes(f.render()).some(node => node.props?.role === 'alert' && JSON.stringify(node).includes('书架没读出来')), '右上角同时提示');
   const reads = f.calls.length;
   await button(issue, '重新读取').props.onClick();
@@ -3905,9 +4119,9 @@ test('首页一次性提示与异常书卡：旧数据收成两本时提示 8 �
   learning = { books: [missing], daily: 1, total: 1 };
   await button(f.render(), '刷新').props.onClick();
   const [card] = desks(f.render());
-  assert.equal(card.props.className, 'ww-desk-card ww-desk-missing ww-desk-wide');
+  assert.equal(card.props['data-missing'], true);
   assert.ok(JSON.stringify(card).includes('《人月神话》的阅读副本不见了'));
-  assert.equal(nodes(card).find(node => node.props?.className === 'ww-desk-main').props.role, undefined, '整卡不可点');
+  assert.equal(deskOpen(card).type, 'div', '这一行不可点');
   assert.deepEqual(menuItems(card), ['取消常看', '从书架删除']);
   button(card, '从书架删除').props.onClick();
   const confirm = nodes(f.render()).filter(node => node.type === 'dialog').at(-1);
@@ -3915,7 +4129,7 @@ test('首页一次性提示与异常书卡：旧数据收成两本时提示 8 �
   learning = { books: [], daily: 0, total: 0 };
   await nodes(confirm).filter(node => node.type === 'button' && node.props.children.includes('从书架删除')).at(-1).props.onClick();
   assert.deepEqual(f.calls.slice(-2), [['library', { action: 'remove', id: missing.id }], ['news', { action: 'home' }]], '在首页删除后重读首页，不自动补位');
-  assert.ok(nodes(f.render()).some(node => node.props?.className === 'ww-desk-add'));
+  assert.ok(nodes(f.render()).some(node => node.props?.className === 'ww-read-add'));
   f.unmount();
 });
 
@@ -3938,8 +4152,8 @@ test('书架：全部与分组筛选，分块导入到当前分组并自动补�
     if (input.action === 'download') { const book = { ...other, id: '00000000-0000-4000-8000-000000000004', title: '开放教材', groups: input.groups ?? [], daily: false }; shelf = { ...shelf, books: [...shelf.books, book] }; return ok({ book, library: shelf }); }
     throw new Error('unexpected library action ' + input.action);
   } });
-  await button(f.render(), '知识卡片').props.onClick();
-  await button(f.render(), '打开书架').props.onClick();
+  await button(f.render(), '每日阅读').props.onClick();
+  await button(f.render(), '书架').props.onClick();
   const view = () => nodes(f.render()).find(node => node.props?.className === 'ww-library');
   const chips = () => nodes(view()).filter(node => node.props.className === 'ww-library-chip');
   const books = () => nodes(view()).filter(node => node.type === 'article' && node.props.className === 'ww-library-book').map(node => node.props.title);
@@ -4000,14 +4214,16 @@ test('AI网页消费正式RPC，十个默认图标不可删除，自定义仅名
  let entries=[...aiWebEntries];const requests=[];
  const f=await fixture({expand:['AiWebView'],aiWeb:async input=>{requests.push(input);if(input.action==='save'){const entry={...input.entry,id:input.id,revision:input.expectedRevision+1,builtin:false,provider:'',keywords:''};entries=[...entries.filter(item=>item.id!==entry.id),entry];}if(input.action==='remove')entries=entries.filter(item=>item.id!==input.id);return {ok:true,value:{entries}};}});
  f.render();f.flushEffects();await new Promise(setImmediate);assert.deepEqual(requests,[]);await button(f.render(),'AI 网页').props.onClick();f.render();f.flushEffects();await new Promise(setImmediate);
- const view=()=>nodes(f.render()).find(node=>node.props.className==='ww-ai-web');let cards=nodes(view()).filter(node=>node.type==='article');assert.equal(cards.length,10);
- for(const card of cards){assert.ok(nodes(card).some(node=>node.type==='img'&&node.props.src.startsWith('data:image/')));assert.equal(nodes(card).some(node=>node.type==='button'&&['编辑','删除'].includes(node.props.children[0])),false);}
+ const view=()=>nodes(f.render()).find(node=>node.props.className==='ww-ai-web');let cards=nodes(view()).filter(node=>node.type==='article');assert.equal(cards.length,aiWebEntries.length);
+ // 聊天十个有官方图标和角色小像；专门的工具里有立绘的用角色小像，其余三个（即梦、秘塔 AI 搜索、Gemini Notebook）没有随包图标，用名字首字。
+ const pictured=cards.filter(card=>nodes(card).some(node=>node.type==='img'&&node.props.src.startsWith('data:image/')));assert.equal(pictured.length,aiWebEntries.length-3);
+ for(const card of cards)assert.equal(nodes(card).some(node=>node.type==='button'&&['编辑','删除'].includes(node.props.children[0])),false);
  nodes(view()).find(node=>node.type==='button'&&node.props.className==='ww-card ww-add-card').props.onClick();taskField(f,'名字','自定义入口');taskField(f,'网址','https://example.org/');let dialog=nodes(view()).find(node=>node.type==='dialog');await nodes(dialog).find(node=>node.type==='form').props.onSubmit({preventDefault(){}});
  assert.deepEqual(requests.at(-1).entry,{name:'自定义入口',url:'https://example.org/',description:'',avatar:null});assert.equal(requests.at(-1).expectedRevision,0);
  let custom=nodes(view()).find(node=>node.type==='article'&&node.props.key===entries.at(-1).id);assert.ok(nodes(custom).some(node=>node.type==='span'&&node.props.children.includes('自')));assert.equal(nodes(custom).some(node=>node.type==='p'&&node.props.children[0]===''),false);
  button(custom,'编辑').props.onClick();taskField(f,'描述（选填）','用户自己的描述');dialog=nodes(view()).find(node=>node.type==='dialog');await nodes(dialog).find(node=>node.type==='form').props.onSubmit({preventDefault(){}});assert.equal(requests.at(-1).expectedRevision,1);
  custom=nodes(view()).find(node=>node.type==='article'&&node.props.key===entries.at(-1).id);assert.ok(JSON.stringify(custom).includes('用户自己的描述'));button(custom,'删除').props.onClick();dialog=nodes(view()).find(node=>node.type==='dialog');await nodes(dialog).find(node=>node.type==='form').props.onSubmit({preventDefault(){}});
- assert.equal(requests.at(-1).action,'remove');assert.equal(requests.at(-1).expectedRevision,2);assert.equal(entries.length,10);assert.equal(f.calls.some(([kind])=>['create','prompt','knowledge'].includes(kind)),false);f.unmount();
+ assert.equal(requests.at(-1).action,'remove');assert.equal(requests.at(-1).expectedRevision,2);assert.equal(entries.length,aiWebEntries.length);assert.equal(f.calls.some(([kind])=>['create','prompt','knowledge'].includes(kind)),false);f.unmount();
 });
 
 /** 浏览器解码对象由测试平台提供；共享decoder及两个真实上传handler仍正常执行。 */
@@ -4018,7 +4234,7 @@ test('专家和AI实际上传入口共同拒收任一边300px，并保留先前2
  globalThis.createImageBitmap=async file=>{const bitmap={width:file.width,height:file.height,closed:false,close(){this.closed=true;}};decoded.push(bitmap);return bitmap;};
  for(const kind of ['expert','ai']){
   const f=await fixture({expand:kind==='expert'?['ExpertEditor']:['AiWebView']});
-  if(kind==='expert')nodes(f.render()).find(node=>node.props.className==='ww-card ww-add-card').props.onClick();else{await button(f.render(),'AI 网页').props.onClick();f.render();f.flushEffects();await new Promise(setImmediate);nodes(f.render()).find(node=>node.type==='button'&&node.props.className==='ww-card ww-add-card').props.onClick();}
+  if(kind==='expert')button(f.render(),'自己填写').props.onClick();else{await button(f.render(),'AI 网页').props.onClick();f.render();f.flushEffects();await new Promise(setImmediate);nodes(f.render()).find(node=>node.type==='button'&&node.props.className==='ww-card ww-add-card').props.onClick();}
   f.render();f.flushEffects();await new Promise(setImmediate);
   const dialog=()=>nodes(f.render()).find(node=>node.type==='dialog');const input=()=>nodes(dialog()).find(node=>node.type==='input'&&node.props.type==='file'&&node.props.accept.startsWith('image/'));
   const good={type:'image/png',size:3,data:'data:image/png;base64,AQID',width:299,height:299};await input().props.onChange({target:{files:[good],value:'selected'}});assert.ok(nodes(dialog()).some(node=>node.type==='img'&&node.props.src===good.data));
@@ -4056,7 +4272,8 @@ test('原生DSH打开AI网页：在专用「AI 网页」会话的右侧浏览器
   assert.equal(f.calls.filter(([kind]) => kind === 'open').every(([, id]) => id === created[0][1].sessionId), true);
 });
 
-test('外部页签使用同一列表插槽，按order动态插入并只渲染选中内容', async () => {
+// 2026-11-13 页头改版：扩展的页签先放进“全部功能”，不占页头；从那里打开后页头临时多一个没钉住的页签。
+test('外部页签使用同一列表插槽，先进全部功能不占页头，打开后只渲染选中内容', async () => {
   const f = await fixture({ expand: ['ExternalView'] });
   let title = '扩展报表', shownWorkbench, refreshed = 0;
   function ExternalView({ workbench, active }) {
@@ -4068,10 +4285,13 @@ test('外部页签使用同一列表插槽，按order动态插入并只渲染选
   await f.featureUpdate(frame);
   const off = f.ctx.slots.register({ name: 'whalewing.workbench.tab', id: 'reports', order: 75, label: () => title }, ExternalView);
   let tree = f.render();
-  assert.deepEqual(tabLabels(tree).slice(-3), ['知识卡片', '扩展报表', '模型世界']);
+  assert.equal(tabLabels(tree).includes('扩展报表'), false, '扩展的页签不占页头');
+  assert.ok(nodes(tree).some(node => node.props.children?.includes('「扩展报表」装好了，在“全部功能”里；常用的话可以钉到页头')), '第一次出现时右上角说一声');
   assert.equal(nodes(tree).some(node => node.props['data-external']), false);
-  await button(tree, '扩展报表').props.onClick();
-  assert.ok(nodes(f.render()).some(node => node.props.children.includes('扩展内容')));
+  await openFromLauncher(f, '扩展报表');
+  tree = f.render();
+  assert.deepEqual(tabLabels(tree).slice(-3), ['每日阅读', '扩展报表', '模型世界'], '打开后临时放在常用页签后面');
+  assert.ok(nodes(tree).some(node => node.props.children.includes('扩展内容')));
   assert.equal(refreshed, 1);
   for (const method of ['run', 'notify', 'guardLeave', 'onRefresh', 'openTab', 'manageFeatures', 'explainError']) assert.equal(typeof shownWorkbench[method], 'function');
   await button(f.render(), '刷新').props.onClick(); assert.equal(refreshed, 2);
@@ -4085,21 +4305,21 @@ test('外部页签使用同一列表插槽，按order动态插入并只渲染选
 
 test('隐藏页签的公开刷新与离开检查固定归属，不覆盖当前页签', async () => {
   const f = await fixture(); f.render();
-  await button(f.render(), '个人知识').props.onClick();
+  await button(f.render(), '知识积累').props.onClick();
   const entries = f.registrations.get('whalewing.workbench.tab');
   const knowledge = entries.find(entry => entry.options.id === 'knowledge');
   let pageWorkbench;
   const original = knowledge.Component;
   knowledge.Component = function KnowledgeView(props) { pageWorkbench = props.workbench; return original(props); };
-  f.render(); await button(f.render(), '技能成长').props.onClick();
+  f.render(); await button(f.render(), '技能中心').props.onClick();
   let refreshed = 0, guarded = 0;
   const offRefresh = pageWorkbench.onRefresh(() => { refreshed++; });
   const offGuard = pageWorkbench.guardLeave(() => { guarded++; return '知识草稿保留'; });
   await button(f.render(), '刷新').props.onClick();
   assert.equal(refreshed, 0);
   await button(f.render(), '专家团队').props.onClick(); assert.equal(guarded, 0);
-  await button(f.render(), '个人知识').props.onClick(); assert.equal(refreshed, 1);
-  await button(f.render(), '技能成长').props.onClick(); assert.equal(guarded, 1);
+  await button(f.render(), '知识积累').props.onClick(); assert.equal(refreshed, 1);
+  await button(f.render(), '技能中心').props.onClick(); assert.equal(guarded, 1);
   offRefresh(); offGuard(); f.unmount();
 });
 
@@ -4107,16 +4327,16 @@ test('公共run同步禁用切换并传播停止信号，迟到结果不提交',
   const f = await fixture(); f.render();
   const held = Promise.withResolvers(); let signal, adopted = false;
   const pending = f.ctx.whalewingWorkbench.run(async value => { signal = value; await held.promise; return () => { adopted = true; }; });
-  assert.equal(button(f.render(), '个人知识').props.disabled, true);
+  assert.equal(button(f.render(), '知识积累').props.disabled, true);
   button(f.render(), '停止等待结果').props.onClick(); assert.equal(signal.aborted, true);
   held.resolve(); await pending;
-  assert.equal(adopted, false); assert.equal(button(f.render(), '个人知识').props.disabled, false);
+  assert.equal(adopted, false); assert.equal(button(f.render(), '知识积累').props.disabled, false);
   f.unmount();
 });
 
 test('主面板卸载与外壳导航布局共同复位，重新进入可重新加载页签', async () => {
   const f = await fixture();
-  await button(f.render(), '个人知识').props.onClick();
+  await button(f.render(), '知识积累').props.onClick();
   button(f.render(), '打开小鲸助手').props.onClick();
   button(f.render(), '停靠').props.onClick();
   assert.ok(nodes(f.render()).some(node => node.props.className === 'ww-workspace ww-workspace-dock'));
@@ -4126,7 +4346,7 @@ test('主面板卸载与外壳导航布局共同复位，重新进入可重新�
   assert.ok(button(tree, '打开小鲸助手'));
   assert.ok(nodes(tree).some(node => node.props.className === 'ww-workspace ww-workspace-bubble'));
   const before = f.calls.filter(([kind]) => kind === 'knowledge').length;
-  await button(f.render(), '个人知识').props.onClick();
+  await button(f.render(), '知识积累').props.onClick();
   assert.ok(f.calls.filter(([kind]) => kind === 'knowledge').length > before);
   f.unmount();
 });
@@ -4149,9 +4369,9 @@ test('恢复弹窗真实重建并回读工作台身份，然后才继续当前�
 });
 
 for (const [label, method, reply] of [
-  ['技能成长', 'skillLibrary', input => ({ ok: true, value: { entries: [], offset: 0, total: 0, truncated: false } })],
+  ['技能中心', 'skillLibrary', input => ({ ok: true, value: { entries: [], offset: 0, total: 0, truncated: false } })],
   ['定时任务', 'automation', input => taskCatalog()],
-  ['知识卡片', 'news', input => ({ ok: true, value: newsHomeResult() })],
+  ['每日阅读', 'news', input => ({ ok: true, value: newsHomeResult() })],
 ]) test(`${label}读失败的恢复动作绑定原页，切页后不刷新其他领域`, async () => {
   let failed = true, reads = 0;
   const f = await fixture({ [method]: async input => { reads++; if (failed) return { ok: false, error: { code: 'offline', message: '本页读取中断' } }; return reply(input); } });
@@ -4169,7 +4389,7 @@ test('专家后台读取失败的重试仍属于专家，不按点击时的页�
   const held = Promise.withResolvers(); let reads = 0, skills = 0;
   const f = await fixture({ experts: async input => { assert.equal(input.action, 'list'); reads++; return reads === 2 ? held.promise : { ok: true, value: { experts: roles, deleted: [] } }; }, skillLibrary: async input => { skills++; return { ok: true, value: { entries: [], offset: 0, total: 0, truncated: false } }; } });
   f.render(); f.flushEffects();
-  await button(f.render(), '技能成长').props.onClick();
+  await button(f.render(), '技能中心').props.onClick();
   held.resolve({ ok: false, error: { code: 'offline', message: '专家读取中断' } }); await new Promise(setImmediate);
   const before = skills;
   await button(f.render(), '重试').props.onClick();
@@ -4257,23 +4477,23 @@ test('当前可选被关立即回专家并提示，keepAlive访问记录清除�
   await f.featureUpdate(featureFrame(2));
   assert.equal(core.visited.has('toolbox'), false);
   await button(f.render(), '办公工坊').props.onClick(); await settleView(f);
-  assert.ok(nodes(f.render()).some(node => node.type?.name === 'ToolboxView'));
+  assert.ok(nodes(f.render()).some(node => node.type?.name === 'WorkshopView'));
   f.unmount();
 });
 
 test('单底座Remote未就绪仍有主入口和其他页面，失败原因与retryBase保持权威帧', async () => {
   let tries = 0;
   const f = await fixture({ featureFrame: featureFrame(0, [], { knowledge: '知识库目录暂不可读，请检查目录后重试' }), retryBase: async id => { assert.equal(id, 'knowledge'); tries++; return { ok: true, value: featureFrame(tries) }; } });
-  await button(f.render(), '个人知识').props.onClick();
+  await button(f.render(), '知识积累').props.onClick();
   assert.ok(nodes(f.render()).some(node => node.props.children?.includes('知识库目录暂不可读，请检查目录后重试')));
   await button(f.render(), '重试').props.onClick();
   assert.equal(tries, 1); f.render(); await f.settlePlugins(); assert.ok(nodes(f.render()).some(node => node.props.className === 'ww-graph-empty')); assert.ok(f.calls.some(([kind, input]) => kind === 'knowledge' && input.action === 'graph'));
   f.unmount();
   const waiting = await fixture({ missingRemotes: ['whalewingKnowledge'] });
   assert.equal(tabIds(waiting).length, 8);
-  await button(waiting.render(), '个人知识').props.onClick();
+  await button(waiting.render(), '知识积累').props.onClick();
   assert.ok(nodes(waiting.render()).some(node => node.props.children?.includes('正在连接功能…')));
-  await button(waiting.render(), '技能成长').props.onClick();
+  await button(waiting.render(), '技能中心').props.onClick();
   assert.equal(waiting.calls.some(([kind]) => kind === 'knowledge'), false);
   waiting.unmount();
 });
@@ -4286,15 +4506,15 @@ test('小鲸助手失败在自身入口重试，不增页签或阻断其他底�
   assert.ok(button(f.render(), '打开小鲸助手')); f.unmount();
 });
 
-test('每日资讯关闭标记来自共享帧且无知识卡片入口，不跨读或补建默认计划', async () => {
+test('每日资讯关闭标记来自共享帧且无每日阅读入口，不跨读或补建默认计划', async () => {
   const task = { ...taskRecord(), sessionId: 'news-1', purpose: 'news', status: 'active' };
   const f = await fixture({ featureFrame: featureFrame(0, ['cards']), automation: async input => { assert.equal(input.action, 'catalog'); return taskCatalog([task]); } });
   await button(f.render(), '定时任务').props.onClick();
   assert.ok(nodes(f.render()).some(node => node.props.children?.some(value => typeof value === 'string' && value.includes('所属功能已关闭'))));
-  assert.equal(nodes(f.render()).some(node => node.type === 'button' && node.props.children?.includes('知识卡片')), false);
+  assert.equal(nodes(f.render()).some(node => node.type === 'button' && node.props.children?.includes('每日阅读')), false);
   assert.equal(f.calls.some(([kind]) => kind === 'news'), false);
   await f.featureUpdate(featureFrame(1));
-  assert.ok(button(f.render(), '知识卡片')); f.unmount();
+  assert.ok(button(f.render(), '每日阅读')); f.unmount();
 });
 
 test('管理功能使用可选导航服务，未提供不显示空入口', async () => {
@@ -4309,6 +4529,11 @@ test('外部metadata按Host身份连接，end整体靠右且SVG仅作为16px蒙�
   const f = await fixture({ featureFrame: frame });
   f.ctx.slots.register({ name: 'whalewing.workbench.tab', id: 'ordinary', order: 100, label: () => '普通扩展' }, () => null);
   f.ctx.slots.register({ name: 'whalewing.workbench.tab', id: 'external', order: 110, label: () => '末尾扩展' }, () => null);
+  // 2026-11-13 页头改版：普通扩展的页签先进“全部功能”，不占页头；钉上以后排在常用页签最后。placement: 'end' 的照旧在最右一组，不能钉。
+  const core = f.ctx.whalewingWorkbench.internal;
+  assert.deepEqual(nodes(f.render()).filter(node => node.props?.['data-tab']).slice(-3).map(node => node.props['data-tab']), ['news', 'models', 'external']);
+  assert.deepEqual(core.directory().filter(item => item.extension).map(item => [item.id, item.group, item.pinned, item.fixed]), [['ordinary', 'extension', false, false], ['external', 'extension', false, true]]);
+  core.pinTab('external'); core.pinTab('ordinary');
   const nav = nodes(f.render()).filter(node => node.props?.['data-tab']);
   assert.deepEqual(nav.slice(-3).map(node => node.props['data-tab']), ['ordinary', 'models', 'external']);
   // 2026-10-27 用户纠正：模型世界不随功能开关增减，要单独放在这一行最右、紧挨着“…”，不和功能页签并在一组。
@@ -4343,8 +4568,10 @@ test('办公工坊关闭真实组件生命周期会终止Worker并撤销下载�
   globalThis.Worker = class { constructor() { workers.push(this); } postMessage(message) { this.message = message; } terminate() { this.terminated = true; } };
   t.mock.method(globalThis.URL, 'createObjectURL', () => 'blob:fixture-' + ++serial);
   t.mock.method(globalThis.URL, 'revokeObjectURL', value => revoked.push(value));
-  const f = await fixture({ expand: ['ToolboxView'] }); t.after(() => f.unmount());
+  const f = await fixture({ expand: ['WorkshopView', 'ToolboxView'] }); t.after(() => f.unmount());
   await button(f.render(), '办公工坊').props.onClick(); await settleView(f); f.flushEffects();
+  // 改版后原来的分类卡片和功能窗口收在“全部功能项”里（2026-11-12）。
+  button(f.render(), '全部功能项').props.onClick(); f.render(); f.flushEffects();
   const search = nodes(f.render()).find(node => node.type === 'input' && node.props.type === 'search');
   search.props.onChange({ target: { value: '生成二维码' } });
   button(f.render(), '生成二维码').props.onClick(); f.render(); f.flushEffects();
@@ -4414,15 +4641,15 @@ test('AI专用会话lookup失败保留原身份，不进入命名和打开业务
 });
 
 
-test('来源标题卡片及详情显式标注证据范围，保留原标题和来源链接', async () => {
+test('只有来源标题的条目在首页和详情里都标“来源标题”，保留原标题和来源链接', async () => {
   const legacy = newsSavedReport(), source = { ...legacy.items[0].sources[0], title: 'Original source headline', excerpt: '' };
   const item = { category: 'research', label: 'headline', title: source.title, link: source.url, brief: headlineBrief, relevance: '', eventKey: `headline:${source.id}`, sources: [source] };
   const report = { ...legacy, status: 'complete', items: [item] };
   const f = await fixture({ news: async input => ({ ok: true, value: input.action === 'home' ? newsHomeResult([report]) : newsList() }) });
-  await button(f.render(), '知识卡片').props.onClick();
-  const card = nodes(f.render()).find(node => node.props?.className === 'ww-tile ww-news-tile');
-  assert.equal(nodes(card).find(node => node.props?.className === 'ww-tile-title').props.children.join(''), source.title);
-  assert.deepEqual(nodes(card).filter(node => node.props?.className?.startsWith?.('ww-brief-flag')).map(node => node.props.children.join('')), ['来源标题']);
+  await button(f.render(), '每日阅读').props.onClick();
+  const [card] = newsTitles(f.render());
+  assert.equal(newsTitleText(card), source.title);
+  assert.equal(newsTags(newsLead(f.render())).at(-1), '来源标题');
   card.props.onClick();
   const detail = nodes(f.render()).find(node => node.type === 'dialog');
   assert.equal(detail.props['aria-label'], source.title);
@@ -4433,4 +4660,264 @@ test('来源标题卡片及详情显式标注证据范围，保留原标题和�
   assert.equal(f.dictionaries.get('whalewing').en.newsHeadline, 'Source headline');
   detail.props.onCancel({ preventDefault() {} });
   assert.equal(nodes(f.render()).some(node => node.type === 'dialog'), false);
+});
+
+test('小鲸对话接着上次：记下会话，重开后接着用；“新对话”另起一段；上次那段接不上时新开', async () => {
+  const f = await fixture();
+  const first = await f.clients.assistant.ensureAssistant();
+  assert.equal(f.storage.get('whalewing.assistantSession'), first);
+  const again = await fixture({ storage: f.storage, existing: f.existing, selected: f.selected });
+  assert.equal(await again.clients.assistant.ensureAssistant(), first, '重开后接着上次那段');
+  const fresh = await again.clients.assistant.newAssistant();
+  assert.notEqual(fresh, first);
+  assert.equal(f.storage.get('whalewing.assistantSession'), fresh);
+  assert.equal(await again.clients.assistant.ensureAssistant(), fresh);
+  // 这段在 DSH 里被换成了别的专家（DSH 把还没说过话的会话当新会话复用时会这样）：另开一段小鲸对话。
+  again.selected.set(fresh, 'development');
+  const reopened = await again.clients.assistant.ensureAssistant();
+  assert.notEqual(reopened, fresh);
+  assert.equal(again.selected.get(reopened), 'manager');
+  assert.equal(f.storage.get('whalewing.assistantSession'), reopened);
+  const gone = 'whalewing-assistant-00000000-0000-4000-8000-000000000000';
+  const broken = await fixture({ storage: new Map([['whalewing.assistantSession', gone]]) });
+  const made = await broken.clients.assistant.ensureAssistant();
+  assert.notEqual(made, gone, '上次那段不在了就新开');
+  assert.equal(broken.storage.get('whalewing.assistantSession'), made);
+});
+
+// 2026-11-09 团队技能接进技能中心页：扩展标了能改的，维护人在抽屉里“编辑技能”，保存交给扩展；只读的只有“关闭”。
+test('团队技能在“我的”里单列一组，能改的由维护人编辑、保存交给扩展，只读的只能看', async () => {
+  const requests = [];
+  const team = { id: 'team', package: 'dsh-team', label: { zh: '团队', en: 'Team' }, skills: [{ name: 'contract-review', description: '审合同', editable: true, note: '销售部' }, { name: 'weekly-report', description: '写周报', note: '全公司' }] };
+  const f = await fixture({ skillLibrary: async input => {
+    requests.push(input);
+    if (input.action === 'list') return { ok: true, value: { entries: [], offset: 0, total: 0, truncated: false } };
+    if (input.action === 'extensions') return { ok: true, value: { extensions: [team] } };
+    if (input.action === 'extension_read') { const item = team.skills.find(skill => skill.name === input.name); return { ok: true, value: { extension: { id: 'team', package: 'dsh-team', label: team.label, name: item.name, description: item.description, content: `正文 ${item.name}`, hash: `hash-${item.name}`, ...(item.editable ? { editable: true } : {}), note: item.note } } }; }
+    if (input.action === 'extension_save') return { ok: true, value: { extension: { id: 'team', package: 'dsh-team', label: team.label, name: input.name, description: '审合同', content: input.content, hash: 'hash-new', editable: true, note: '销售部' } } };
+    assert.fail(`意外动作 ${input.action}`);
+  } });
+  const frame = featureFrame(1); frame.features.push({ id: 'team', instance: 100, kind: 'extension', api: 1, package: 'dsh-team', skills: ['C:/team/skills'] });
+  await f.featureUpdate(frame);
+  await button(f.render(), '技能中心').props.onClick();
+  await new Promise(setImmediate); f.render(); f.flushEffects(); await new Promise(setImmediate);
+  const group = nodes(f.render()).find(node => node.type === 'section' && node.props['aria-label'] === '团队');
+  assert.ok(group, '团队一组');
+  const types = nodes(group).filter(node => node.props?.className === 'ww-kit-type').map(node => node.props.children[0]);
+  assert.deepEqual(types, ['团队 · 销售部', '团队 · 全公司']);
+  await skillRow(f.render(), 'extension:team:weekly-report').props.onClick();
+  assert.equal(nodes(f.render()).some(node => node.type === 'button' && node.props.children.includes('编辑技能')), false, '只读的没有编辑');
+  assert.ok(button(f.render(), '关闭'));
+  await skillRow(f.render(), 'extension:team:contract-review').props.onClick();
+  button(f.render(), '编辑技能').props.onClick();
+  const editor = nodes(f.render()).find(node => node.type?.name === 'TeamSkillEditor');
+  assert.ok(editor, '打开团队技能编辑');
+  await editor.props.onSave('改过的正文');
+  assert.deepEqual(requests.find(item => item.action === 'extension_save'), { action: 'extension_save', feature: 'team', name: 'contract-review', content: '改过的正文', expectedHash: 'hash-contract-review' });
+  assert.ok(nodes(f.render()).some(node => node.type === 'pre' && node.props.children.includes('改过的正文')), '保存后详情显示新正文');
+  f.unmount();
+});
+
+// 2026-11-09 技能中心页的 MCP：我的列表、详情（密钥只显示圆点）、从精选加（只填密钥，拼好的配置交给 Host）。
+test('MCP：我的列出鲸翼加的和 DSH 配置里的，详情不显示密钥；从精选加高德只填 Key，拼好配置交给 Host', async () => {
+  const echo = { name: 'echo-test', title: '本机回声', transport: 'stdio', target: 'node echo.mjs', command: 'node', args: ['echo.mjs'], env: [{ name: 'TOKEN', secret: true }], headers: [], enabled: true, revision: 0, status: 'connected', tools: ['echo'] };
+  const saves = [];
+  const f = await fixture({ mcp: async input => {
+    if (input.action === 'list') return { ok: true, value: { servers: [echo], profile: [{ name: 'github', transport: 'streamable-http', target: 'https://api.githubcopilot.com/mcp/', enabled: true }], credentials: true } };
+    if (input.action === 'save') { saves.push(input); return { ok: true, value: { server: { name: input.server.name, title: input.server.title, catalogId: input.server.catalogId, transport: 'streamable-http', target: 'https://mcp.amap.com/mcp?key=•••', url: '', urlSecret: true, env: [], headers: [], enabled: true, revision: 0, status: 'connected', tools: ['maps_geo'] } } }; }
+    assert.fail(`意外动作 ${input.action}`);
+  } });
+  await button(f.render(), '技能中心').props.onClick();
+  const tab = nodes(f.render()).find(node => node.type === 'button' && node.props.role === 'tab' && node.props.children.includes('MCP'));
+  tab.props.onClick();
+  for (let i = 0; i < 3; i++) { f.render(); f.flushEffects(); await new Promise(setImmediate); }
+  assert.ok(skillRow(f.render(), 'ww:echo-test'), '鲸翼加的');
+  const types = nodes(f.render()).filter(node => node.props?.className === 'ww-kit-type').map(node => node.props.children[0]);
+  assert.deepEqual(types, ['本机程序', 'DSH 配置 · 远程服务']);
+  await skillRow(f.render(), 'ww:echo-test').props.onClick();
+  const drawerText = JSON.stringify(nodes(f.render()).filter(node => node.type === 'pre').map(node => node.props.children));
+  assert.match(drawerText, /TOKEN: ••••••（已保存）/);
+  assert.ok(button(f.render(), '断开')); assert.ok(button(f.render(), '编辑'));
+  // 去发现，点高德。
+  nodes(f.render()).find(node => node.type === 'button' && node.props['aria-label'] === '关闭' && node.props.children.includes('×'))?.props.onClick();
+  nodes(f.render()).find(node => node.type === 'button' && node.props.role === 'tab' && node.props.children.includes('发现')).props.onClick();
+  const amap = nodes(f.render()).find(node => node.type === 'button' && node.props['aria-label'] === '高德地图');
+  assert.ok(amap, '精选里有高德');
+  amap.props.onClick();
+  const editor = nodes(f.render()).find(node => node.type?.name === 'McpEditor');
+  assert.ok(editor, '打开添加抽屉');
+  await editor.props.onSave({ name: 'amap', title: '高德地图', catalogId: 'amap', transport: 'streamable-http', url: 'https://mcp.amap.com/mcp?key=K', urlSecret: true, env: [], headers: [] }, null);
+  assert.deepEqual(saves[0].server.url, 'https://mcp.amap.com/mcp?key=K');
+  assert.equal(saves[0].expectedRevision, null);
+  f.unmount();
+});
+
+// 2026-11-09 技能中心页的“插件”改成插件包（照 Claude 的插件包：一组技能加一组 MCP）。
+const tripPack = (patch = {}) => ({
+  name: 'trip-planner', title: '出行规划', description: '查路线和天气', version: '1.0.0', author: '鲸翼', homepage: '', installedAt: '2026-11-09T02:00:00.000Z', enabled: true,
+  source: { kind: 'curated', label: '鲸翼精选', market: 'whalewing', entry: 'trip-planner' }, skills: [{ name: 'trip-plan', description: '排行程' }],
+  mcp: [{ key: 'amap', server: 'amap' }], skippedMcp: [{ key: 'variflight', reason: '安装时没勾选' }], skipped: { commands: 2, agents: 0, hooks: false, lsp: false }, issues: [], ...patch,
+});
+const amapServer = (patch = {}) => ({ name: 'amap', title: 'amap', pack: 'trip-planner', transport: 'streamable-http', target: 'https://mcp.amap.com/mcp?key=•••', url: '', urlSecret: true, env: [], headers: [], enabled: true, revision: 0, status: 'connected', tools: ['maps_geo'], ...patch });
+const settle = async f => { for (let i = 0; i < 4; i++) { f.render(); f.flushEffects(); await new Promise(setImmediate); } };
+const tabButton = (f, label) => nodes(f.render()).find(node => node.type === 'button' && node.props.role === 'tab' && node.props.children.includes(label));
+
+test('插件包：我的列出装好的包和来源，详情里看技能、MCP 连接状态和没装的部分；停用、卸载都交给 Host，卸载先确认', async () => {
+  const requests = [];
+  let current = tripPack();
+  const f = await fixture({
+    packs: async input => {
+      requests.push(input);
+      if (input.action === 'list') return { ok: true, value: { packs: current ? [current] : [] } };
+      if (input.action === 'toggle') { current = { ...current, enabled: input.enabled }; return { ok: true, value: { pack: current } }; }
+      if (input.action === 'remove') { current = null; return { ok: true, value: { removed: input.name, mcp: ['amap'] } }; }
+      assert.fail(`意外动作 ${input.action}`);
+    },
+    mcp: async input => input.action === 'list' ? { ok: true, value: { servers: current ? [amapServer({ ...(current.enabled ? {} : { status: 'disabled', packOff: true }) })] : [], profile: [], credentials: true } } : assert.fail(`意外动作 ${input.action}`),
+  });
+  await button(f.render(), '技能中心').props.onClick();
+  await settle(f);
+  // 包里的技能和个人技能一起出现在“技能”里，单列“插件包”一组。
+  const skill = skillRow(f.render(), 'pack:trip-planner:trip-plan');
+  assert.ok(skill, '包里的技能列在技能里');
+  assert.ok(nodes(skill).some(node => node.props?.className === 'ww-kit-type' && node.props.children.includes('插件包 · 出行规划')));
+  tabButton(f, '插件').props.onClick();
+  await settle(f);
+  const row = skillRow(f.render(), 'trip-planner');
+  assert.ok(row, '装好的包');
+  assert.ok(nodes(row).some(node => node.props?.className === 'ww-kit-type' && node.props.children.includes('鲸翼精选')));
+  assert.match(nodes(f.render()).find(node => node.type === 'p' && String(node.props.children).startsWith('插件包')).props.children[0], /^插件包 1 个 · 开着 1 · 技能 1 项 · MCP 1 个$/);
+  row.props.onClick();
+  const drawer = JSON.stringify(nodes(f.render()).filter(node => ['strong', 'small', 'li', 'p'].includes(node.type)).map(node => node.props.children));
+  assert.match(drawer, /trip-plan/); assert.match(drawer, /已连上 · 1 个工具/); assert.match(drawer, /variflight：安装时没勾选/);
+  assert.doesNotMatch(drawer, /命令/, 'DSH 用不上的命令不写（用户定：用不了的就不写）');
+  await button(f.render(), '停用').props.onClick();
+  await settle(f);
+  assert.deepEqual(requests.find(item => item.action === 'toggle'), { action: 'toggle', name: 'trip-planner', enabled: false });
+  assert.ok(button(f.render(), '启用'), '停用后按钮换成启用');
+  assert.match(JSON.stringify(nodes(f.render()).filter(node => node.type === 'small').map(node => node.props.children)), /包已停用/);
+  button(f.render(), '卸载').props.onClick();
+  assert.match(nodes(f.render()).find(node => node.props?.className === 'ww-confirm-body').props.children[0], /1 项技能和 1 个 MCP 一起删掉/);
+  assert.equal(requests.some(item => item.action === 'remove'), false, '确认前不删');
+  await nodes(f.render()).find(node => node.type === 'button' && node.props.className === 'ww-danger').props.onClick();
+  await settle(f);
+  assert.deepEqual(requests.find(item => item.action === 'remove'), { action: 'remove', name: 'trip-planner' });
+  assert.equal(skillRow(f.render(), 'trip-planner'), undefined, '卸载后不再列出');
+  f.unmount();
+});
+
+test('插件包·发现：市场分栏，读不到的那栏写原因；点卡片先预览，DSH 连不了的 MCP 不列，必填的密钥没填不装，装好后切回“我的”', async () => {
+  const requests = [];
+  const preview = {
+    stage: 's1', hash: 'h1', name: 'trip-planner', title: '出行规划', description: '查路线', version: '1.0.0', author: '鲸翼', homepage: '', source: { kind: 'curated', label: '鲸翼精选', market: 'whalewing', entry: 'trip-planner' }, installed: false,
+    skills: [{ name: 'trip-plan', description: '排行程', conflict: true }], skipped: { commands: 0, agents: 0, hooks: false, lsp: false }, issues: [],
+    mcp: [
+      { key: 'amap', title: 'amap', transport: 'streamable-http', target: 'https://mcp.amap.com/mcp', fields: [{ id: 'user_config.amapKey', label: '高德 Key', secret: true, required: true }], ready: true },
+      { key: 'slack', title: 'slack', transport: 'streamable-http', target: 'https://mcp.slack.com/mcp', fields: [], blocked: '要在浏览器里授权登录（OAuth），DSH 的 MCP 暂时不支持', ready: false },
+    ],
+  };
+  let installed = [];
+  const f = await fixture({ packs: async input => {
+    requests.push(input);
+    if (input.action === 'list') return { ok: true, value: { packs: installed } };
+    if (input.action === 'market') return { ok: true, value: { markets: [
+      { id: 'whalewing', title: '鲸翼精选', kind: 'local', entries: [{ id: 'whalewing:trip-planner', market: 'whalewing', name: 'trip-planner', title: '出行规划', description: '查路线', author: '鲸翼', category: '地图出行', installable: true }] },
+      { id: 'claude-official', title: 'Claude 官方插件目录', kind: 'github', repo: 'anthropics/claude-plugins-official', entries: [], issue: '连不上 GitHub：国内网络可能要开代理' },
+    ] } };
+    if (input.action === 'preview') return { ok: true, value: { preview } };
+    if (input.action === 'install') { installed = [tripPack({ skippedMcp: [{ key: 'slack', reason: preview.mcp[1].blocked }] })]; return { ok: true, value: { pack: installed[0], failed: [] } }; }
+    assert.fail(`意外动作 ${input.action}`);
+  } });
+  await button(f.render(), '技能中心').props.onClick();
+  tabButton(f, '插件').props.onClick();
+  await settle(f);
+  tabButton(f, '发现').props.onClick();
+  await settle(f);
+  const shelves = nodes(f.render()).filter(node => node.type === 'h3' && node.props.children.some(child => ['鲸翼精选', 'Claude 官方插件目录'].includes(child))).map(node => node.props.children[0]);
+  assert.deepEqual(shelves, ['鲸翼精选', 'Claude 官方插件目录']);
+  assert.ok(nodes(f.render()).some(node => node.props?.role === 'status' && node.props.children.includes('连不上 GitHub：国内网络可能要开代理')), '读不到的市场写原因');
+  nodes(f.render()).find(node => node.type === 'button' && node.props['aria-label'] === '出行规划').props.onClick();
+  await settle(f);
+  assert.deepEqual(requests.find(item => item.action === 'preview'), { action: 'preview', entry: { market: 'whalewing', name: 'trip-planner' } });
+  const boxes = nodes(f.render()).filter(node => node.type === 'input' && node.props.type === 'checkbox');
+  assert.deepEqual(boxes.map(box => [box.props.checked, box.props.disabled]), [[true, false]], '能连的默认勾上；DSH 连不了的（OAuth）不列');
+  assert.equal(JSON.stringify(nodes(f.render()).map(node => node.props?.children)).includes('slack'), false);
+  assert.ok(nodes(f.render()).some(node => node.type === 'span' && node.props.children.includes('同名')), '同名技能标出来');
+  button(f.render(), '安装').props.onClick();
+  assert.match(nodes(f.render()).find(node => node.props?.role === 'alert').props.children[0], /MCP「amap」还没填：高德 Key/);
+  assert.equal(requests.some(item => item.action === 'install'), false, '没填完不装');
+  nodes(f.render()).find(node => node.type === 'input' && node.props.type === 'password').props.onChange({ target: { value: 'KEY-1' } });
+  button(f.render(), '安装').props.onClick();
+  await settle(f);
+  assert.deepEqual(requests.find(item => item.action === 'install'), { action: 'install', stage: 's1', expectedHash: 'h1', mcp: [{ key: 'amap', values: { 'user_config.amapKey': 'KEY-1' } }] });
+  assert.equal(nodes(f.render()).some(node => node.type === 'button' && node.props.children.includes('安装')), false, '装好后关掉预览');
+  assert.ok(button(f.render(), '卸载') && button(f.render(), '停用'), '打开刚装的包');
+  assert.ok(tabButton(f, '我的').props['aria-selected'], '切回我的');
+  f.unmount();
+});
+
+// 2026-11-09 用户要照 Codex：技能一行两个、能展开收起；下面一排横向滚动的分类，含共用目录和各项目。
+test('我的·技能：已安装先露 6 项，“查看…另有 N 项”展开、“收起”收回；下面按个人、共用、内置、各项目分类；项目里的技能只读、按路径读正文', async () => {
+  const builtins = Array.from({ length: 9 }, (_, index) => ({ id: `.system/whalewing/builtin/b${index}/SKILL.md`, name: `b${index}`, description: `内置 ${index}`, origin: 'builtin', hash: `h${index}`, actions: ['read', 'update'], discovery: 'available' }));
+  const mine = { id: 'mine/SKILL.md', name: 'mine', description: '我写的', origin: 'user', hash: 'm', actions: ['read', 'update', 'remove'], discovery: 'available' };
+  const entries = [mine, ...builtins];
+  const scopes = [
+    { id: 'agents', kind: 'agents', label: '共用', root: 'C:/home/.agents/skills', skills: [{ name: 'shared', description: '共用的', path: 'C:/home/.agents/skills/shared/SKILL.md' }] },
+    { id: 'project:C:/work/blog', kind: 'project', label: 'blog', root: 'C:/work/blog', skills: [{ name: 'blog-helper', description: '博客助手', path: 'C:/work/blog/.agents/skills/blog-helper/SKILL.md' }] },
+  ];
+  const reads = [];
+  const f = await fixture({
+    skillLibrary: async input => {
+      if (input.action === 'list') return { ok: true, value: { entries, offset: 0, total: entries.length, truncated: false } };
+      if (input.action === 'scope_read') { reads.push(input.path); return { ok: true, value: { scoped: { path: input.path, content: '---\nname: blog-helper\n---\n博客正文' } } }; }
+      assert.fail(`意外动作 ${input.action}`);
+    },
+    skillScopes: async () => ({ ok: true, value: { scopes } }),
+  });
+  await button(f.render(), '技能中心').props.onClick();
+  await settle(f);
+  const installed = () => nodes(f.render()).find(node => node.type === 'section' && node.props['aria-label'] === '已安装');
+  const names = section => nodes(section).filter(node => node.props?.className === 'ww-kit-name').map(node => node.props.children[0]);
+  assert.deepEqual(names(installed()), ['mine', 'shared', 'blog-helper', 'b0', 'b1', 'b2'], '自己的在前，内置在后；先露 6 项');
+  const more = nodes(installed()).find(node => node.type === 'button' && node.props.className === 'ww-kit-more');
+  assert.equal(more.props.children[0], '查看 b3、b4，另有 4 项');
+  more.props.onClick();
+  assert.equal(names(installed()).length, 12);
+  const less = nodes(installed()).find(node => node.type === 'button' && node.props.className === 'ww-kit-more');
+  assert.equal(less.props.children[0], '收起');
+  less.props.onClick();
+  assert.equal(names(installed()).length, 6);
+  const chips = nodes(f.render()).find(node => node.props?.role === 'group' && node.props['aria-label'] === '按来源和项目看');
+  assert.deepEqual(nodes(chips).filter(node => node.type === 'button').map(node => [node.props.children[0], node.props.children[1].props.children[0]]), [['个人', '1'], ['共用', '1'], ['内置', '9'], ['blog', '1']]);
+  nodes(chips).find(node => node.type === 'button' && node.props.children[0] === 'blog').props.onClick();
+  const project = nodes(f.render()).find(node => node.type === 'section' && node.props['aria-label'] === 'blog');
+  assert.deepEqual(names(project), ['blog-helper']);
+  assert.ok(nodes(project).some(node => node.props?.className === 'ww-kit-type' && node.props.children.includes('项目 · blog')));
+  await skillRow(f.render(), 'scope:C:/work/blog/.agents/skills/blog-helper/SKILL.md').props.onClick();
+  assert.deepEqual(reads, ['C:/work/blog/.agents/skills/blog-helper/SKILL.md']);
+  assert.ok(nodes(f.render()).some(node => node.props?.role === 'status' && String(node.props.children).includes('只有在这个项目里干活时 DSH 才会用')));
+  assert.equal(nodes(f.render()).some(node => node.type === 'button' && node.props.children.includes('编辑技能')), false, '只读');
+  assert.match(nodes(f.render()).find(node => node.type === 'p' && String(node.props.children).startsWith('技能')).props.children[0], /^技能 12 项 · 个人 1 · 共用 1 · 内置 9 · 项目里 1$/);
+  f.unmount();
+});
+
+test('打开原会话：任务会话还空白（没跑过、没人说过话）时不打开，右上角说还没运行过和下一次几点；有内容的照常打开', async () => {
+  const tasks = [{ ...taskRecord({ title: '研究专家巡检' }), sessionId: 'task-s', purpose: 'custom', status: 'active' }];
+  const f = await fixture({ automation: async input => input.action === 'catalog' ? taskCatalog(tasks) : { ok: true, value: {} } });
+  await button(f.render(), '定时任务').props.onClick();
+  const opened = () => f.calls.some(([kind, id]) => kind === 'open' && id === 'task-s');
+  // 会话列表里查不到、也没送达过：当成空白。
+  await button(f.render(), '打开原会话').props.onClick();
+  assert.equal(opened(), false, '不打开一段空白会话（DSH 会当成“新会话”显示）');
+  const toast = () => JSON.stringify(f.render('shell.overlay'));
+  assert.match(toast(), /「研究专家巡检」还没运行过，任务会话里还没有内容；下一次是 10\/14 00:15，跑过一次后再打开/);
+  // 会话列表里标着空白：同样不打开。
+  const current = f.ctx.sessions.list.getSnapshot();
+  f.ctx.sessions.list.set({ ...current, byId: { ...current.byId, 'task-s': { id: 'task-s', title: '', blank: true, updatedAt: Date.now() } } });
+  await button(f.render(), '打开原会话').props.onClick();
+  assert.equal(opened(), false);
+  // 会话里有内容了（跑过，或员工在里面说过话）：照常打开。
+  f.ctx.sessions.list.set({ ...current, byId: { ...current.byId, 'task-s': { id: 'task-s', title: '研究专家 · 研究专家巡检', blank: false, updatedAt: Date.now() } } });
+  await button(f.render(), '打开原会话').props.onClick();
+  assert.equal(opened(), true);
 });

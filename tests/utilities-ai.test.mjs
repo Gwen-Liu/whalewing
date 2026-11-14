@@ -1,13 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { aiWebEntries } from '../features/ai-web/catalog.js';
+import { aiWebEntries, aiWebGroup } from '../features/ai-web/catalog.js';
 import { createAiWebView } from '../features/ai-web/view.js';
 import { findAiWebEntries, openAiWebsite } from '../features/ai-web/client-api.js';
 import { fixture as shellFixture } from './client-fixture.mjs';
 
 test('官方目录名称唯一，仅包含不带凭据的 HTTPS 入口', () => {
   assert.equal(new Set(aiWebEntries.map(entry => entry.id)).size, aiWebEntries.length);
-  assert.equal(aiWebEntries.length, 10);
+  // 聊天 10 个加专门的工具 5 个（2026-11-13 改版）。
+  assert.equal(aiWebEntries.length, 15);
+  assert.equal(aiWebEntries.filter(entry => ['tool', 'tool-global'].includes(aiWebGroup(entry))).length, 5);
   for (const entry of aiWebEntries) {
     const url = new URL(entry.url);
     assert.equal(url.protocol, 'https:');
@@ -22,7 +24,7 @@ test('搜索按全部关键词匹配名称、厂商或用途，空结果不补�
   assert.deepEqual(findAiWebEntries(' OPENAI gPt ').map(entry => entry.id), ['chatgpt']);
   assert.deepEqual(findAiWebEntries('清华').map(entry => entry.id), ['qingyan']);
   assert.deepEqual(findAiWebEntries('不存在的站点'), []);
-  assert.equal(findAiWebEntries('').length, 10);
+  assert.equal(findAiWebEntries('').length, aiWebEntries.length);
 });
 
 test('唯一打开动作使用目录地址，拒收任意 URL，原样传播宿主错误', async () => {
@@ -86,17 +88,17 @@ test('宿主失败保留完整目录和网址，原位重试成功，搜索空�
   const f = fixture(() => { if (fail) throw new Error('浏览器未注册'); });
   await nodes(f.render()).find(node => node.props['aria-label'] === '打开 DeepSeek').props.onClick();
   const failed = f.render();
-  assert.equal(nodes(failed).filter(node => node.type === 'article').length, 10);
+  assert.equal(nodes(failed).filter(node => node.type === 'article').length, aiWebEntries.length);
   assert.ok(nodes(failed).some(node => node.props.role === 'alert'));
   assert.ok(nodes(failed).some(node => node.props.role === 'alert' && node.props.children[0].includes('DeepSeek')));
   nodes(f.render()).find(node => node.type === 'input').props.onChange({ target: { value: '无此服务' } });
   assert.equal(nodes(f.render()).filter(node => node.type === 'article').length, 0);
   nodes(f.render()).find(node => node.type === 'input').props.onChange({ target: { value: '' } });
-  assert.equal(nodes(f.render()).filter(node => node.type === 'article').length, 10);
+  assert.equal(nodes(f.render()).filter(node => node.type === 'article').length, aiWebEntries.length);
   fail = false;
   await nodes(failed).find(node => node.type === 'button' && node.props.children[0] === '重试打开').props.onClick();
   assert.equal(nodes(f.render()).some(node => node.props.role === 'alert'), false);
-  assert.equal(nodes(f.render()).filter(node => node.type === 'article').length, 10);
+  assert.equal(nodes(f.render()).filter(node => node.type === 'article').length, aiWebEntries.length);
   assert.equal(tileName(currentTile(f.render())), 'DeepSeek');
   assert.equal(nodes(f.render()).filter(node => node.type === 'select').length, 0);
 });
@@ -106,7 +108,7 @@ test('打开后入口照常列出并标出正在用的，工具栏按租约会�
   const f = fixture(url => calls.push(url), { restoreBrowser: () => restores++, focusBrowser: () => focuses++ });
   await nodes(f.render()).find(node => node.props['aria-label'] === '打开 Kimi').props.onClick();
   const opened = f.render();
-  assert.equal(nodes(opened).filter(node => node.type === 'article').length, 10);
+  assert.equal(nodes(opened).filter(node => node.type === 'article').length, aiWebEntries.length);
   assert.equal(tileName(currentTile(opened)), 'Kimi');
   assert.equal(nodes(f.toolbar()).find(node => node.type === 'select').props.value, 'kimi');
   assert.equal(f.toolbar('other-session'), null);
@@ -207,8 +209,9 @@ test('默认十项显示离线官方图标且无删除按钮，自定义首字�
   const loaded = f.render();
   const card = nodes(loaded).find(node => node.type === 'article' && nodes(node).some(child => child.type === 'strong' && child.props.children.includes('办公助手')));
   assert.ok(nodes(card).some(node => node.type === 'span' && node.props.children.includes('办')));
-  // 磁贴只写名字和厂商（自定义入口写“自定义”），不再列网址和用途。
-  assert.ok(nodes(card).some(node => node.type === 'small' && node.props.children.includes('自定义')));
+  // “全部”是名录里的小块：只有头像和名字，厂商、网址和用途都不写在小块上（2026-11-13 改成紧凑名录）。
+  assert.ok(card.props.className.includes('ww-ai-mini'));
+  assert.equal(nodes(card).filter(node => node.type === 'small').length, 0);
   assert.equal(nodes(card).filter(node => node.type === 'p').length, 0);
   assert.equal(nodes(loaded).filter(node => node.props['aria-label']?.startsWith('编辑 ')).length, 1);
   assert.equal(nodes(loaded).filter(node => node.props['aria-label']?.startsWith('删除 ')).length, 1);
@@ -221,7 +224,7 @@ test('持久目录读取失败保留默认目录，刷新恢复自定义入口�
   let fail = true, signal;
   const f = fixture(() => {}, { manageAiWeb: async (_input, value) => { signal = value; if (fail) throw new Error('目录读取失败'); return { entries: aiWebEntries }; } });
   f.render(); await Promise.resolve();
-  assert.equal(nodes(f.render()).filter(node => node.type === 'article').length, 10);
+  assert.equal(nodes(f.render()).filter(node => node.type === 'article').length, aiWebEntries.length);
   assert.ok(nodes(f.render()).some(node => node.props.role === 'alert' && node.props.children.includes('目录读取失败')));
   fail = false; await nodes(f.render()).find(node => node.props.children.includes('刷新入口')).props.onClick();
   assert.equal(nodes(f.render()).filter(node => node.props.role === 'alert').length, 0);
@@ -242,7 +245,7 @@ test('他客户端删除所选入口后清理目录选择，陈旧继续按钮�
   const stale = button(f.render(), '继续使用');
   entries = aiWebEntries; f.render(false); f.render(); await Promise.resolve();
   assert.equal(button(f.render(), '继续使用'), undefined);
-  assert.equal(nodes(f.render()).filter(node => node.type === 'article').length, 10);
+  assert.equal(nodes(f.render()).filter(node => node.type === 'article').length, aiWebEntries.length);
   await stale.props.onClick();
   assert.ok(JSON.stringify(f.render()).includes('此 AI 入口已不存在'));
   assert.equal(opens, 1); assert.equal(focuses, 0); assert.equal(restores, 0);
@@ -269,7 +272,7 @@ for (const late of ['resolve', 'reject']) test(`Editor 已保存读回使早发 
   assert.ok(nodes(f.render()).some(node => node.props['aria-label'] === '编辑 新名字'));
   assert.equal(nodes(f.render()).some(node => node.props['aria-label'] === '编辑 旧名字'), false);
   assert.equal(JSON.stringify(f.render()).includes('已失效读取失败'), false);
-  assert.equal(nodes(f.render()).filter(node => node.type === 'article').length, 11);
+  assert.equal(nodes(f.render()).filter(node => node.type === 'article').length, aiWebEntries.length + 1);
 });
 
 test('编辑冲突读回保留草稿，可显式加载已保存版本并按新修订重试', async t => {
@@ -318,7 +321,7 @@ test('原版回到页签时按记下的入口标“正在用”，页头写“�
   const opens = [], resumed = [];
   const f = fixture(url => opens.push(url), { remembered: 'kimi', focusBrowser: async (signal, entry) => { assert.ok(signal instanceof AbortSignal); resumed.push(entry); } });
   const back = f.render();
-  assert.equal(nodes(back).filter(node => node.type === 'article').length, 10, '入口照常列着');
+  assert.equal(nodes(back).filter(node => node.type === 'article').length, aiWebEntries.length, '入口照常列着');
   assert.equal(tileName(currentTile(back)), 'Kimi');
   assert.ok(nodes(currentTile(back)).some(node => node.type === 'small' && node.props.children.includes('正在用')));
   assert.match(pageHead(back), /^正在用 Kimi · /);
@@ -334,7 +337,7 @@ test('原版没有记下入口或记下的会话已不在时，不标“正在�
   const none = f.render();
   assert.equal(currentTile(none), undefined);
   assert.equal(button(none, '继续使用'), undefined);
-  assert.match(pageHead(none), /^10 个入口 · /);
+  assert.match(pageHead(none), new RegExp(`^${aiWebEntries.length} 个入口 · `));
   // 回来时会话列表还没读完先标上，读完发现会话不在了就去掉（这个夹具里 effect 改的状态下一次渲染才看得到）。
   options.remembered = 'kimi'; f.render(); assert.equal(tileName(currentTile(f.render())), 'Kimi');
   options.remembered = ''; f.render(); const gone = f.render();

@@ -1,13 +1,17 @@
+import { navGroups } from '../features/index.js';
+
 /** 登记快照与订阅共用同一严格结构，不把宿主fiber或路径缓存当作独立身份。 */
 export function workbenchContract(z) {
   const feature = z.strictObject({
     id: z.string(), kind: z.enum(['base', 'optional', 'extension']), api: z.literal(1), package: z.string(), skills: z.array(z.string()),
-    tab: z.strictObject({ placement: z.literal('end').optional(), keepAlive: z.literal(true).optional(), icon: z.string().optional() }).optional(), error: z.string().optional(),
+    tab: z.strictObject({ placement: z.literal('end').optional(), keepAlive: z.literal(true).optional(), icon: z.string().optional(), group: z.enum(navGroups).optional(), summary: z.strictObject({ zh: z.string(), en: z.string() }).optional() }).optional(), error: z.string().optional(),
     instance: z.number().int().positive().optional(),
   }).refine(value => value.instance !== undefined || value.kind === 'base' && Boolean(value.error), '活动功能必须带有本轮登记实例');
   // assistant：扩展给小鲸起的名字和是哪个扩展起的；没有扩展起名时不带。
   const assistant = z.strictObject({ name: z.string(), feature: z.string(), package: z.string(), label: z.strictObject({ zh: z.string(), en: z.string() }).optional() });
-  const snapshot = z.strictObject({ revision: z.number().int().min(0), features: z.array(feature), assistant: assistant.optional() });
+  // skillSources：扩展的技能来源变过几次（能改的项、挂在哪一层），技能页据此重读。
+  // knowledgeSources：知识来源登记、撤销或目录变过几次，知识积累页据此重读知识空间。
+  const snapshot = z.strictObject({ revision: z.number().int().min(0), features: z.array(feature), assistant: assistant.optional(), skillSources: z.number().int().min(1).optional(), knowledgeSources: z.number().int().min(1).optional() });
   // 检查更新的结果：latest 已是最新、available 有新版本、needs-dsh 新版本要先升级 DSH、local 从本机目录装的不在这里更新、failed 安装源都没问到。
   const update = z.strictObject({
     status: z.enum(['latest', 'available', 'needs-dsh', 'local', 'failed']), current: z.string(), runtimeVersion: z.string(),

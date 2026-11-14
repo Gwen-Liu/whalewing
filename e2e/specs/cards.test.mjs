@@ -50,20 +50,26 @@ function newsStore(instance) {
 }
 
 // —— 页面 ——
-/** 首页的“今日学习”（读取中的骨架也带这个样式名，要排除）。 */
-const learning = page => page.locator('.ww-learning:not(.ww-skeleton)');
+// 2026-11-14 首页改成每天一期、一屏放得下：左边今日资讯，右边今日一招、接着读、回顾（新功能的用例在 reading.test.mjs）。
+/** 首页的“接着读”那一块（原“今日学习”的书桌）。 */
+const learning = page => page.locator('.ww-read .ww-read-book');
+/** 首页“今日一招”里的卡，和“今日资讯”那一块。 */
+const tipCard = page => page.locator('.ww-read .ww-read-tip .ww-read-tipcard');
+const newsPane = page => page.locator('.ww-read .ww-read-news');
+const homeHead = page => page.locator('.ww-read > .ww-news-header');
 async function openCards(page, instance = dsh) {
-  await openWhaleWing(page, instance.url);
-  await openTab(page, '知识卡片');
-  await learning(page).waitFor();
+  await openWhaleWing(page, instance.url, { assistant: 'float' });
+  await openTab(page, '每日阅读');
+  // 窗口窄时首页换成页签，一次只显示一块，所以等首页本身而不是等“接着读”。
+  await page.locator('.ww-read .ww-read-board').waitFor();
 }
-const learningMeta = page => textOf(learning(page).locator('.ww-shelf-head small'));
+const learningMeta = page => textOf(learning(page).locator('.ww-read-head small'));
 async function openShelf(page) {
-  await learning(page).getByRole('button', { name: '打开书架' }).click();
+  await homeHead(page).getByRole('button', { name: '书架', exact: true }).click();
   await page.locator('.ww-library').waitFor();
 }
 async function backHome(page) {
-  await page.locator('.ww-library .ww-crumb', { hasText: '知识卡片' }).click();
+  await page.locator('.ww-library .ww-crumb', { hasText: '每日阅读' }).click();
   await learning(page).waitFor();
 }
 async function closeToast(page) {
@@ -89,40 +95,38 @@ async function bookAction(page, scope, title, action) {
   await scope.locator('.ww-book-menu').getByRole('button', { name: `${title} · 更多操作` }).click();
   await page.getByRole('dialog', { name: `${title} · 更多操作` }).getByRole('button', { name: action, exact: true }).click();
 }
-const deskTitles = page => learning(page).locator('.ww-desk-card .ww-desk-book strong').allInnerTexts();
+const deskTitles = page => learning(page).locator('.ww-read-bookrow .ww-read-booktitle').allInnerTexts();
 const learningDate = date => { const [year, month, day] = date.split('-').map(Number); return `${month} 月 ${day} 日 · 星期${'日一二三四五六'[new Date(Date.UTC(year, month - 1, day)).getUTCDay()]}`; };
 const fullDate = date => { const [year, month, day] = date.split('-').map(Number); return `${year} 年 ${month} 月 ${day} 日`; };
 const slash = date => date.replaceAll('-', '/');
 
-// 需求§知识卡片（首页先展示今日学习和最新一期每日资讯；领域设置在“卡片设置”）
-test('首页：标题和“卡片设置”，今日学习带日期和“打开书架”，有 AI 使用技巧卡和每日资讯', async t => {
+// 需求§每日阅读·首页（左边今日资讯，右边今日一招、接着读、回顾；页头有这一期的日期、“书架”“阅读设置”）
+test('首页：标题、这一期的日期、“书架”和“阅读设置”；四块是今日资讯、今日一招、接着读、回顾，最新一期的领域排在最前', async t => {
   resetShelf();
   await withPage(browser, t, async ({ page, errors, external }) => {
     await openCards(page);
-    const header = page.locator('.ww-cards > .ww-news-header');
-    assert.equal(await header.locator('h2').innerText(), '知识卡片');
-    await header.getByRole('button', { name: '卡片设置' }).waitFor();
-    assert.equal(await textOf(learning(page).locator('.ww-shelf-eyebrow')), '今日学习');
-    assert.equal(await learning(page).locator('.ww-shelf-head h3').innerText(), learningDate(plan.today));
-    await learning(page).getByRole('button', { name: '打开书架' }).waitFor();
-    const tip = learning(page).locator('.ww-tip-card');
-    assert.match(await textOf(tip), /AI 使用技巧.*近 14 天.*查看往期 →/);
-    const news = page.locator('.ww-cards > .ww-shelf').filter({ has: page.locator('.ww-shelf-eyebrow', { hasText: '每日资讯' }) });
-    assert.equal(await news.first().locator('.ww-shelf-head h3').innerText(), 'AI 与科技', '最新一期排在最前');
+    const header = homeHead(page);
+    assert.equal(await header.locator('h2').innerText(), '每日阅读');
+    await header.getByRole('button', { name: '阅读设置', exact: true }).waitFor();
+    await header.getByRole('button', { name: '书架', exact: true }).waitFor();
+    assert.equal(await header.locator('.ww-read-stepper b').innerText(), learningDate(plan.period));
+    assert.deepEqual(await page.locator('.ww-read .ww-read-head h3').allInnerTexts(), ['今日资讯', '今日一招', '接着读', '回顾']);
+    assert.match(await textOf(tipCard(page)), /AI 技巧.*近 14 天.*往期/);
+    assert.deepEqual(await newsPane(page).getByRole('group', { name: '看哪个领域' }).getByRole('button').allInnerTexts(), ['AI 与科技', plan.stale.fieldName], '最新一期排在最前');
     assert.deepEqual(external, []); assert.deepEqual(errors, []);
   });
 });
 
-// 需求§今日学习与书架（零本只放一张“添加常看书籍”的虚线占位卡，卡里不出现任何书；“换一本”和占位卡打开右侧“选择常看书籍”抽屉）
+// 需求§接着读与书架（零本只放一张“添加常看书籍”的虚线占位卡，卡里不出现任何书；“换一本”和占位卡打开右侧“选择常看书籍”抽屉）
 test('常看为零时首页只有一张虚线占位卡、不出现书：书架空时进书架导入，书架有书时打开“选择常看书籍”', async t => {
   resetShelf();
   const [first] = books(1);
   await withPage(browser, t, async ({ page, errors }) => {
     await openCards(page);
-    const placeholder = learning(page).locator('.ww-desk-add');
+    const placeholder = learning(page).locator('.ww-read-add');
     assert.equal(await placeholder.evaluate(element => getComputedStyle(element).borderTopStyle), 'dashed');
     assert.match(await textOf(placeholder), /书架里还没有书.*导入电子书，或从在线书目下载开放许可的书/);
-    assert.equal(await learning(page).locator('.ww-desk-card, .ww-desk .ww-cover').count(), 0, '占位卡里没有书');
+    assert.equal(await learning(page).locator('.ww-read-bookrow, .ww-cover').count(), 0, '占位卡里没有书');
     assert.equal(await learningMeta(page), '书架还是空的');
     await placeholder.click();
     await page.locator('.ww-library').waitFor();
@@ -136,7 +140,7 @@ test('常看为零时首页只有一张虚线占位卡、不出现书：书架�
     await backHome(page);
     assert.equal(await learningMeta(page), '还没有常看书 · 书架 1 本');
     assert.match(await textOf(placeholder), /添加常看书籍.*从书架选一到两本/);
-    assert.equal(await learning(page).locator('.ww-desk-card, .ww-desk .ww-cover').count(), 0, '占位卡里没有书');
+    assert.equal(await learning(page).locator('.ww-read-bookrow, .ww-cover').count(), 0, '占位卡里没有书');
     await placeholder.click();
     const picker = drawer(page, '选择常看书籍');
     await picker.waitFor();
@@ -146,7 +150,7 @@ test('常看为零时首页只有一张虚线占位卡、不出现书：书架�
   });
 });
 
-// 需求§今日学习与书架（能导入的格式；TXT 自动识别 UTF-8、GBK，识别“第X章”；导入后只保留阅读副本，不另存原文件）
+// 需求§接着读与书架（能导入的格式；TXT 自动识别 UTF-8、GBK，识别“第X章”；导入后只保留阅读副本，不另存原文件）
 test('导入 TXT：UTF-8 和 GBK 都分成 3 章、中文不乱码，书架上有生成的封面，本机只留每章一份阅读副本', async t => {
   resetShelf();
   const utf8 = book('鲸翼测试小书-CRD03'), legacy = book('鲸翼测试小书-CRD03-GBK', { encoding: 'gbk' });
@@ -203,7 +207,7 @@ async function importFailure(page, paths, marker) {
   return { failure, message: await textOf(failure.locator('.ww-toast-text')) };
 }
 
-// 需求§今日学习与书架（不能读的格式导入时说明原因；同一文件不重复导入）；需求§界面通用约定（失败在右上角提示，带恢复动作）
+// 需求§接着读与书架（不能读的格式导入时说明原因；同一文件不重复导入）；需求§界面通用约定（失败在右上角提示，带恢复动作）
 test('反例：不能读的文件和重复导入都不进书架：右上角报错并带“重试”，书目和上传临时文件都不变', async t => {
   resetShelf();
   const [good] = books(1), bad = unreadable();
@@ -227,7 +231,7 @@ test('反例：不能读的文件和重复导入都不进书架：右上角报�
   });
 });
 
-// 需求§今日学习与书架（DRM、CHM、DjVu、UMD、旧版 .doc、RAR/7z 不能读，导入时说明原因和办法（如用 Calibre 转成 EPUB、另存为 DOCX、先解压）；同一文件不重复导入）
+// 需求§接着读与书架（DRM、CHM、DjVu、UMD、旧版 .doc、RAR/7z 不能读，导入时说明原因和办法（如用 Calibre 转成 EPUB、另存为 DOCX、先解压）；同一文件不重复导入）
 test('反例：CHM、旧版 .doc、RAR、坏 EPUB 导入时各自说明原因和办法，重复导入说明已在书架', async t => {
   resetShelf();
   const [good] = books(1), bad = unreadable();
@@ -247,7 +251,7 @@ test('反例：CHM、旧版 .doc、RAR、坏 EPUB 导入时各自说明原因和
   });
 });
 
-// 需求§今日学习与书架（不能读的文件导入时说明原因）；需求§界面通用约定（失败在右上角提示）
+// 需求§接着读与书架（不能读的文件导入时说明原因）；需求§界面通用约定（失败在右上角提示）
 test('反例：导入 0 字节的文件时说明文件是空的，不显示程序内部信息', async t => {
   resetShelf();
   const { empty } = unreadable();
@@ -261,8 +265,8 @@ test('反例：导入 0 字节的文件时说明文件是空的，不显示程�
   });
 });
 
-// 需求§今日学习与书架（新书自动补位，提示里有“不放首页”可撤销；一本时是加宽书卡，右侧“接下来”和“查看全部 n 章”；表头“常看 n / 2 本 · 书架 n 本”）
-test('新书自动设为常看：首页是加宽书卡，带章节、时长、摘要和“接下来”；再导入一本点“不放首页”不进常看', async t => {
+// 需求§接着读与书架（新书自动补位，提示里有“不放首页”可撤销；一本时是加宽书卡，右侧“接下来”和“查看全部 n 章”；表头“常看 n / 2 本 · 书架 n 本”）
+test('新书自动设为常看：首页“接着读”里是这一本，带章节、时长、进度和“接下来”；再导入一本点“不放首页”不进常看', async t => {
   resetShelf();
   const [first, second] = books(2);
   await withPage(browser, t, async ({ page, errors }) => {
@@ -274,16 +278,15 @@ test('新书自动设为常看：首页是加宽书卡，带章节、时长、�
     await closeToast(page);
     await backHome(page);
     assert.equal(await learningMeta(page), '常看 1 / 2 本 · 书架 1 本');
-    const card = learning(page).locator('.ww-desk-card.ww-desk-wide');
-    assert.equal(await card.count(), 1, '一本时是一张加宽书卡');
+    const card = learning(page).locator('.ww-read-bookrow');
+    assert.equal(await card.count(), 1, '一本时只有一行');
     await card.locator('.ww-cover').waitFor();
-    assert.match(await textOf(card.locator('.ww-desk-chapter')), /^第 1 \/ 3 章 约 \d+ 分钟$/);
-    assert.equal(await card.locator('.ww-desk-title').innerText(), '第一章 起点');
-    assert.match(await textOf(card.locator('.ww-desk-excerpt')), /起点第 1 段/);
-    assert.equal(await card.locator('.ww-desk-pct').innerText(), '0%');
-    assert.equal(await card.locator('.ww-desk-next .ww-desk-eyebrow').innerText(), '接下来');
-    assert.deepEqual(await card.locator('.ww-desk-next-row strong').allInnerTexts(), ['第二章 中段', '第三章 终点']);
-    await card.getByRole('button', { name: '查看全部 3 章' }).waitFor();
+    assert.match(await textOf(card.locator('.ww-read-booktxt small').first()), /^第 1 \/ 3 章 · 约 \d+ 分钟$/);
+    assert.equal(await card.locator('.ww-read-booktxt strong').innerText(), '第一章 起点');
+    assert.equal(await textOf(card.locator('.ww-read-booktxt small').last()), `${titleOf(first)} · 读到 0% · 划线 0 条`);
+    // 只有一本时，下面接着列“接下来”两章和“查看全部”。
+    assert.deepEqual(await learning(page).locator('.ww-read-nextrow strong').allInnerTexts(), ['第二章 中段', '第三章 终点']);
+    await learning(page).getByRole('button', { name: '查看全部 3 章' }).waitFor();
     await openShelf(page);
     await page.locator('.ww-library input[type=file]').setInputFiles(second);
     await toast(page, `已导入《${titleOf(second)}》`).getByRole('button', { name: '不放首页' }).click();
@@ -297,7 +300,7 @@ test('新书自动设为常看：首页是加宽书卡，带章节、时长、�
   assert.deepEqual(dailyFlags(), { [titleOf(first)]: true, [titleOf(second)]: false });
 });
 
-// 需求§今日学习与书架（删除常看书不自动补位）
+// 需求§接着读与书架（删除常看书不自动补位）
 test('删除一本常看书后不自动补位：常看剩 1 本，另一本仍不是常看', async t => {
   resetShelf();
   const [a, b, c] = books(3);
@@ -319,7 +322,7 @@ test('删除一本常看书后不自动补位：常看剩 1 本，另一本仍�
   assert.deepEqual(dailyFlags(), { [titleOf(b)]: true, [titleOf(c)]: false });
 });
 
-// 需求§今日学习与书架·换书（已满两本再设第三本时弹出居中弹窗，选一本换下，换下的书留在书架、进度不变；替换在右上角提示里能撤销）
+// 需求§接着读与书架·换书（已满两本再设第三本时弹出居中弹窗，选一本换下，换下的书留在书架、进度不变；替换在右上角提示里能撤销）
 test('已满两本时设第三本：居中弹窗选一本换下，换下的书留在书架、进度不变，提示里能撤销', async t => {
   resetShelf();
   const [a, b, c] = books(3);
@@ -361,7 +364,7 @@ test('已满两本时设第三本：居中弹窗选一本换下，换下的书�
   });
 });
 
-// 需求§今日学习与书架·换书（“选择常看书籍”抽屉最多勾两本）
+// 需求§接着读与书架·换书（“选择常看书籍”抽屉最多勾两本）
 test('反例：“选择常看书籍”已勾两本时第三本勾不上，并说明已选满；取消后常看不变', async t => {
   resetShelf();
   const [a, b, c] = books(3);
@@ -371,7 +374,7 @@ test('反例：“选择常看书籍”已勾两本时第三本勾不上，并�
     await importBooks(page, [a, b, c]);
     const before = fs.readFileSync(shelfFile(dsh), 'utf8');
     await backHome(page);
-    const card = learning(page).locator('.ww-desk-card').filter({ hasText: titleOf(a) });
+    const card = learning(page).locator('.ww-read-bookrow').filter({ hasText: titleOf(a) });
     await bookAction(page, card, titleOf(a), '换一本');
     const picker = drawer(page, '选择常看书籍');
     await picker.waitFor();
@@ -417,9 +420,9 @@ async function illustratedBook(title) {
   return files.file(`${title}.html`, `<html><head><title>${title}</title></head><body>${chapter(1, '需求从哪来')}${chapter(2, '日常需求分析')}${chapter(3, '需求评审')}</body></html>`);
 }
 
-// 需求§今日学习与书架（2026-10-28 用户要求改成电脑上的读法：正文一栏上下滚动，目录在左侧；滚到本章末尾记为读完，章末有“下一章”，
+// 需求§接着读与书架（2026-10-28 用户要求改成电脑上的读法：正文一栏上下滚动，目录在左侧；滚到本章末尾记为读完，章末有“下一章”，
 // 停一下再往下滚进入下一章；关闭后回到打开它的那一页并原位刷新进度）
-test('阅读器：正文上下滚动、目录在左侧；滚到第一章末尾有“下一章”，停一下再往下滚进入第二章；关闭后首页书卡推进到第 2 章', async t => {
+test('阅读器：正文上下滚动、目录在左侧；滚到第一章末尾有“下一章”，停一下再往下滚进入第二章；关闭后首页“接着读”推进到第 2 章', async t => {
   resetShelf();
   const long = book('鲸翼测试长书', { long: true });
   await withPage(browser, t, { reducedMotion: 'reduce' }, async ({ page, errors }) => {
@@ -447,16 +450,16 @@ test('阅读器：正文上下滚动、目录在左侧；滚到第一章末尾�
     assert.equal((await scrollState(reader)).top, 0, '从第二章开头读起');
     await reader.getByRole('button', { name: '关闭' }).click();
     await reader.waitFor({ state: 'detached' });
-    const card = learning(page).locator('.ww-desk-card');
-    await card.locator('.ww-desk-chapter', { hasText: '第 2 / 3 章' }).waitFor();
-    assert.equal(await card.locator('.ww-desk-title').innerText(), '第二章 中段');
-    assert.notEqual(await card.locator('.ww-desk-pct').innerText(), '0%', '百分比增加');
+    const card = learning(page).locator('.ww-read-bookrow');
+    await card.locator('.ww-read-booktxt small', { hasText: '第 2 / 3 章' }).waitFor();
+    assert.equal(await card.locator('.ww-read-booktxt strong').innerText(), '第二章 中段');
+    assert.doesNotMatch(await textOf(card.locator('.ww-read-booktxt small').last()), /读到 0%/, '百分比增加');
     assert.deepEqual(errors, []);
   });
   assert.equal(readShelf().books[0].progress.next, 1, '第一章记为读完');
 });
 
-// 需求§今日学习与书架（读到的位置记在本机，下次打开回到原处；字号也记住）
+// 需求§接着读与书架（读到的位置记在本机，下次打开回到原处；字号也记住）
 test('读到一半关掉，再打开同一章回到原来的位置，字号也还是上次的', async t => {
   resetShelf();
   const long = book('鲸翼测试记位置', { long: true });
@@ -482,7 +485,7 @@ test('读到一半关掉，再打开同一章回到原来的位置，字号也�
   });
 });
 
-// 需求§今日学习与书架（一章一读；最后一章没有下一章）——在头和尾继续滚、按方向键都不越界
+// 需求§接着读与书架（一章一读；最后一章没有下一章）——在头和尾继续滚、按方向键都不越界
 test('反例：第一章开头往上滚、按 ← 都不会离开第一章；最后一章末尾没有“下一章”，再往下滚、按 → 都停在原地、不出错', async t => {
   resetShelf();
   const [only] = books(1);
@@ -509,7 +512,7 @@ test('反例：第一章开头往上滚、按 ← 都不会离开第一章；最
   });
 });
 
-// 需求§今日学习与书架（目录在左侧，本章小节跟着阅读位置；插图按正文宽度显示，点开看大图）
+// 需求§接着读与书架（目录在左侧，本章小节跟着阅读位置；插图按正文宽度显示，点开看大图）
 test('本章小节列在目录里，点了跳到那一节并高亮；插图点开看大图，Esc 只关大图', async t => {
   resetShelf();
   const file = await illustratedBook('鲸翼测试插图书');
@@ -541,7 +544,7 @@ test('本章小节列在目录里，点了跳到那一节并高亮；插图点�
   });
 });
 
-// 需求§今日学习与书架（2026-10-28 用户反馈：正文旁边也要有目录那样看得见、能拖的滚动条，长章节好定位；拖到底只算读完，
+// 需求§接着读与书架（2026-10-28 用户反馈：正文旁边也要有目录那样看得见、能拖的滚动条，长章节好定位；拖到底只算读完，
 // 换章仍要停一下再往下滚）
 test('正文右边有看得见的滚动条：拖动滑块跳到本章中间，小节高亮跟着走；反例：拖到底只记读完，不自动换章', async t => {
   resetShelf();
@@ -587,7 +590,7 @@ test('正文右边有看得见的滚动条：拖动滑块跳到本章中间，�
   assert.equal(readShelf().books[0].progress.next, 1, '拖到底也记第一章读完');
 });
 
-// 需求§今日学习与书架（窄窗时目录收起，点“目录”浮出，选完自动收起）
+// 需求§接着读与书架（窄窗时目录收起，点“目录”浮出，选完自动收起）
 test('窄窗时目录默认收起，点“目录”浮出，选了一章后自动收起', async t => {
   resetShelf();
   const [only] = books(1);
@@ -609,7 +612,7 @@ test('窄窗时目录默认收起，点“目录”浮出，选了一章后自�
   });
 });
 
-// 需求§今日学习与书架·书架页（头行一行排开；新建分组、一本书放进分组；查找框按 / 聚焦、即时过滤；排序默认“最近加入 ↓”，选择记在本机）
+// 需求§接着读与书架·书架页（头行一行排开；新建分组、一本书放进分组；查找框按 / 聚焦、即时过滤；排序默认“最近加入 ↓”，选择记在本机）
 test('书架：头行一行排开；分组只显示组里的书；按 / 查找即时过滤；排序改成书名后刷新页面还在', async t => {
   resetShelf();
   const [a, b] = books(2);
@@ -658,7 +661,7 @@ test('书架：头行一行排开；分组只显示组里的书；按 / 查找�
     assert.equal(await head.locator('.ww-library-dir').getAttribute('aria-label'), '按书名拼音从后往前');
     await page.reload();
     await page.getByRole('button', { name: '鲸翼', exact: true }).first().click();
-    await openTab(page, '知识卡片');
+    await openTab(page, '每日阅读');
     await learning(page).waitFor();
     await openShelf(page);
     assert.equal(await page.locator('.ww-library-head').getByRole('combobox', { name: '排序' }).inputValue(), 'title');
@@ -668,7 +671,7 @@ test('书架：头行一行排开；分组只显示组里的书；按 / 查找�
   });
 });
 
-// 需求§今日学习与书架·书架页（删分组不删书）；需求§界面通用约定（删除确认用居中弹窗，确认按钮为红色）
+// 需求§接着读与书架·书架页（删分组不删书）；需求§界面通用约定（删除确认用居中弹窗，确认按钮为红色）
 test('删除分组：居中红色确认后只去掉分组，书还在“全部”里；查找不到时说明，并能一键清除', async t => {
   resetShelf();
   const [a] = books(1);
@@ -711,7 +714,7 @@ test('删除分组：居中红色确认后只去掉分组，书还在“全部�
   });
 });
 
-// 需求§今日学习与书架（书的“…”里有从书架删除）；需求§界面通用约定（确认用居中弹窗，删除类确认按钮为红色；结果用右上角提示）
+// 需求§接着读与书架（书的“…”里有从书架删除）；需求§界面通用约定（确认用居中弹窗，删除类确认按钮为红色；结果用右上角提示）
 test('从书架删除：居中红色确认写明会删什么，删除后书架和首页常看都没有它，阅读副本目录删掉，原文件不动', async t => {
   resetShelf();
   const [a] = books(1), hash = await sha256(a);
@@ -736,7 +739,7 @@ test('从书架删除：居中红色确认写明会删什么，删除后书架�
     await closeToast(page);
     await backHome(page);
     assert.equal(await learningMeta(page), '书架还是空的');
-    assert.equal(await learning(page).locator('.ww-desk-card').count(), 0);
+    assert.equal(await learning(page).locator('.ww-read-bookrow').count(), 0);
     assert.equal(fs.existsSync(dir), false, '阅读副本目录删掉了');
     assert.deepEqual(errors, []);
   });
@@ -744,7 +747,7 @@ test('从书架删除：居中红色确认写明会删什么，删除后书架�
   assert.equal(await sha256(a), hash, '原文件不受影响');
 });
 
-// 需求§界面通用约定（确认用居中弹窗，“取消 + 确认”）；需求§今日学习与书架（从书架删除）
+// 需求§界面通用约定（确认用居中弹窗，“取消 + 确认”）；需求§接着读与书架（从书架删除）
 test('反例：删除确认框点“取消”，书还在、仍是常看，书目和阅读副本都没变', async t => {
   resetShelf();
   const [a] = books(1);
@@ -785,15 +788,15 @@ function monthStep(date, delta) {
 test('AI 使用技巧：卡上近 14 天刻度和日报一致；历史时间线新的在上、空档折叠、标出部分失败；刻度尺键盘跳转；弹窗跨天切换', async t => {
   await withPage(browser, t, { reducedMotion: 'reduce' }, async ({ page, errors, external }) => {
     await openCards(page);
-    const card = learning(page).locator('.ww-tip-card');
+    const card = tipCard(page);
     const [newest] = plan.tips, featured = featuredTip(newest.date, newest.count);
-    assert.equal(await card.locator('.ww-tile-title').innerText(), tipTitle(newest.date, featured), '卡上是最新一期的“当天首页”那条');
-    const cells = await card.locator('.ww-tip-cells i').evaluateAll(list => list.map(cell => ({ kind: cell.dataset.day, today: cell.hasAttribute('data-today') })));
+    assert.equal(await card.locator('h4').innerText(), tipTitle(newest.date, featured), '卡上是最新一期的“当天首页”那条');
+    const cells = await card.locator('.ww-read-ticks i').evaluateAll(list => list.map(cell => ({ kind: cell.dataset.day, today: cell.hasAttribute('data-today') })));
     assert.deepEqual(cells, expectedStrip().map(({ kind, today }) => ({ kind, today })));
-    await card.click();
+    await card.getByRole('button', { name: '往期' }).click();
     const history = page.locator('section.ww-tips');
     await history.waitFor();
-    assert.equal(await textOf(history.getByRole('navigation', { name: '位置' })), '知识卡片 › AI 使用技巧');
+    assert.equal(await textOf(history.getByRole('navigation', { name: '位置' })), '每日阅读 › AI 使用技巧');
     await history.locator('.ww-tips-meta', { hasText: '共' }).waitFor();
     assert.equal(await textOf(history.locator('.ww-tips-meta')), `每天 08:00 随每日资讯整理 · 共 ${plan.tips.length} 期`);
     await history.locator('.ww-tips-day').first().waitFor();
@@ -850,10 +853,9 @@ test('还没有技巧日报时：首页技巧卡说明随每日资讯整理，�
   const store = newsStore(blank), before = await sha256(store);
   await withPage(browser, t, async ({ page, errors, external }) => {
     await openCards(page, blank);
-    const card = learning(page).locator('.ww-tip-card');
-    assert.match(await textOf(card), /AI 使用技巧随每日资讯一起整理，DSH 需要开着/);
-    assert.equal(await card.locator('.ww-tip-cells i[data-day=none]').count(), 14, '近 14 天都没有日报');
-    await card.click();
+    const card = tipCard(page);
+    assert.match(await textOf(card), /今天的技巧 08:00 后整理好.*AI 使用技巧随每日资讯一起整理，DSH 需要开着/);
+    await card.getByRole('button', { name: '往期' }).click();
     const history = page.locator('section.ww-tips');
     await history.locator('.ww-tips-blank').waitFor();
     assert.equal(await textOf(history.locator('.ww-tips-blank')), '还没有技巧。第一期会在 08:00 随每日资讯整理好，DSH 需要开着。');
@@ -869,13 +871,13 @@ test('反例：某个领域本期没有日报时，首页仍显示它的上一�
   const store = newsStore(dsh), before = await sha256(store);
   await withPage(browser, t, async ({ page, errors, external }) => {
     await openCards(page);
-    const block = page.locator('.ww-cards > .ww-shelf').filter({ has: page.locator('.ww-shelf-head h3', { hasText: plan.stale.fieldName }) });
-    await block.waitFor();
-    const meta = await textOf(block.locator('.ww-shelf-head small'));
-    assert.match(meta, new RegExp(`^截至 ${slash(plan.stale.date)} 08:00 · ${plan.stale.count} 条`));
-    assert.doesNotMatch(meta, new RegExp(slash(plan.period)), '不写成本期的日期');
-    assert.deepEqual(await block.locator('.ww-tile-title').allInnerTexts(), [newsTitle(plan.stale.fieldName, plan.stale.date, 0), newsTitle(plan.stale.fieldName, plan.stale.date, 1)]);
-    assert.doesNotMatch(await textOf(block.locator('.ww-tile-source').first()), /今天/, '来源时间不写成今天');
+    // 一次看一个领域：在标题旁点这个领域的小片。
+    await newsPane(page).getByRole('group', { name: '看哪个领域' }).getByRole('button', { name: plan.stale.fieldName }).click();
+    assert.equal(await homeHead(page).locator('.ww-read-stepper b').innerText(), learningDate(plan.stale.date), '页头写的是那一期的日期，不写成本期的');
+    assert.match(await textOf(homeHead(page).locator('p')), new RegExp(`^今天这一期还没出，下面是 ${plan.stale.date.slice(5).replace('-', '/')} 那一期`));
+    assert.equal(await textOf(newsPane(page).locator('.ww-read-head small')), `${plan.stale.count} 条`);
+    assert.deepEqual([await newsPane(page).locator('.ww-read-lead-t').innerText(), ...await newsPane(page).locator('.ww-read-q .ww-read-q-t').allInnerTexts()], [newsTitle(plan.stale.fieldName, plan.stale.date, 0), newsTitle(plan.stale.fieldName, plan.stale.date, 1)]);
+    assert.doesNotMatch(await textOf(newsPane(page).locator('.ww-read-lead .ww-read-hint').first()), /今天/, '来源时间不写成今天');
     assert.deepEqual(external, []); assert.deepEqual(errors, []);
   });
   assert.equal(await sha256(store), before, '没有补采或改写日报');
@@ -885,45 +887,38 @@ test('反例：某个领域本期没有日报时，首页仍显示它的上一�
 test('还没有任何日报时，每日资讯写明“今日日报尚未生成”', async t => {
   await withPage(browser, t, async ({ page, errors, external }) => {
     await openCards(page, blank);
-    const block = page.locator('.ww-cards > .ww-shelf').filter({ has: page.locator('.ww-shelf-eyebrow', { hasText: '每日资讯' }) });
-    assert.equal(await block.count(), 1);
-    assert.equal(await block.locator('.ww-shelf-head h3').innerText(), '今日日报尚未生成');
-    assert.equal(await block.locator('.ww-news-tile').count(), 0);
+    assert.equal(await textOf(newsPane(page).locator('.ww-read-blank')), '今日日报尚未生成。每天北京时间 08:00 整理，DSH 需要开着。');
+    assert.equal(await newsPane(page).locator('.ww-read-lead, .ww-read-q').count(), 0);
+    assert.match(await textOf(homeHead(page).locator('p')), /^今天这一期还没出/);
     assert.deepEqual(external, []); assert.deepEqual(errors, []);
   });
 });
 
-// 需求§每日资讯·展示（默认一行 4 张，展开再加一行，最多 8 张，超过 8 条的旧日报也只显示前 8 条；卡片只放类别图标、编号、标签、标题和来源时间；点卡片在弹框里看说明、关联和全部来源，链接标为“查看来源”；运行详情也在弹框里）
-test('每日资讯：默认一行 4 张，展开到 8 张、第 9 和 10 条不显示，收起回一行；点卡片在弹框看说明和来源，运行详情也在弹框里', async t => {
+// 需求§每日资讯·展示（头条一条加快讯几条；旧日报超过 8 条也只显示前 8 条；快讯每行是编号、标题、一句说明、性质标记、发布时间和书签；点标题在弹框里看说明、关联和全部来源，链接标为“查看来源”；运行详情在“…”里、也在弹框里看）
+test('今日资讯：头条一条加快讯七条，第 9 和 10 条不显示；快讯行有编号、标题、说明、性质和时间；点标题在弹框看说明和来源，运行详情也在弹框里', async t => {
   await withPage(browser, t, async ({ page, errors, external }) => {
     await openCards(page);
-    const block = page.locator('.ww-cards > .ww-shelf').filter({ has: page.locator('.ww-shelf-head h3', { hasText: 'AI 与科技' }) });
-    const tiles = block.locator('.ww-news-tile');
-    await tiles.first().waitFor();
-    assert.match(await textOf(block.locator('.ww-shelf-head small')), new RegExp(`^截至 ${slash(plan.news.date)} 08:00 · 8 条`));
+    const block = newsPane(page);
+    await block.locator('.ww-read-lead').waitFor();
+    assert.equal(await textOf(block.locator('.ww-read-head small')), '8 条');
     const titles = Array.from({ length: plan.news.count }, (_, i) => newsTitle('AI 与科技', plan.news.date, i));
-    assert.deepEqual(await tiles.locator('.ww-tile-title').allInnerTexts(), titles.slice(0, 4));
-    const tops = await tiles.evaluateAll(list => list.map(tile => Math.round(tile.getBoundingClientRect().top)));
-    assert.equal(new Set(tops).size, 1, '4 张在同一行');
-    // 卡片上只有图标、类别、编号、标题、来源和时间，不放说明。
-    const first = tiles.first();
-    await first.locator('.ww-tile-icon').waitFor();
-    assert.equal(await first.locator('.ww-tile-num').innerText(), '01');
-    assert.equal(await first.locator('.ww-tile-kicker').innerText(), '大模型');
+    // 这份旧日报不是照员工情况挑的：头条就是第一条，顺序不变，也不标“和你有关”（虽然每条都带一句关联）。
+    assert.equal(await block.locator('.ww-read-lead-t').innerText(), titles[0]);
+    assert.equal(await textOf(block.locator('.ww-read-lead .ww-read-row').first()), `头条 大模型 官方 ${await textOf(block.locator('.ww-read-lead .ww-read-hint').first())}`);
+    assert.deepEqual(await block.locator('.ww-read-q .ww-read-q-t').allInnerTexts(), titles.slice(1, 8));
+    assert.equal(await page.getByText(titles[8]).count() + await page.getByText(titles[9]).count(), 0, '第 9、10 条不显示');
+    assert.equal(await block.locator('.ww-read-tag-me', { hasText: '和你有关' }).count() + await block.locator('.ww-read-rel').count(), 0);
+    const first = block.locator('.ww-read-q').first();
+    assert.equal(await first.locator('.ww-read-q-n').innerText(), '2');
+    assert.equal(await textOf(first.locator('.ww-read-q-d')), `${plan.news.date} 第 2 条的一句话说明。`);
+    assert.equal(await textOf(first.locator('.ww-read-tag-plain')), '官方');
+    await first.getByRole('button', { name: '存一条' }).waitFor();
     // 来源时间是本期前一天的北京 20:00。北京 0—8 点本期还是前一天那期，这时它已经是前天，界面写日期而不是“昨天”。
     const sourceDay = shiftDate(plan.news.date, -1), today = beijingDate(Date.now());
     const sourceLabel = sourceDay === shiftDate(today, -1) ? '昨天' : sourceDay === today ? '今天' : sourceDay.slice(5).replace('-', '/');
-    assert.match(await textOf(first.locator('.ww-tile-source')), new RegExp(`测试来源甲 · ${sourceLabel} 20:00$`));
-    assert.doesNotMatch(await textOf(first), /一句话说明|关联说明/);
-    const more = block.getByRole('button', { name: '展开另外 4 条' });
-    assert.equal(await more.getAttribute('aria-expanded'), 'false');
-    await more.click();
-    assert.deepEqual(await tiles.locator('.ww-tile-title').allInnerTexts(), titles.slice(0, 8));
-    assert.equal(await page.getByText(titles[8]).count() + await page.getByText(titles[9]).count(), 0, '第 9、10 条不显示');
-    await block.getByRole('button', { name: '收起' }).click();
-    assert.equal(await tiles.count(), 4);
-    // 点卡片：弹框里看说明、关联和来源。
-    await first.click();
+    assert.equal(await textOf(first.locator('.ww-read-q-s')), `${sourceLabel} 20:00`);
+    // 点标题：弹框里看说明、关联和来源。
+    await block.locator('.ww-read-lead-t').click();
     const detail = page.locator('dialog.ww-modal[open]').filter({ has: page.locator('header h2', { hasText: titles[0] }) });
     await detail.waitFor();
     assert.match(await textOf(detail.locator('.ww-brief-lead')), new RegExp(`${plan.news.date} 第 1 条的一句话说明`));
@@ -932,7 +927,8 @@ test('每日资讯：默认一行 4 张，展开到 8 张、第 9 和 10 条不�
     assert.match(await textOf(detail.locator('.ww-brief-sources ul')), /测试来源甲/);
     await page.keyboard.press('Escape');
     await detail.waitFor({ state: 'detached' });
-    await block.getByRole('button', { name: '查看运行详情' }).click();
+    await block.getByRole('button', { name: 'AI 与科技 · 运行详情和历史日报' }).click();
+    await page.getByRole('dialog', { name: 'AI 与科技 · 运行详情和历史日报' }).getByRole('button', { name: '查看运行详情', exact: true }).click();
     const run = modal(page, 'AI 与科技 · 查看运行详情');
     await run.waitFor();
     assert.match(await textOf(run), /本期发布时间窗口（北京时间）.*功能测试数据/);
@@ -940,9 +936,9 @@ test('每日资讯：默认一行 4 张，展开到 8 张、第 9 和 10 条不�
   });
 });
 
-/** 打开“卡片设置”，返回设置页。 */
+/** 打开“阅读设置”（原“卡片设置”），返回设置页。 */
 async function openSettings(page) {
-  await page.locator('.ww-cards > .ww-news-header').getByRole('button', { name: '卡片设置' }).click();
+  await homeHead(page).getByRole('button', { name: '阅读设置', exact: true }).click();
   const settings = page.locator('.ww-news-settings');
   await settings.waitFor();
   return settings;
@@ -953,8 +949,8 @@ async function fieldAction(page, name, action) {
   await page.getByRole('dialog', { name: `${name} · 编辑领域`, exact: true }).getByRole('button', { name: action, exact: true }).click();
 }
 
-// 需求§每日资讯（员工可以新增、编辑、删除自己的领域；卡片设置里每个领域是一张卡片，最后一张是“＋ 添加领域”；编辑在右侧抽屉）；需求§界面通用约定（删除用居中确认，结果用右上角提示）
-test('卡片设置：添加自己的领域出现在加号卡前面，编辑关注描述后保存，删除时居中确认，删完卡片消失', async t => {
+// 需求§每日资讯（员工可以新增、编辑、删除自己的领域；阅读设置里每个领域是一张卡片，最后一张是“＋ 添加领域”；编辑在右侧抽屉）；需求§界面通用约定（删除用居中确认，结果用右上角提示）
+test('阅读设置：添加自己的领域出现在加号卡前面，编辑关注描述后保存，删除时居中确认，删完卡片消失', async t => {
   const name = `鲸翼测试-CRD19-${Math.random().toString(16).slice(2, 6)}`;
   await withPage(browser, t, async ({ page, errors, external }) => {
     await openCards(page);
@@ -1060,26 +1056,26 @@ test('反例：默认领域“AI 与科技”的菜单里没有“删除领域�
   assert.equal(await sha256(store), before);
 });
 
-// 需求§知识卡片（书架和技巧历史是子页，面包屑“知识卡片 › 书架 / AI 使用技巧”，切走页签再回来停在原来的子页）
-test('子页：书架和技巧历史有面包屑，切到别的页签再回来仍停在原子页，点“知识卡片”回首页', async t => {
+// 需求§每日阅读（书架和技巧历史是子页，面包屑“每日阅读 › 书架 / AI 使用技巧”，切走页签再回来停在原来的子页）
+test('子页：书架和技巧历史有面包屑，切到别的页签再回来仍停在原子页，点“每日阅读”回首页', async t => {
   resetShelf();
   await withPage(browser, t, async ({ page, errors }) => {
     await openCards(page);
     await openShelf(page);
-    assert.equal(await textOf(page.locator('.ww-library .ww-crumbs')), '知识卡片 › 书架 0');
+    assert.equal(await textOf(page.locator('.ww-library .ww-crumbs')), '每日阅读 › 书架 0');
     await openTab(page, '办公工坊');
-    await openTab(page, '知识卡片');
+    await openTab(page, '每日阅读');
     await page.locator('.ww-library').waitFor();
     assert.equal(await learning(page).count(), 0, '还在书架');
     await backHome(page);
-    await learning(page).locator('.ww-tip-card').click();
+    await tipCard(page).getByRole('button', { name: '往期' }).click();
     const history = page.locator('section.ww-tips');
     await history.waitFor();
     await openTab(page, '办公工坊');
-    await openTab(page, '知识卡片');
+    await openTab(page, '每日阅读');
     await history.waitFor();
-    assert.equal(await textOf(history.getByRole('navigation', { name: '位置' })), '知识卡片 › AI 使用技巧');
-    await history.getByRole('navigation', { name: '位置' }).getByRole('button', { name: '知识卡片' }).click();
+    assert.equal(await textOf(history.getByRole('navigation', { name: '位置' })), '每日阅读 › AI 使用技巧');
+    await history.getByRole('navigation', { name: '位置' }).getByRole('button', { name: '每日阅读' }).click();
     await learning(page).waitFor();
     assert.deepEqual(errors, []);
   });
@@ -1109,19 +1105,20 @@ test('读取本期日报只读已保存的内容：有就在弹窗里显示，�
 });
 
 // 需求§AI 使用技巧（员工可以删除，删除后不再自动恢复；领域删除后不显示技巧卡）。删除会改变 blank 环境，放在文件最后。
-test('删除“AI 使用技巧”领域后，首页不再显示技巧卡', async t => {
+test('删除“AI 使用技巧”领域后，首页今日一招里不再有 AI 技巧，只剩鲸翼的用法', async t => {
   await withPage(browser, t, async ({ page, errors }) => {
     await openCards(page, blank);
-    await learning(page).locator('.ww-tip-card').waitFor();
+    await tipCard(page).filter({ hasText: 'AI 技巧' }).waitFor();
     const settings = await openSettings(page);
     await fieldAction(page, 'AI 使用技巧', '删除领域');
     await dialogButton(modal(page, '删除领域'), '确认修改领域').click();
     await toast(page, '资讯领域已删除').waitFor();
     assert.deepEqual(await fieldNames(settings), ['AI 与科技']);
-    await page.getByRole('button', { name: '返回知识卡片' }).click();
+    await page.getByRole('button', { name: '返回每日阅读' }).click();
     await learning(page).waitFor();
-    await learning(page).locator('.ww-desk-row.ww-desk-solo').waitFor();
-    assert.equal(await learning(page).locator('.ww-tip-card').count(), 0);
+    await tipCard(page).filter({ hasText: '鲸翼的用法' }).waitFor();
+    assert.equal(await tipCard(page).filter({ hasText: 'AI 技巧' }).count(), 0);
+    assert.equal(await page.locator('.ww-read-tip').getByRole('button', { name: 'AI 技巧' }).count(), 0, '也没有切换');
     assert.deepEqual(errors, []);
   });
 });

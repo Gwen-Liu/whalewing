@@ -55,7 +55,7 @@ async function placement(scope, agent) {
 function definition(scope) {
   return defineTool({
     name: handoffToolName,
-    description: '把一件事交给另一位鲸翼专家：为这位专家新建一个任务，交接说明作为草稿放进那个任务的输入框，由员工看过后自己发送。不会自动发送，也不会替员工开始对话；新任务和当前对话互不相通。只在员工同意交给这位专家后调用，每件事调用一次，需要员工批准。专家标识先用 whalewing_experts 的 list 查。',
+    description: '把一件事派给另一位鲸翼专家：为这位专家新建一个任务，把交接说明作为第一条消息发进去，专家马上开工。需要员工批准，批准就是确认派出去。专家做完后，你每轮开头的【派出去的事】会写它的情况和交付开头，完整交付用 whalewing_handoff_result 读。每件事调用一次，不要为同一件事再派。专家标识先用 whalewing_experts 的 list 查。',
     parameters: {
       expertId: { type: 'string', required: true, description: '接手的专家标识，来自 whalewing_experts 的 list；不能是 manager。' },
       title: { type: 'string', required: true, description: '新任务的名字，一行，不超过40字。' },
@@ -68,15 +68,17 @@ function definition(scope) {
       schema: { type: 'object', additionalProperties: false, properties: {
         sessionId: { type: 'string', required: true }, expertId: { type: 'string', required: true }, expertName: { type: 'string', required: true },
         title: { type: 'string', required: true }, draft: { type: 'string', required: true }, renamed: { type: 'boolean', required: true },
+        started: { type: 'boolean', required: true }, startIssue: { type: 'string' },
       } },
       render: (_args, value) => [{ type: 'text', text: [
-        `已为「${value.expertName}」新建任务「${value.title}」，交接说明还没有发送。员工点这条记录上的「打开任务」，交接说明会放进那个任务的输入框，看过、改好后由员工自己发送。`,
-        '新任务和当前对话互不相通，你看不到它的进展；不要为同一件事再次调用。',
+        ...(value.started
+          ? [`已派给「${value.expertName}」，任务「${value.title}」（${value.sessionId}）已经开工。它做完后，你下一轮开头的【派出去的事】会写结果；员工这时也能在这条记录上看到进度。不要为同一件事再派一次。`]
+          : [`已为「${value.expertName}」新建任务「${value.title}」，但没能让它开工：${value.startIssue || '原因不明'}。员工点这条记录上的「打开任务」，交接说明会放进那个任务的输入框，看过后自己发送。不要为同一件事再次调用。`]),
         ...(value.renamed ? [] : ['任务标题没有设上，不影响使用。']),
         `交接说明全文：\n${value.draft}`,
       ].join('\n') }],
       // 卡片据此打开任务和填草稿，不必再解析给模型看的文字。
-      presentationMeta: (_args, value) => ({ sessionId: value.sessionId, expertId: value.expertId, expertName: value.expertName, title: value.title, draft: value.draft }),
+      presentationMeta: (_args, value) => ({ sessionId: value.sessionId, expertId: value.expertId, expertName: value.expertName, title: value.title, draft: value.draft, started: value.started }),
     },
     async execute(args, exec) {
       exec.signal.throwIfAborted();
@@ -93,7 +95,7 @@ function definition(scope) {
       // 与知识写入同一套原生一次授权：完全访问时直接执行，其余模式问员工。
       await approveEscalation({
         requestedMode: 'danger-full-access', effectiveMode: scope.sandboxPolicy.resolve({ session: agent.session }).mode, subject: '鲸翼专家交接',
-        justification: `为「${role.name}」新建任务「${input.title}」，交接说明作为草稿放进那个任务，由员工看过后自己发送；不改变会话权限模式。`,
+        justification: `派给「${role.name}」：新建任务「${input.title}」，把交接说明发进去让它马上开工；它干活中途要审批的操作照常问你。不改变会话权限模式。`,
       }, { approver: scope.get('approval'), agent, callId: exec.callId, toolName: handoffToolName, signal: exec.signal });
       exec.signal.throwIfAborted();
       // 等待批准期间专家可能被删除，按创建前的最新配置执行。
@@ -104,8 +106,9 @@ function definition(scope) {
       const sessionId = created?.sessionId;
       if (typeof sessionId !== 'string' || !sessionId) fail('DSH 没有返回新任务，交接没有完成；请稍后重试');
       // 建好之后不再响应取消：选专家很快，半途停下会留下没有专家的空任务。
+      let task;
       try {
-        const { agent: task } = await controller.resolveAgent(sessionId);
+        ({ agent: task } = await controller.resolveAgent(sessionId));
         const done = await commands.execute(task, `/whalewing-expert ${JSON.stringify({ expertId: target.id })}`, [], new AbortController().signal);
         if (done?.result.kind !== 'success') throw new Error(done?.result.text || '专家选择没有完成');
         if (!(await sessions.flush(task.session))) throw new Error('专家选择还没确认保存');
@@ -118,16 +121,27 @@ function definition(scope) {
         try { await controller.rename({ sessionId, title: `${target.name} · ${input.title}` }); renamed = true; }
         catch { /* 标题只方便查找，设不上不影响交接。 */ }
       }
-      return { sessionId, expertId: target.id, expertName: target.name, title: input.title, draft: input.draft, renamed };
+      // 员工批准了就直接开工（2026-11-08 用户定）；开不了工时退回原来的做法：交接说明留给员工自己发。
+      let started = false, startIssue;
+      try {
+        const dispatches = scope.get('whalewingDispatches');
+        if (!dispatches) throw new Error('派工记录还没准备好');
+        await dispatches.start({ task, sessionId, expert: target, title: input.title, from: agent.session.id, draft: input.draft });
+        started = true;
+      } catch (error) { startIssue = error.message; }
+      return { sessionId, expertId: target.id, expertName: target.name, title: input.title, draft: input.draft, renamed, started, ...(startIssue ? { startIssue } : {}) };
     },
     presentCall: args => ({ card: 'generic', title: '交给专家', kind: 'other', rawInput: args }),
   });
 }
 
 /** 只在实际选了小鲸的普通主会话里出现，其他专家和子代理看不到这项工具。 */
-export function applyHandoff(ctx) {
+export function applyHandoff(ctx) { applyManagerTool(ctx, definition, 'whalewing handoff'); }
+
+/** 小鲸专用的工具（交接、建专家）都这样登记：选了小鲸的普通主会话才有，换专家、子代理、功能退出都撤回。 */
+export function applyManagerTool(ctx, makeDefinition, label) {
   ctx.inject(['tools', 'agents', 'whalewingExperts', 'sandboxPolicy'], scope => {
-    const tool = definition(scope);
+    const tool = makeDefinition(scope);
     const owned = new Map();
     let closing = false;
     const release = agent => {
@@ -144,7 +158,7 @@ export function applyHandoff(ctx) {
       owned.set(agent, record);
       record.unregister = agent.ctx.tools.register(tool);
       // 会话结束时登记随 Agent 作用域一起撤销，这里只清掉自己的记录。
-      record.lifetime = agent.ctx.effect(() => () => { if (owned.get(agent) === record) owned.delete(agent); }, 'whalewing handoff lifetime');
+      record.lifetime = agent.ctx.effect(() => () => { if (owned.get(agent) === record) owned.delete(agent); }, `${label} lifetime`);
     }
     scope.on('agent/created', ({ agent }) => sync(agent));
     scope.on('session/event', (session, event) => {
@@ -155,7 +169,7 @@ export function applyHandoff(ctx) {
     scope.effect(() => () => {
       closing = true;
       for (const agent of [...owned.keys()]) release(agent);
-    }, 'whalewing handoff scope');
+    }, `${label} scope`);
     for (const agent of scope.agents.list()) sync(agent);
   });
 }

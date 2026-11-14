@@ -12,7 +12,7 @@ test('真实组合按领域提供实例，外壳不再导出万能API或领域�
   const core = f.ctx.whalewingWorkbench.internal;
   assert.equal(core.api, undefined);
   assert.equal(f.api, undefined);
-  assert.deepEqual(Object.keys(core.clients).sort(), ['ai-web', 'assistant', 'automation', 'cards', 'experts', 'knowledge', 'model-world', 'skills']);
+  assert.deepEqual(Object.keys(core.clients).sort(), ['ai-web', 'assistant', 'automation', 'cards', 'experts', 'knowledge', 'model-world', 'skills', 'toolbox']);
   assert.equal(core.clients.knowledge.knowledge, f.clients.knowledge.knowledge);
   assert.equal(core.clients.assistant.experts, core.clients.experts.experts);
   assert.equal(core.clients.assistant.subscribeExperts, core.clients.experts.subscribeExperts);

@@ -3,7 +3,7 @@ import Whalewing from '../index.js';
 import AiWeb from '../features/ai-web/host.js';
 import Cards from '../features/cards/host.js';
 import ModelWorld from '../features/model-world/host.js';
-import * as Toolbox from '../features/toolbox/host.js';
+import Toolbox from '../features/toolbox/host.js';
 import { parts } from '../features/index.js';
 
 /** 单元夹具显式启用全部来源；正式运行时只读活动登记，二者不共用规则。 */

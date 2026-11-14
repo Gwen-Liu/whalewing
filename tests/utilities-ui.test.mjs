@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createUtilityRunner, createUtilityViews } from '../src/utilities/views.js';
-import { searchUtilities, utilityGapsFor } from '../src/utilities/catalog.js';
+import { searchUtilities, utilityGapsFor, utilityCatalog } from '../src/utilities/catalog.js';
 
 function platformFixture() {
   const workers = [], urls = new Map(), revoked = [], timers = new Map(), changes = [];
@@ -143,6 +143,7 @@ test('进度只在当前任务内更新；追加结果保留上次下载，失�
   runner.dispose(); assert.equal(f.urls.size, 0);
 });
 
+let lastFixture;
 function reactFixture() {
   const instances = new Map(); let current;
   const React = {
@@ -164,8 +165,8 @@ function reactFixture() {
     if (node.props.ref && !node.props.ref.current) node.props.ref.current = { open: false, showModal() { this.open = true; }, close() { this.open = false; }, focus() {}, getBoundingClientRect() { return { left: 10, top: 10, right: 500, bottom: 500 }; } };
     return { ...node, props: { ...node.props, children: (node.props.children || []).map((child, i) => expand(child, path + '/' + i, seen)) } };
   }
-  return { render(active = true) {
-    const seen = new Set(), tree = expand(h(ToolboxView, { active, Glyph: ({ name }) => h('svg', { 'data-icon': name }) }), '', seen);
+  return lastFixture = { render(active = true, extra = {}) {
+    const seen = new Set(), tree = expand(h(ToolboxView, { active, Glyph: ({ name }) => h('svg', { 'data-icon': name }), ...extra }), '', seen);
     for (const [key, instance] of instances) if (!seen.has(key)) { cleanup(instance); instances.delete(key); }
     for (const instance of instances.values()) for (const effect of instance.effects) if (effect.pending) { effect.cleanup?.(); effect.cleanup = effect.callback(); effect.pending = false; }
     return tree;
@@ -174,7 +175,17 @@ function reactFixture() {
 }
 function nodes(tree) { return tree && typeof tree === 'object' ? [tree, ...(tree.props?.children || []).flatMap(nodes)] : []; }
 const button = (tree, text) => nodes(tree).find(node => node.type === 'button' && (node.props.children.includes(text) || node.props['aria-label'] === text));
-const openTool = (tree, name, target = { focus() {}, isConnected: true }) => button(tree, name).props.onClick({ currentTarget: target });
+// 全部功能项里的分类默认收起（2026-11-12）：标签不在时先展开它所在的分类，再点标签。
+const openTool = (tree, name, target = { focus() {}, isConnected: true }) => {
+  let chip = button(tree, name);
+  if (!chip) {
+    const item = utilityCatalog.find(entry => entry.title === name);
+    nodes(tree).find(node => node.props?.['data-tool-id'] === item?.tool && node.props['aria-expanded'] === false)?.props.onClick();
+    chip = button(lastFixture.render(), name);
+  }
+  return chip.props.onClick({ currentTarget: target });
+};
+const expandAll = fixture => { for (const head of nodes(fixture.render()).filter(node => node.props?.className === 'ww-tool-card-head' && node.props['aria-expanded'] === false)) head.props.onClick(); return fixture.render(); };
 
 test('办公工坊搜索、键盘按钮语义、active 隐藏与选件保留', () => {
   const fixture = reactFixture();
@@ -185,7 +196,7 @@ test('办公工坊搜索、键盘按钮语义、active 隐藏与选件保留', (
     assert.equal(nodes(tree).filter(node => node.type === 'dialog').length, 0);
     assert.equal(nodes(tree).filter(node => node.type === 'svg').length, 7);
     assert.ok(nodes(tree).filter(node => node.type === 'button').every(node => node.props.type === 'button'));
-    openTool(tree, 'Word 转 PDF'); tree = fixture.render();
+    openTool(tree, 'Office 转 PDF'); tree = fixture.render();
     const fileInput = nodes(tree).find(node => node.type === 'input' && node.props.type === 'file');
     fileInput.props.onChange({ target: { files: [new File(['字节'], '选中文件.docx')] } });
     tree = fixture.render(false); assert.equal(tree.props.hidden, true);
@@ -202,10 +213,18 @@ test('目录按分类分组，每个分类列出全部功能项入口；搜索�
   try {
     let tree = fixture.render();
     assert.deepEqual(cards(tree).map(card => nodes(card).find(node => node.props['data-tool-id']).props['data-tool-id']), ['convert', 'pdf', 'excel', 'image', 'text', 'media', 'qr']);
+    // 分类默认都收起，只占一行；点一下展开它的功能项标签，再点收起。
+    assert.equal(nodes(tree).filter(node => node.props.className === 'ww-tool-chip').length, 0);
+    const head = nodes(tree).find(node => node.props['data-tool-id'] === 'pdf');
+    assert.equal(head.props['aria-expanded'], false); head.props.onClick(); tree = fixture.render();
+    assert.equal(nodes(tree).filter(node => node.props.className === 'ww-tool-chip').length, 8);
+    nodes(tree).find(node => node.props['data-tool-id'] === 'pdf').props.onClick(); tree = fixture.render();
+    assert.equal(nodes(tree).filter(node => node.props.className === 'ww-tool-chip').length, 0);
+    tree = expandAll(fixture);
     assert.equal(nodes(tree).filter(node => node.props.className === 'ww-tool-chip').length, 44);
     nodes(tree).find(node => node.props.type === 'search').props.onChange({ target: { value: 'Word' } }); tree = fixture.render();
     const hits = nodes(tree).filter(node => node.props.className === 'ww-tool-hit');
-    assert.deepEqual(hits.map(node => node.props.children[1].props.children[0]), ['Word 转 PDF', 'PDF 转 Word', 'Word 转 TXT', 'Word 版本对照', '提取文档图片']);
+    assert.deepEqual(hits.map(node => node.props.children[1].props.children[0]), ['Office 转 PDF', 'PDF 转 Word', 'Word 转 TXT', 'Word 版本对照', '提取文档图片']);
     assert.equal(cards(tree).length, 0);
     hits[3].props.onClick({ currentTarget: { focus() {} } }); tree = fixture.render();
     assert.equal(nodes(tree).find(node => node.type === 'dialog').props['aria-label'], '文字处理');
@@ -225,7 +244,7 @@ test('搜索词序无关、可搜格式与别名，尚未内置的能力单独�
   assert.deepEqual(titles('照片压缩'), ['压缩与转格式']);
   // 员工习惯说“PDF 工具”“图片工具”：“工具”不当搜索词，分类里的功能项排在前面，别的分类里沾边的排在后面。
   const pdfGroup = ['合并 PDF', '拆分 PDF', '压缩 PDF', '页面整理', '旋转页面', '添加页码', '添加水印', '提取文字'];
-  for (const query of ['PDF 工具', 'pdf工具']) { const found = titles(query); assert.deepEqual(found.slice(0, 2), ['合并 PDF', '拆分 PDF'], query); assert.ok(pdfGroup.every(title => found.indexOf(title) < found.indexOf('Word 转 PDF')), query); }
+  for (const query of ['PDF 工具', 'pdf工具']) { const found = titles(query); assert.deepEqual(found.slice(0, 2), ['合并 PDF', '拆分 PDF'], query); assert.ok(pdfGroup.every(title => found.indexOf(title) < found.indexOf('Office 转 PDF')), query); }
   assert.ok(titles('图片工具').includes('裁剪')); assert.equal(titles('工具').length, 44);
   assert.deepEqual(titles('不存在的功能'), []); assert.deepEqual(titles('   '), []);
   assert.deepEqual(utilityGapsFor('HEIC 转 JPG').length, 1); assert.match(utilityGapsFor('扫描件提字')[0], /OCR/); assert.deepEqual(utilityGapsFor('合并 PDF'), []);
@@ -245,22 +264,29 @@ test('搜索词序无关、可搜格式与别名，尚未内置的能力单独�
   } finally { fixture.unmount(); }
 });
 
-test('切换到 inactive 立即终止运行，重新显示保留已有下载', () => {
-  const f = platformFixture(), originals = new Map();
-  // 组件只注入浏览器平台；替换均局限本测试并恢复原属性描述符。
+// 2026-11-14 用户定方案 A：切到别的页签处理照常做完（原来一切走就停），页签上标点，做好了右上角提示一句。
+test('切到别的页签时处理照常做完：页签上先标“处理中”，做好了标“做好了”并提示一句，回来点就消失、结果还在', () => {
+  const f = platformFixture(), originals = new Map(), marks = [], notes = []; let pages = 0;
+  const host = { setAttention: value => marks.push(value), notify: (text, options) => notes.push({ text, options }), openPage: () => { pages++; } };
   for (const key of ['Worker', 'URL', 'Blob', 'setTimeout', 'clearTimeout']) { originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key)); Object.defineProperty(globalThis, key, { value: f.platform[key], configurable: true, writable: true }); }
-  const fixture = reactFixture();
+  const fixture = reactFixture(), render = active => fixture.render(active, { host });
   try {
-    let tree = fixture.render(); openTool(tree, '整理与统计');
-    tree = fixture.render(); button(tree, '开始处理').props.onClick();
-    f.workers[0].success(result()); tree = fixture.render(); const url = nodes(tree).find(node => node.type === 'a').props.href;
-    button(tree, '开始处理').props.onClick(); const worker = f.workers[1];
-    fixture.render(false); assert.equal(worker.stopped, true); worker.success(result('迟到.txt'));
-    tree = fixture.render(true); assert.equal(nodes(tree).find(node => node.type === 'a').props.href, url);
-  } finally {
-    fixture.unmount();
-    for (const [key, descriptor] of originals) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key]; }
-  }
+    let tree = render(true); openTool(tree, '整理与统计');
+    tree = render(true); button(tree, '开始处理').props.onClick();
+    render(true); render(true); const worker = f.workers[0];
+    render(false); render(false);
+    assert.equal(worker.stopped, false, '切走不停');
+    assert.deepEqual(marks.at(-1), { tone: 'busy', label: '办公工坊：还在处理' });
+    worker.success(result()); render(false); render(false);
+    assert.deepEqual(marks.at(-1), { tone: 'done', label: '办公工坊：做好了，结果还没下载' });
+    assert.equal(notes.length, 1); assert.equal(notes[0].text, '「整理与统计」做好了，结果还没下载'); assert.equal(notes[0].options.action.label, '去看看');
+    notes[0].options.action.run(); assert.equal(pages, 1, '“去看看”回到办公工坊');
+    tree = render(true); render(true);
+    assert.equal(marks.at(-1), null, '回来就消失');
+    assert.equal(notes.length, 2); assert.equal(notes[1].text, null, '回来看了就把那条提示收掉，免得盖住窗口右上角');
+    assert.ok(nodes(tree).some(node => node.type === 'a' && node.props.download === '结果.txt'), '结果还在');
+    assert.equal(nodes(tree).find(node => node.type === 'dialog').props.ref.current.open, true, '没收起的窗口回来照常开着');
+  } finally { fixture.unmount(); for (const [key, descriptor] of originals) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key]; } }
   assert.equal(f.urls.size, 0); assert.equal(f.timers.size, 0);
 });
 
@@ -317,22 +343,58 @@ test('计时器或平台初始化失败退出 busy、保留下载且允许原入
   assert.equal(f.timers.size, 0); assert.equal(f.urls.size, 0);
 });
 
-test('最小化保留同一有界任务与草稿，恢复后关闭立即清理并归还焦点', () => {
-  const f = platformFixture(), originals = new Map(); let focused = 0;
+// 2026-11-14 用户定方案 A：收起后的入口是页头胶囊（由页面画，这里只核对交给页面的内容），页面里不再插“恢复”一行。
+test('收起保留同一任务与草稿，交给页头胶囊的是名字和进度；恢复后还在处理或没下载时“关闭”先问，“仍然关闭”才清理并归还焦点', () => {
+  const f = platformFixture(), originals = new Map(); let focused = 0, dock = null;
   for (const key of ['Worker', 'URL', 'Blob', 'setTimeout', 'clearTimeout']) { originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key)); Object.defineProperty(globalThis, key, { value: f.platform[key], configurable: true, writable: true }); }
-  const fixture = reactFixture();
+  const fixture = reactFixture(), render = () => fixture.render(true, { onDock: value => { dock = value; } });
+  const ask = tree => nodes(tree).find(node => node.props.className === 'ww-tool-ask');
   try {
-    let tree = fixture.render(); openTool(tree, '整理与统计', { isConnected: true, focus() { focused++; } });
-    tree = fixture.render(); nodes(tree).find(node => node.type === 'textarea').props.onChange({ target: { value: '保留草稿' } });
-    tree = fixture.render(); button(tree, '开始处理').props.onClick(); const worker = f.workers[0];
-    tree = fixture.render(); button(tree, '最小化窗口').props.onClick(); tree = fixture.render();
+    let tree = render(); openTool(tree, '整理与统计', { isConnected: true, focus() { focused++; } });
+    tree = render(); nodes(tree).find(node => node.type === 'textarea').props.onChange({ target: { value: '保留草稿' } });
+    tree = render(); button(tree, '开始处理').props.onClick(); const worker = f.workers[0];
+    tree = render(); button(tree, '最小化窗口').props.onClick(); tree = render(); render();
     assert.equal(worker.stopped, false); assert.equal(f.timers.size, 1); assert.equal(nodes(tree).find(node => node.type === 'dialog').props.ref.current.open, false);
-    worker.success(result()); tree = fixture.render(); assert.ok(button(tree, '恢复'));
-    button(tree, '恢复').props.onClick(); tree = fixture.render();
+    assert.equal(button(tree, '恢复'), undefined, '页面里不再插“恢复”一行');
+    assert.equal(dock.tool.title, '文字处理'); assert.equal(dock.title, '整理与统计'); assert.equal(dock.status.kind, 'running');
+    worker.success(result()); render(); render(); assert.equal(dock.status.kind, 'done');
+    dock.restore(); tree = render(); render();
+    assert.equal(dock, null, '恢复后胶囊收走');
     assert.equal(nodes(tree).find(node => node.type === 'textarea').props.value, '保留草稿'); assert.equal(f.workers.length, 1); assert.equal(f.urls.size, 1);
-    button(tree, '开始处理').props.onClick(); const pending = f.workers[1]; tree = fixture.render(); button(tree, '关闭窗口').props.onClick();
+    // 结果没下载时点“关闭”先问；“先不关”什么都不动。
+    button(tree, '关闭窗口').props.onClick(); tree = render();
+    assert.ok(ask(tree)); assert.ok(nodes(ask(tree)).some(node => typeof node.props?.children?.[0] === 'string' && node.props.children[0].includes('做好的结果还没下载')));
+    button(tree, '先不关').props.onClick(); tree = render();
+    assert.equal(ask(tree), undefined); assert.equal(f.urls.size, 1);
+    // 再开始一次，处理中点“关闭”也先问；“仍然关闭”才停掉、清理、归还焦点。
+    button(tree, '开始处理').props.onClick(); const pending = f.workers[1]; tree = render(); render(); tree = render();
+    button(tree, '关闭窗口').props.onClick(); tree = render();
+    assert.ok(nodes(ask(tree)).some(node => typeof node.props?.children?.[0] === 'string' && node.props.children[0].includes('还在处理')));
+    assert.equal(pending.stopped, false);
+    button(tree, '仍然关闭').props.onClick();
     assert.equal(pending.stopped, true); assert.equal(f.urls.size, 0); assert.equal(f.timers.size, 0); assert.equal(focused, 1);
-    pending.success(result('迟到.txt')); tree = fixture.render(); assert.equal(nodes(tree).some(node => node.type === 'dialog'), false);
+    pending.success(result('迟到.txt')); tree = render(); assert.equal(nodes(tree).some(node => node.type === 'dialog'), false);
+  } finally { fixture.unmount(); for (const [key, descriptor] of originals) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key]; } }
+});
+
+test('从页头胶囊点 ×：做好了没下载时先把窗口打开问一句；下载过就直接关', () => {
+  const f = platformFixture(), originals = new Map(); let dock = null;
+  for (const key of ['Worker', 'URL', 'Blob', 'setTimeout', 'clearTimeout']) { originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key)); Object.defineProperty(globalThis, key, { value: f.platform[key], configurable: true, writable: true }); }
+  const fixture = reactFixture(), render = () => fixture.render(true, { onDock: value => { dock = value; } });
+  try {
+    let tree = render(); openTool(tree, '整理与统计');
+    tree = render(); button(tree, '开始处理').props.onClick(); render(); f.workers[0].success(result());
+    tree = render(); render(); button(tree, '最小化窗口').props.onClick(); tree = render(); render();
+    assert.equal(dock.status.kind, 'done');
+    dock.requestClose(); tree = render(); render();
+    assert.equal(nodes(tree).find(node => node.type === 'dialog').props.ref.current.open, true, '窗口打开给员工看要丢的结果');
+    assert.ok(nodes(tree).some(node => node.props.className === 'ww-tool-ask'));
+    // 下载过就不再问。
+    nodes(tree).find(node => node.type === 'a').props.onClick(); tree = render(); render();
+    button(tree, '先不关').props.onClick(); tree = render(); button(tree, '最小化窗口').props.onClick(); tree = render(); render();
+    assert.equal(dock.status.kind, 'saved');
+    dock.requestClose(); tree = render(); render();
+    assert.equal(nodes(tree).some(node => node.type === 'dialog'), false); assert.equal(dock, null);
   } finally { fixture.unmount(); for (const [key, descriptor] of originals) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key]; } }
 });
 
@@ -354,27 +416,34 @@ test('切换分类必须确认，拒绝时保留旧窗口与输入', () => {
   } finally { fixture.unmount(); if (original) Object.defineProperty(globalThis, 'confirm', original); else delete globalThis.confirm; }
 });
 
-test('Escape 与遮罩关闭同一路径，面板内空白不关闭且关闭后才归还焦点', () => {
-  const fixture = reactFixture(); let focused = 0, dialogElement;
+// 2026-11-14 用户定方案 A：最小化是收起不是关，Esc 和点窗口外面也只收起，输入和结果都留着。
+test('按 Esc、点窗口外面只收起不关，面板内空白不收起；没东西要丢时“关闭”直接关，关上后才归还焦点', () => {
+  const fixture = reactFixture(); let focused = 0, dialogElement, dock = null;
+  const render = () => fixture.render(true, { onDock: value => { dock = value; } });
   const target = { isConnected: true, focus() { assert.equal(dialogElement.open, false); focused++; } };
   try {
-    let tree = fixture.render(); openTool(tree, '整理与统计', target); tree = fixture.render();
+    let tree = render(); openTool(tree, '整理与统计', target); tree = render();
+    nodes(tree).find(node => node.type === 'textarea').props.onChange({ target: { value: '留着' } }); tree = render();
     let dialog = nodes(tree).find(node => node.type === 'dialog'); dialogElement = dialog.props.ref.current;
     dialog.props.onClick({ target: dialogElement, currentTarget: dialogElement, clientX: 20, clientY: 20 });
-    assert.equal(dialogElement.open, true);
+    tree = render(); assert.equal(dialogElement.open, true, '面板里点空白不收起');
     let prevented = false; dialog.props.onCancel({ preventDefault() { prevented = true; } });
-    tree = fixture.render(); assert.equal(prevented, true); assert.equal(focused, 1); assert.equal(nodes(tree).some(node => node.type === 'dialog'), false);
-    openTool(tree, '整理与统计', target); tree = fixture.render(); dialog = nodes(tree).find(node => node.type === 'dialog'); dialogElement = dialog.props.ref.current;
+    tree = render(); assert.equal(prevented, true); assert.equal(dialogElement.open, false, 'Esc 收起'); assert.equal(focused, 0);
+    assert.equal(nodes(tree).find(node => node.type === 'textarea').props.value, '留着');
+    render(); dock.restore(); tree = render(); dialog = nodes(tree).find(node => node.type === 'dialog'); dialogElement = dialog.props.ref.current;
+    assert.equal(dialogElement.open, true);
     dialog.props.onClick({ target: dialogElement, currentTarget: dialogElement, clientX: 0, clientY: 0 });
-    tree = fixture.render(); assert.equal(focused, 2); assert.equal(nodes(tree).some(node => node.type === 'dialog'), false);
+    tree = render(); assert.equal(dialogElement.open, false, '点窗口外面收起'); assert.equal(nodes(tree).find(node => node.type === 'textarea').props.value, '留着');
+    render(); dock.restore(); tree = render(); button(tree, '关闭窗口').props.onClick();
+    tree = render(); assert.equal(focused, 1); assert.equal(nodes(tree).some(node => node.type === 'dialog'), false);
   } finally { fixture.unmount(); }
 });
 
 test('清除选件同步清空原生输入；原卡片被筛选移除时恢复目录再归还焦点', () => {
   const fixture = reactFixture(); let focused = 0;
   try {
-    let tree = fixture.render(); const directory = nodes(tree).find(node => node.props.className === 'ww-grid ww-tool-directory').props.ref;
-    openTool(tree, 'Word 转 PDF', { isConnected: false }); tree = fixture.render();
+    let tree = fixture.render(); const directory = nodes(tree).find(node => node.props.className === 'ww-tool-directory').props.ref;
+    openTool(tree, 'Office 转 PDF', { isConnected: false }); tree = fixture.render();
     const file = nodes(tree).find(node => node.props.type === 'file'); file.props.ref.current.value = 'fixture.docx';
     file.props.onChange({ target: { files: [new File(['x'], 'fixture.docx')] } }); tree = fixture.render();
     button(tree, '清除选件').props.onClick(); assert.equal(file.props.ref.current.value, '');
@@ -396,7 +465,7 @@ test('办公工坊窗口独立于整页几何，内容高度居中且视口内�
     const css = nodes(tree).find(node => node.type === 'style').props.children.join('');
     const geometry = /dialog\.ww-tool-modal\{([^}]+)\}/.exec(css)?.[1];
     assert.ok(geometry);
-    for (const declaration of ['position:fixed', 'inset:0', 'margin:auto', 'display:block', 'box-sizing:border-box', 'height:fit-content', 'min-height:0', 'width:min(1040px,calc(100vw - 32px))', 'max-height:calc(100dvh - 48px)', 'overflow:auto']) assert.ok(geometry.split(';').includes(declaration), declaration);
+    for (const declaration of ['position:fixed', 'inset:0', 'margin:auto', 'display:block', 'box-sizing:border-box', 'height:fit-content', 'min-height:0', 'width:min(calc(100vw - 32px),clamp(45rem,64vw,87.5rem))', 'max-height:calc(100dvh - 48px)', 'overflow:auto']) assert.ok(geometry.split(';').includes(declaration), declaration);
     assert.match(css, /dialog\.ww-tool-modal:not\(\[open\]\)\{display:none\}/);
     assert.ok(css.includes('.ww-tool-modal::backdrop'));
     assert.equal(dialog.props.ref.current.open, true);
@@ -423,7 +492,7 @@ test('读图片的功能项选到 HEIC、TIFF、SVG 时马上提示先导出为 
     assert.equal(hint(tree), undefined, '移除后提示消失');
     // 不读图片的功能项（Word 转 PDF）选到同名文件不出这条提示，由扩展名检查说明。
     button(tree, '关闭窗口').props.onClick(); tree = fixture.render();
-    openTool(tree, 'Word 转 PDF'); tree = fixture.render();
+    openTool(tree, 'Office 转 PDF'); tree = fixture.render();
     nodes(tree).find(node => node.props.type === 'file').props.onChange({ target: { files: [new File(['x'], 'photo.heic')] } });
     tree = fixture.render(); assert.equal(hint(tree), undefined);
   } finally { fixture.unmount(); }

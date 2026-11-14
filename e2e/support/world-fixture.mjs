@@ -6,7 +6,7 @@ import { modelWorldVendorIds } from '../../src/model-world-roster.js';
 
 /**
  * 合成数据里的厂商和型号：[厂商 id, 型号 id, 名称, 发布日期, 输入价, 输出价]（美元 / 百万 tokens）。
- * - DeepSeek V4 Flash 用来测系列形象（小肥鱼），它的 id 在人民币价目表里，应显示官网人民币价；
+ * - DeepSeek V4 Flash 用来测系列形象（小飞鱼），它的 id 在人民币价目表里，应显示官网人民币价；
  * - DeepSeek V4 是国产但不在价目表里，应不显示价格，不拿这里的美元价换算；
  * - Kimi E2E 只有年月，用来测发布日期不被补成具体日期。
  */

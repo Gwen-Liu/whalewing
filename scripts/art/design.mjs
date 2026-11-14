@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
  * 按 design.json 原创设计模型世界立绘：每个角色三套设定各出一张候选，只附厂商标识做参考，不附任何社区立绘；已存在的跳过。
  * 用法：node design.mjs <素材目录> [并发数] [id 或 id-序号...]
  *       node design.mjs --retouch <素材目录> [并发数] [id...]   在已有候选上只改标识（去掉大标识，换成身上一个小饰物），写到 final/
- * 素材目录下需有 logos/<id>.png；候选写到 out/<id>-<序号>.png。小肥鱼按 out/deepseek-<序号>.png 画成她小时候，须在大肥鱼之后生成。
+ * 素材目录下需有 logos/<id>.png；候选写到 out/<id>-<序号>.png。小飞鱼按 out/deepseek-<序号>.png 画成她小时候，须在大飞鱼之后生成。
  * 调用本机 Codex CLI 的内置生图，单张最大 941×1672，4K 版本另行放大。
  */
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -24,7 +24,7 @@ const jobs = Object.entries(spec.characters)
   .filter(({ id, n }) => !only.length || only.includes(id) || only.includes(`${id}-${n}`))
   .filter(job => !existsSync(path.join(output, job.file)));
 
-// 小肥鱼统一用发夹，其余按候选序号轮换胸针、发饰、挂牌。
+// 小飞鱼统一用发夹，其余按候选序号轮换胸针、发饰、挂牌。
 const placeOf = ({ item, n }) => item.child ? spec.place[1] : spec.place[Number(n) - 1];
 
 function brief(job) {

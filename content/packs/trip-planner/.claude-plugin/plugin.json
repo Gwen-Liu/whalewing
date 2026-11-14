@@ -1,0 +1,21 @@
+{
+  "name": "trip-planner",
+  "displayName": "出行规划",
+  "version": "1.0.0",
+  "description": "用高德地图查地点、路线和天气，用 12306 查火车票，用飞常准查航班，排出按时间走的行程单。",
+  "author": { "name": "鲸翼" },
+  "userConfig": {
+    "amapKey": {
+      "type": "string",
+      "title": "高德 Key",
+      "description": "在高德开放平台（console.amap.com）新建 Key，服务平台选“Web服务”。",
+      "sensitive": true
+    },
+    "variflightKey": {
+      "type": "string",
+      "title": "飞常准 API Key",
+      "description": "在 ai.variflight.com 的 Keys 页面申请，新账户有试用额度，之后按量付费。",
+      "sensitive": true
+    }
+  }
+}

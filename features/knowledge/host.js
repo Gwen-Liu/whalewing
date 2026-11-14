@@ -16,7 +16,7 @@ export default class Knowledge extends Service {
     this.pending = new Set();
     this.typertRemote = bindTypertRemote(this, 'whalewingKnowledge', { namespace: 'whalewingKnowledge' });
     ctx.typert.register(contract.host);
-    ctx.inject(['tools', 'sandboxPolicy'], scope => registerTool(scope));
+    ctx.inject(['tools', 'sandboxPolicy', 'sessionProjections'], scope => registerTool(scope));
     for (const action of ['initialize', 'search', 'browse', 'question', 'read', 'document', 'graph', 'write', 'remove', 'restore', 'validate', 'sources', 'source_read', 'coverage', 'complete', 'source_add', 'source_remove']) this.host.commands.handle(action, (input, caller) => this.host.execute(input, caller));
     ctx.effect(() => async () => {
       this.closing.abort(new Error('功能已卸载，当前操作停止'));

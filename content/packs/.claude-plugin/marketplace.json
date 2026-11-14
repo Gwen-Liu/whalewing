@@ -1,0 +1,39 @@
+{
+  "name": "whalewing-picks",
+  "owner": { "name": "鲸翼" },
+  "metadata": { "description": "鲸翼精选插件包：按常见场景把技能和 MCP 打好包，装一个就能用。" },
+  "plugins": [
+    {
+      "name": "recording-notes",
+      "displayName": "录音进第二大脑",
+      "source": "./recording-notes",
+      "description": "连上 Plaud 录音卡，把会议和随口说的想法整理成要点、决定和待办，按知识库规则存进第二大脑。",
+      "category": "录音会议",
+      "author": { "name": "鲸翼" }
+    },
+    {
+      "name": "trip-planner",
+      "displayName": "出行规划",
+      "source": "./trip-planner",
+      "description": "用高德地图查地点、路线和天气，用 12306 查火车票，用飞常准查航班，排出按时间走的行程单。",
+      "category": "地图出行",
+      "author": { "name": "鲸翼" }
+    },
+    {
+      "name": "feishu-office",
+      "displayName": "飞书办公",
+      "source": "./feishu-office",
+      "description": "连上飞书，把会议纪要写成飞书文档，从第二大脑的日记和任务记录写周报。",
+      "category": "办公协作",
+      "author": { "name": "鲸翼" }
+    },
+    {
+      "name": "web-search",
+      "displayName": "联网搜索",
+      "source": "./web-search",
+      "description": "接上百炼联网搜索和 Tavily，国内资讯和海外资料都能查，配合内置的调研技能用。",
+      "category": "搜索资料",
+      "author": { "name": "鲸翼" }
+    }
+  ]
+}

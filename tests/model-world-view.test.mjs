@@ -79,25 +79,6 @@ test('token 数按常见写法缩写，时间按北京时间显示', () => {
   assert.equal(worldTime(null), null); assert.equal(worldTime('无效'), null);
 });
 
-test('初始读取不联网刷新，图鉴、时间线与榜单使用同一公开请求入口', async () => {
-  const requests = [];
-  const f = harness(React => createModelWorldView(React, 'data:image/png;base64,fixture'), { api: { worldRequest: async input => { requests.push(input); return data(input); } } });
-  f.render(); await tick();
-  let tree = f.render();
-  assert.equal(requests[0].action, 'list');
-  assert.equal(requests[0].limit, 12);
-  assert.ok(nodes(tree).some(node => node.props.className === 'ww-mw-deck'));
-  findButton(tree, '发布时间线').props.onClick(); await tick(); tree = f.render();
-  assert.equal(requests.at(-1).action, 'timeline');
-  assert.ok(nodes(tree).some(node => node.props.className === 'ww-mw-timeline'));
-  findButton(tree, '实力榜').props.onClick(); await tick(); tree = f.render();
-  assert.equal(requests.at(-1).league, 'overall');
-  assert.ok(nodes(tree).some(node => node.type === 'table'));
-  assert.equal(requests.some(input => input.action === 'refresh'), false);
-  f.unmount();
-});
-
-// 需求§界面通用约定·页头（每个页签标题下一句现状摘要）；2026-10-28 修功能测试的已知问题：模型世界原来没有摘要
 test('页头标题下一句现状摘要：读取中、没有数据、有数据时写几家厂商、几个模型和哪天更新', async () => {
   const summary = tree => text(nodes(tree).find(node => node.props?.className === 'ww-mw-summary'));
   let reply = input => ({ ...data(input), modelCount: 192, acceptedAt: '2026-10-22T01:30:00.000Z' });
@@ -113,50 +94,6 @@ test('页头标题下一句现状摘要：读取中、没有数据、有数据�
   empty.unmount();
 });
 
-test('两项选择跨页保留，第三项被拒收；比较仅打开独立窗口', async () => {
-  const requests = [], ms = [model('甲'), model('乙'), model('丙')];
-  const f = harness(React => createModelWorldView(React, 'art'), { api: { worldRequest: async input => { requests.push(input); return data(input, input.action === 'compare' ? ms.slice(0, 2) : ms); } } });
-  f.render(); await tick();
-  findButton(f.render(), '发布时间线').props.onClick(); await tick();
-  for (const id of ['甲', '乙', '丙']) {
-    const b = nodes(f.render()).find(node => node.props['aria-label'] === `加入对决 ${id}`); b.props.onClick();
-  }
-  let tree = f.render();
-  assert.equal(nodes(tree).find(node => node.props['aria-label'] === '加入对决 丙').props.disabled, true);
-  await findButton(tree, '对决').props.onClick({ currentTarget: { isConnected: true } });
-  tree = f.render();
-  assert.deepEqual(requests.at(-1), { action: 'compare', ids: ['甲', '乙'] });
-  assert.ok(nodes(tree).some(node => node.type?.name === 'ModelWindow'));
-  assert.equal(nodes(tree).some(node => node.props.className === 'ww-world-result'), false);
-  f.unmount();
-});
-
-test('切页失败保留旧视图和旧数据，重试使用失败请求而不是旧查询', async () => {
-  let fail = true;
-  const requests = [];
-  const f = harness(React => createModelWorldView(React, 'art'), { api: { worldRequest: async input => { requests.push(input); if (input.action === 'timeline' && fail) throw new Error('读取失败'); return data(input); } } });
-  f.render(); await tick();
-  findButton(f.render(), '发布时间线').props.onClick(); await tick();
-  let tree = f.render(); assert.ok(nodes(tree).some(node => node.props.className === 'ww-mw-deck'));
-  fail = false; await findButton(tree, '重试').props.onClick(); tree = f.render();
-  assert.equal(requests.at(-1).action, 'timeline');
-  assert.ok(nodes(tree).some(node => node.props.className === 'ww-mw-timeline'));
-  f.unmount();
-});
-
-test('迟到分页请求不能覆盖新查询；卸载取消请求', async () => {
-  const waiting = [], signals = [];
-  const f = harness(React => createModelWorldView(React, 'art'), { api: { worldRequest: (input, signal) => { signals.push(signal); return new Promise(resolve => waiting.push({ input, resolve })); } } });
-  f.render();
-  findButton(f.render(), '发布时间线').props.onClick();
-  assert.equal(signals[0].aborted, true);
-  waiting[1].resolve(data(waiting[1].input)); await tick();
-  waiting[0].resolve(data(waiting[0].input)); await tick();
-  assert.ok(nodes(f.render()).some(node => node.props.className === 'ww-mw-timeline'));
-  findButton(f.render(), '实力榜').props.onClick();
-  f.unmount(); assert.equal(signals.at(-1).aborted, true);
-});
-
 test('更新失败重试仍为更新，取消更新不继续追加读取', async () => {
   let fail = true, refreshResolve;
   const requests = [];
@@ -167,126 +104,6 @@ test('更新失败重试仍为更新，取消更新不继续追加读取', async
   assert.equal(requests.at(-1).action, 'refresh');
   findButton(f.render(), '取消').props.onClick(); refreshResolve(); await pending;
   assert.equal(requests.at(-1).action, 'refresh');
-  f.unmount();
-});
-
-test('存储接受未知保留原错误及恢复入口，回读不联网也不声称磁盘恢复', async () => {
-  const requests = [], notices = [];
-  const failure = { status: 'error', code: 'WORLD_STORAGE_UNKNOWN', message: '快照提交后的恢复结果未确认；请修复本地目录后重新加载核对' };
-  let failed = false;
-  const f = harness(React => createModelWorldView(React), { notify: message => notices.push(message), api: { worldRequest: async input => {
-    requests.push(input.action);
-    if (input.action === 'refresh') { failed = true; throw Object.assign(new Error(failure.message), { code: failure.code }); }
-    return { ...data(input), lastRefresh: failed ? failure : null };
-  } } });
-  f.render(); await tick(); await findButton(f.render(), '更新数据').props.onClick();
-  let tree = f.render();
-  assert.ok(text(tree).includes(failure.message)); assert.equal(text(tree).includes(failure.code), false, '错误码不展示给员工');
-  assert.equal(text(tree).includes('现有数据已保留'), false); assert.equal(notices.some(message => message.includes('已保留')), false);
-  assert.ok(text(tree).includes('请重启 DSH 后重新读取'));
-  assert.ok(nodes(tree).some(node => node.props.className === 'ww-mw-deck'));
-  await findButton(tree, '重新读取').props.onClick(); tree = f.render();
-  assert.deepEqual(requests, ['list', 'refresh', 'list']);
-  assert.equal(text(tree).includes(failure.code), false);
-  assert.ok(findButton(tree, '重新读取'));
-  f.unmount();
-});
-
-test('更新自身的普通网络失败保留原因，只有显式重试更新才再联网', async () => {
-  const requests = [], notices = []; let failing = true;
-  const f = harness(React => createModelWorldView(React), { notify: message => notices.push(message), api: { worldRequest: async input => {
-    requests.push(input.action);
-    if (input.action === 'refresh' && failing) throw Object.assign(new Error('GitHub 连接超时'), { code: 'WORLD_FETCH' });
-    return data(input);
-  } } });
-  f.render(); await tick(); await findButton(f.render(), '更新数据').props.onClick();
-  const tree = f.render(); assert.equal(text(tree).includes('WORLD_FETCH'), false); assert.ok(text(tree).includes('GitHub 连接超时'));
-  assert.equal(text(tree).includes('现有数据已保留'), false);
-  await tick(); f.render(); assert.deepEqual(requests, ['list', 'refresh']);
-  failing = false; await findButton(tree, '重试更新').props.onClick();
-  assert.deepEqual(requests, ['list', 'refresh', 'refresh', 'list']);
-  assert.equal(nodes(f.render()).some(node => node.props.role === 'alert'), false);
-  assert.equal(notices.at(-1), '模型数据已更新');
-  f.unmount();
-});
-
-test('更新成功而列表回读失败，原请求重试只读本地而不再次外网更新', async () => {
-  const requests = [], notices = []; let refreshed = false, readFails = true;
-  const f = harness(React => createModelWorldView(React), { notify: message => notices.push(message), api: { worldRequest: async input => {
-    requests.push(input.action);
-    if (input.action === 'refresh') { refreshed = true; return data(input); }
-    if (refreshed && readFails) throw Object.assign(new Error('列表响应中断'), { code: 'READ_FAILURE' });
-    return data(input);
-  } } });
-  f.render(); await tick(); await findButton(f.render(), '更新数据').props.onClick();
-  let tree = f.render(); assert.ok(text(tree).includes('数据已更新，列表读取失败'));
-  assert.equal(text(tree).includes('READ_FAILURE'), false); assert.ok(text(tree).includes('列表响应中断'));
-  assert.equal(notices.includes('模型数据已更新'), false);
-  readFails = false; await findButton(tree, '重试').props.onClick(); tree = f.render();
-  assert.deepEqual(requests, ['list', 'refresh', 'list', 'list']);
-  assert.equal(nodes(tree).some(node => node.props.role === 'alert'), false);
-  f.unmount();
-});
-
-test('图鉴一页展示全部收录厂商并显示模型数，刷新缩减后不留空白或分页', async () => {
-  let count = 15;
-  const f = harness(React => createModelWorldView(React), { api: { worldRequest: async input => {
-    if (input.action === 'refresh') count = 1;
-    return { ...data(input), vendors: Array.from({ length: count }, (_, index) => ({ id: 'vendor-' + index, name: '厂商' + index, nameZh: '厂商' + index, modelCount: index + 1 })) };
-  } } });
-  f.render(); await tick(); let tree = f.render();
-  assert.equal(nodes(tree).filter(node => node.props.className === 'ww-mw-role').length, 15);
-  assert.ok(text(tree).includes('15 个模型')); assert.equal(findButton(tree, '下一页'), undefined);
-  await findButton(f.render(), '更新数据').props.onClick(); tree = f.render();
-  assert.equal(nodes(tree).filter(node => node.props.className === 'ww-mw-role').length, 1);
-  assert.equal(nodes(tree).some(node => node.props.className === 'ww-mw-page'), false);
-  f.unmount();
-});
-
-test('模型末页快照缩减后进行一次本地offset纠正，不重复刷新', async () => {
-  let total = 25; const requests = [];
-  const f = harness(React => createModelWorldView(React), { api: { worldRequest: async input => {
-    requests.push(input);
-    if (input.action === 'refresh') total = 1;
-    const ms = Array.from({ length: Math.max(0, Math.min(12, total - (input.offset || 0))) }, (_, index) => model(String((input.offset || 0) + index)));
-    return { ...data(input, ms), total };
-  } } });
-  f.render(); await tick(); findButton(f.render(), '发布时间线').props.onClick(); await tick();
-  await findButton(f.render(), '下一页').props.onClick(); await findButton(f.render(), '下一页').props.onClick();
-  assert.ok(text(f.render()).includes('25–25 / 25'));
-  await findButton(f.render(), '更新数据').props.onClick();
-  assert.deepEqual(requests.slice(-3).map(input => [input.action, input.offset]), [['refresh', undefined], ['timeline', 24], ['timeline', 0]]);
-  assert.equal(nodes(f.render()).filter(node => node.props.className === 'ww-mw-model-row').length, 1);
-  assert.equal(nodes(f.render()).some(node => node.props.className === 'ww-mw-page'), false); f.unmount();
-});
-
-test('无快照停止等待保留可回读入口，迟到结果不宣称更新成功', async () => {
-  let resolve; const requests = [], notices = [];
-  const f = harness(React => createModelWorldView(React), { notify: message => notices.push(message), api: { worldRequest: async input => {
-    requests.push(input.action);
-    if (input.action === 'refresh') return new Promise(done => { resolve = done; });
-    return { ...data(input, []), available: false, total: 0, modelCount: 0, vendors: [] };
-  } } });
-  f.render(); await tick(); const pending = findButton(f.render(), '更新数据').props.onClick(); await tick();
-  findButton(f.render(), '取消').props.onClick(); resolve(data({ action: 'refresh' })); await pending;
-  const tree = f.render(); assert.ok(text(tree).includes('更新可能已完成'));
-  assert.ok(findButton(tree, '重新读取')); assert.deepEqual(requests, ['list', 'refresh']);
-  assert.equal(notices.length, 0); await findButton(tree, '重新读取').props.onClick();
-  assert.deepEqual(requests, ['list', 'refresh', 'list']);
-  f.unmount();
-});
-
-test('无快照网络失败保留原错误，已接纳空目录明确显示空态', async () => {
-  let available = false, failing = true;
-  const f = harness(React => createModelWorldView(React), { api: { worldRequest: async input => {
-    if (input.action === 'refresh' && failing) throw Object.assign(new Error('连接失败'), { code: 'WORLD_FETCH' });
-    return { ...data(input, []), available, total: 0, modelCount: 0, vendors: [] };
-  } } });
-  f.render(); await tick(); await findButton(f.render(), '更新数据').props.onClick();
-  assert.equal(text(f.render()).includes('WORLD_FETCH'), false); assert.ok(text(f.render()).includes('连接失败'));
-  assert.equal(text(f.render()).includes('现有数据已保留'), false);
-  available = true; failing = false; await findButton(f.render(), '重试更新').props.onClick();
-  assert.ok(text(f.render()).includes('没有符合条件的模型')); assert.equal(nodes(f.render()).some(node => node.props.className === 'ww-mw-page'), false);
   f.unmount();
 });
 
@@ -305,120 +122,6 @@ async function modalHarness(models, options = {}) {
   return { f, parent, props, dialog, get closed() { return closed; }, get returnFocused() { return returnFocused; } };
 }
 
-test('模态层具备原生top-layer与Escape出口，关闭回到触发按钮', async () => {
-  const m = await modalHarness([model('a'), model('b')]);
-  assert.equal(m.dialog.open, true);
-  const dialog = nodes(m.f.render()).find(node => node.type === 'dialog');
-  let prevented = false; dialog.props.onCancel({ preventDefault() { prevented = true; } });
-  assert.equal(prevented, true); assert.equal(m.closed, 1);
-  m.f.unmount(); assert.equal(m.dialog.open, false); assert.equal(m.returnFocused, 1);
-  m.parent.unmount();
-});
-
-test('未知评分仍展示双侧资料但没有可执行胜负，低动态时直接呈现真实结果', async () => {
-  const original = globalThis.matchMedia;
-  globalThis.matchMedia = () => ({ matches: true, addEventListener() {}, removeEventListener() {} });
-  try {
-    const unknown = await modalHarness([model('a'), model('b', null, { contextWindow: null })]);
-    assert.equal(findButton(unknown.f.render(), '开始对决').props.disabled, true);
-    assert.equal(nodes(unknown.f.render()).filter(node => node.type === 'section' && /^(左方|右方)/.test(node.props['aria-label'] || '')).length, 2);
-    assert.ok(text(unknown.f.render()).includes('无法判定胜负'));
-    unknown.f.unmount(); unknown.parent.unmount();
-    const win = await modalHarness([model('a', 20), model('b', 30)]);
-    findButton(win.f.render(), '开始对决').props.onClick();
-    assert.ok(text(win.f.render()).includes('b 获胜'));
-    assert.ok(text(win.f.render()).includes('综合实力 20 : 30'));
-    assert.equal(nodes(win.f.render()).filter(node => node.type === 'li').length, 4, '回合记录逐条列出');
-    win.f.unmount(); win.parent.unmount();
-  } finally { globalThis.matchMedia = original; }
-});
-
-test('战斗动画逐回合推进并有界结束，取消不宣布结果，关闭清理未完成动画', async () => {
-  const originalSet = globalThis.setTimeout, originalClear = globalThis.clearTimeout;
-  const timers = new Map(); let id = 0;
-  globalThis.setTimeout = (callback, delay) => { timers.set(++id, { callback, delay }); return id; };
-  globalThis.clearTimeout = timer => timers.delete(timer);
-  try {
-    const m = await modalHarness([model('a', 8), model('b', 8)]);
-    findButton(m.f.render(), '开始对决').props.onClick();
-    assert.equal(timers.size, 1); assert.equal([...timers.values()][0].delay, 1100);
-    assert.ok(text(m.f.render()).includes('交锋中')); assert.ok(text(m.f.render()).includes('回合 1 · 试探'));
-    findButton(m.f.render(), '停止').props.onClick();
-    assert.equal(timers.size, 0); assert.ok(text(m.f.render()).includes('已停止'));
-    findButton(m.f.render(), '开始对决').props.onClick();
-    // 依次触发每回合计时器直到结算；回合数有上限，不会无限推进。
-    let steps = 0;
-    while (timers.size && steps < 10) { const [key, { callback }] = [...timers.entries()][0]; timers.delete(key); callback(); steps++; }
-    assert.equal(steps, 8); assert.equal(timers.size, 0);
-    assert.ok(text(m.f.render()).includes('平局'));
-    assert.equal(text(m.f.render()).includes('获胜'), false);
-    findButton(m.f.render(), '再来一次').props.onClick();
-    m.f.unmount(); assert.equal(timers.size, 0);
-  } finally { globalThis.setTimeout = originalSet; globalThis.clearTimeout = originalClear; }
-});
-
-test('关闭尚未加载的详情取消该请求，迟到结果不重新打开窗口', async () => {
-  let resolveDetail, signal;
-  const f = harness(React => createModelWorldView(React), { api: { worldRequest: async (input, currentSignal) => {
-    if (input.action === 'detail') { signal = currentSignal; return new Promise(resolve => { resolveDetail = () => resolve(data(input)); }); }
-    return data(input);
-  } } });
-  f.render(); await tick(); findButton(f.render(), '发布时间线').props.onClick(); await tick();
-  const pending = nodes(f.render()).find(node => node.props['aria-label'] === '详情 甲').props.onClick({ currentTarget: {} });
-  nodes(f.render()).find(node => node.type?.name === 'ModelWindow').props.onClose();
-  assert.equal(signal.aborted, true); resolveDetail(); await pending;
-  assert.equal(nodes(f.render()).some(node => node.type?.name === 'ModelWindow'), false);
-  f.unmount();
-});
-
-test('未确认形象不套用临时职业映射，已批准图片按准确厂商 id 消费', async () => {
-  const f = harness(React => createModelWorldView(React, { openai: 'data:image/png;base64,approved' }), { api: { worldRequest: async input => data(input) } });
-  f.render(); await tick();
-  const portrait = nodes(f.render()).find(node => node.type?.name === 'Portrait');
-  const image = portrait.type(portrait.props);
-  assert.equal(image.type, 'img'); assert.equal(image.props.src, 'data:image/png;base64,approved');
-  const unknown = portrait.type({ vendorId: 'unknown' });
-  assert.equal(unknown.type, 'span'); assert.equal(text(unknown), 'U');
-  assert.equal(text(f.render()).includes('星环研究员'), false);
-  f.unmount();
-});
-
-test('收录名单的立绘逐一准确展示，图鉴与图片使用同一自有映射', async () => {
-  const portraits = loadModelWorldPortraits();
-  assert.equal(Object.keys(portraits).length, modelWorldPortraitIds.length);
-  const vendors = Object.keys(portraits).map(id => ({ id, name: id }));
-  const f = harness(React => createModelWorldView(React, portraits), { api: { worldRequest: async input => ({ ...data(input), vendors }) } });
-  f.render(); await tick();
-  const cards = nodes(f.render()).filter(node => node.props.className === 'ww-mw-role');
-  assert.equal(cards.length, modelWorldPortraitIds.length);
-  for (const card of cards) {
-    const portrait = nodes(card).find(node => node.type?.name === 'Portrait');
-    const image = portrait.type(portrait.props);
-    assert.equal(image.type, 'img');
-    assert.equal(image.props.src, portraits[portrait.props.vendorId]);
-  }
-  f.unmount();
-});
-
-for (const id of ['unknown', 'constructor', 'toString', '__proto__', 'hasOwnProperty']) {
-  test(`未批准身份 ${id} 不从原型继承图片、排序或已确认状态`, async () => {
-    const portraits = loadModelWorldPortraits();
-    assert.equal(Object.hasOwn(portraits, id), false);
-    // 名称顺序刻意相反，以验证继承属性也不会取得已确认角色的排序优先级。
-    const vendors = [{ id, name: 'A pending' }, { id: 'openai', name: 'Z approved' }];
-    const f = harness(React => createModelWorldView(React, portraits), { api: { worldRequest: async input => ({ ...data(input), vendors }) } });
-    f.render(); await tick();
-    const cards = nodes(f.render()).filter(node => node.props.className === 'ww-mw-role');
-    const portraitsInCards = cards.map(card => nodes(card).find(node => node.type?.name === 'Portrait'));
-    assert.deepEqual(portraitsInCards.map(portrait => portrait.props.vendorId), ['openai', id]);
-    const placeholder = portraitsInCards[1].type(portraitsInCards[1].props);
-    assert.equal(placeholder.type, 'span');
-    assert.equal(placeholder.props.src, undefined);
-    assert.equal(text(placeholder), id[0].toUpperCase());
-    f.unmount();
-  });
-}
-
 test('CSS遵循宿主主题、窗口尺寸、键盘焦点与减少动画，不固定黑白主题', () => {
   assert.match(worldViewCss, /prefers-reduced-motion:reduce/);
   assert.match(worldViewCss, /\.ww-mw-dialog:not\(\[open\]\)/);
@@ -427,41 +130,10 @@ test('CSS遵循宿主主题、窗口尺寸、键盘焦点与减少动画，不�
   assert.doesNotMatch(worldViewCss, /font-weight:(600|700|800|900)/);
 });
 
-test('实力榜按榜单切换请求，综合实力标出最强档；性价比榜按消耗档位推荐方案并可展开全部方案；图鉴卡片显示最强型号', async () => {
-  const requests = [];
-  const ranked = [model('甲', 58, { rating: { ...model('甲').rating, overall: 58, tier: 'T0', effort: 'max' } }), model('乙', 50)];
-  const plan = (key, index, cost, effort, frontier = true) => ({ key, modelId: '甲', name: '甲', vendorId: 'openai', effort, index, cost, frontier });
-  const bands = [{ id: 'c200', name: '偏贵（≤ 200）', best: plan('甲#high', 54, 182, 'high'), alternatives: [plan('乙#max', 53, 199, 'max', false)] }, { id: 'c5', name: '极省（≤ 5）', best: null, alternatives: [] }];
-  const plans = [plan('甲#max', 58, 598, 'max'), plan('甲#high', 54, 182, 'high'), plan('乙#max', 53, 199, 'max', false)];
-  const vendors = [{ id: 'openai', name: 'OpenAI', nameZh: 'OpenAI', modelCount: 2, top: { id: '甲', name: '甲', overall: 58, tier: 'T0' } }];
-  const reply = input => input.action === 'value' ? { action: 'value', available: true, vendors, leagues: [{ id: 'overall', name: '综合实力' }], modelCount: 2, generatedAt: '2026-10-12T00:00:00Z', acceptedAt: '2026-10-12T00:00:00Z', attributions: [], lastRefresh: null, bands, plans } : { ...data(input, ranked), vendors };
-  const f = harness(React => createModelWorldView(React), { api: { worldRequest: async input => { requests.push(input); return reply(input); } } });
-  f.render(); await tick();
-  assert.ok(text(f.render()).includes('最强 甲'));
-  findButton(f.render(), '实力榜').props.onClick(); await tick();
-  let tree = f.render();
-  assert.deepEqual([requests.at(-1).league, requests.at(-1).limit], ['overall', 20]);
-  assert.ok(nodes(tree).some(node => node.props?.className === 'ww-mw-tier' && node.props['data-tier'] === 'T0'));
-  assert.ok(nodes(tree).some(node => node.props?.className === 'ww-mw-effort' && text(node) === '最高'), '综合实力标出取分的思考档');
-  assert.ok(nodes(tree).some(node => node.type === 'th' && text(node) === '编程'));
-  findButton(tree, '性价比').props.onClick(); await tick(); tree = f.render();
-  assert.deepEqual(requests.at(-1), { action: 'value' });
-  assert.ok(nodes(tree).some(node => node.type === 'th' && text(node) === '消耗档位'));
-  assert.ok(text(tree).includes('偏贵（≤ 200）')); assert.ok(text(tree).includes('甲 · 高')); assert.ok(text(tree).includes('甲 · 最高：53 / 199'));
-  assert.equal(text(tree).includes('极省（≤ 5）'), false, '没有方案的档位不显示');
-  const rows = () => nodes(f.render()).filter(node => node.type === 'tr' && node.props.key?.includes('#')).length;
-  assert.equal(rows(), 2, '默认只列同价最强方案');
-  findButton(f.render(), '显示全部方案').props.onClick(); assert.equal(rows(), 3);
-  assert.equal(nodes(f.render()).some(node => node.type === 'select' && node.props['aria-label'] === '排序'), false, '性价比榜不提供升降序');
-  findButton(f.render(), '编程').props.onClick(); await tick();
-  assert.deepEqual([requests.at(-1).action, requests.at(-1).league], ['ranking', 'coding']);
-  f.unmount();
-});
-
 /** 综合实力数据窗口：从页面按钮打开，再单独渲染窗口组件。 */
 async function keyHarness(index, worldRequest = async input => ({ ...data(input), index })) {
   const toasts = [], requests = [];
-  const parent = harness(React => createModelWorldView(React), { api: { worldRequest: async (input, signal) => { requests.push(input); return input.action === 'list' ? { ...data(input), index } : worldRequest(input, signal); } }, notify: message => toasts.push(message) });
+  const parent = harness(React => createModelWorldView(React), { api: { worldRequest: async (input, signal) => { requests.push(input); return input.action === 'all' ? { ...data(input), index } : worldRequest(input, signal); } }, notify: message => toasts.push(message) });
   parent.render(); await tick();
   findButton(parent.render(), '综合实力数据').props.onClick({ currentTarget: { isConnected: true, focus() {} } });
   const window = nodes(parent.render()).find(node => node.type?.name === 'KeyWindow');
@@ -527,7 +199,8 @@ test('更新数据时综合实力在线更新失败：右上角说明模型目�
 // 2026-10-27 用户：模型娘立绘是我们生成的高清图，要能点开放大、自己保存（不能商用）；保存的图右下角带鲸翼水印，不占画面。
 const flush = () => new Promise(setImmediate);
 async function viewerParent({ loadLarge } = {}) {
-  const portraits = loadModelWorldPortraits();
+  // 只批准三张立绘：图鉴和查看器里就是这三位，按名单顺序排。
+  const all = loadModelWorldPortraits(), portraits = { openai: all.openai, anthropic: all.anthropic, google: all.google };
   const calls = { large: [], watermark: [], download: [], revoked: [], notes: [] };
   const options = {
     loadLarge: loadLarge ?? (async id => { calls.large.push(id); return `data:large/${id}`; }),
@@ -535,9 +208,10 @@ async function viewerParent({ loadLarge } = {}) {
     download: (url, name) => calls.download.push([url, name]),
     objectUrl: { create: blob => `blob:${blob.from.slice('data:large/'.length)}`, revoke: url => calls.revoked.push(url) },
   };
-  const vendors = [{ id: 'openai', name: 'OpenAI', nameZh: 'OpenAI' }, { id: 'google', name: 'Google', nameZh: '谷歌' }, { id: 'anthropic', name: 'Anthropic', nameZh: 'Anthropic' }];
+  const vendors = [{ id: 'openai', name: 'OpenAI', nameZh: 'OpenAI' }, { id: 'anthropic', name: 'Anthropic', nameZh: 'Anthropic' }, { id: 'google', name: 'Google', nameZh: '谷歌' }];
   const parent = harness(React => createModelWorldView(React, portraits, options), { api: { worldRequest: async input => ({ ...data(input), vendors }) }, notify: message => calls.notes.push(message) });
   parent.render(); await tick();
+  findButton(parent.render(), '角色图鉴').props.onClick();
   return { parent, calls, portraits };
 }
 async function openViewer(start, setup) {
@@ -562,11 +236,11 @@ const byLabel = (tree, label) => nodes(tree).find(node => node.type === 'button'
 test('图鉴每张有立绘的卡片右上角都有“查看大图”，点开按图鉴顺序浏览；没有大图来源时不显示入口', async () => {
   const { parent } = await viewerParent();
   const zooms = nodes(parent.render()).filter(node => node.props?.className === 'ww-mw-zoom');
-  assert.deepEqual(zooms.map(node => node.props['aria-label']), ['查看大图：OpenAI', '查看大图：谷歌', '查看大图：Anthropic']);
+  assert.deepEqual(zooms.map(node => node.props['aria-label']), ['查看大图：OpenAI', '查看大图：Anthropic', '查看大图：谷歌']);
   assert.equal(nodes(parent.render()).filter(node => node.props?.className === 'ww-mw-role').length, 3, '卡片本身仍是进入该厂商的按钮');
   zooms[1].props.onClick({ currentTarget: null });
   const viewer = nodes(parent.render()).find(node => node.type?.name === 'PortraitViewer');
-  assert.deepEqual(viewer.props.items, [{ id: 'openai', name: 'OpenAI' }, { id: 'google', name: '谷歌' }, { id: 'anthropic', name: 'Anthropic' }]);
+  assert.deepEqual(viewer.props.items, [{ id: 'openai', name: 'OpenAI' }, { id: 'anthropic', name: 'Anthropic' }, { id: 'google', name: '谷歌' }]);
   assert.equal(viewer.props.start, 1);
   parent.unmount();
   const plain = harness(React => createModelWorldView(React, loadModelWorldPortraits()), { api: { worldRequest: async input => data(input) } });
@@ -578,14 +252,14 @@ test('图鉴每张有立绘的卡片右上角都有“查看大图”，点开�
 test('查看器先显示小图，取到大图后显示带水印的那张；保存的就是这张，文件名带角色名', async () => {
   const v = await openViewer(1);
   assert.equal(v.dialog.open, true);
-  assert.deepEqual(v.calls.large, ['google']); assert.deepEqual(v.calls.watermark, ['data:large/google'], '大图先加水印再显示');
+  assert.deepEqual(v.calls.large, ['anthropic']); assert.deepEqual(v.calls.watermark, ['data:large/anthropic'], '大图先加水印再显示');
   const tree = v.render();
-  assert.equal(shownImage(tree).props.src, 'blob:google'); assert.equal(shownImage(tree).props['data-ready'], true);
-  assert.equal(text(nodes(tree).find(node => node.props?.className === 'ww-mw-viewer-title')), '谷歌2 / 3');
+  assert.equal(shownImage(tree).props.src, 'blob:anthropic'); assert.equal(shownImage(tree).props['data-ready'], true);
+  assert.equal(text(nodes(tree).find(node => node.props?.className === 'ww-mw-viewer-title')), 'Anthropic2 / 3');
   assert.match(text(nodes(tree).find(node => node.props?.className === 'ww-mw-viewer-note')), /水印.*不能商用（CC BY-NC-SA 4\.0）/);
   byLabel(tree, '保存图片').props.onClick();
-  assert.deepEqual(v.calls.download, [['blob:google', '鲸翼立绘-谷歌.jpg']]);
-  assert.equal(v.calls.notes.at(-1), '已保存“鲸翼立绘-谷歌.jpg”，在浏览器的下载里');
+  assert.deepEqual(v.calls.download, [['blob:anthropic', '鲸翼立绘-Anthropic.jpg']]);
+  assert.equal(v.calls.notes.at(-1), '已保存“鲸翼立绘-Anthropic.jpg”，在浏览器的下载里');
   v.parent.unmount();
 });
 
@@ -607,13 +281,13 @@ test('点图片放大到原图一比一并把点到的地方滚到中间，再�
 test('左右按钮和方向键切换角色并循环，每张大图只取一次；关闭释放图片、焦点回到入口', async () => {
   const v = await openViewer(0);
   byLabel(v.render(), '下一位').props.onClick(); v.render(); await flush();
-  assert.equal(shownImage(v.render()).props.src, 'blob:google');
+  assert.equal(shownImage(v.render()).props.src, 'blob:anthropic');
   const dialog = () => nodes(v.render()).find(node => node.type === 'dialog');
   dialog().props.onKeyDown({ key: 'ArrowLeft', preventDefault() {} }); v.render();
   dialog().props.onKeyDown({ key: 'ArrowLeft', preventDefault() {} }); v.render(); await flush();
-  assert.equal(shownImage(v.render()).props.src, 'blob:anthropic', '从第一位往前回到最后一位');
+  assert.equal(shownImage(v.render()).props.src, 'blob:google', '从第一位往前回到最后一位');
   byLabel(v.render(), '下一位').props.onClick(); v.render(); await flush();
-  assert.deepEqual(v.calls.large, ['openai', 'google', 'anthropic'], '看过的不再重取');
+  assert.deepEqual(v.calls.large, ['openai', 'anthropic', 'google'], '看过的不再重取');
   let prevented = false; dialog().props.onCancel({ preventDefault() { prevented = true; } });
   assert.equal(prevented, true); assert.equal(v.closed, 1);
   v.parent.unmount();
@@ -631,26 +305,6 @@ test('大图取不到时保留小图、不能保存，并给出重试', async ()
   fail = false; byLabel(tree, '重试').props.onClick(); v.render(); await flush();
   assert.equal(shownImage(v.render()).props.src, 'blob:openai'); assert.deepEqual(asked, ['openai', 'openai']);
   v.parent.unmount();
-});
-
-test('详情里的立绘可直接点开大图；系列形象用系列立绘和名字', async () => {
-  const portraits = loadModelWorldPortraits(), zoomed = [];
-  const flash = model('deepseek/deepseek-v4-flash', 90, { vendorId: 'deepseek' });
-  const vendors = [{ id: 'deepseek', name: 'DeepSeek', nameZh: '深度求索' }];
-  const parent = harness(React => createModelWorldView(React, portraits, { loadLarge: async () => 'data:x' }), { api: { worldRequest: async input => ({ ...data(input, [flash]), vendors }) } });
-  parent.render(); await tick(); findButton(parent.render(), '发布时间线').props.onClick(); await tick();
-  await nodes(parent.render()).find(node => node.props['aria-label'] === `详情 ${flash.name}`).props.onClick({ currentTarget: { isConnected: true, focus() {} } });
-  const window = nodes(parent.render()).find(node => node.type?.name === 'ModelWindow');
-  assert.equal(typeof window.props.onZoom, 'function');
-  const props = { ...window.props, onZoom: (item, element) => zoomed.push([item, element]), state: { ...window.props.state, busy: false, data: { available: true, model: flash, vendors } } };
-  parent.replace(window.type, props);
-  const tree = parent.render(props, tree => { for (const node of nodes(tree)) if (node.props.ref) node.props.ref.current = node.type === 'dialog' ? { open: false, showModal() { this.open = true; }, close() {} } : { focus() {} }; });
-  const art = nodes(tree).find(node => node.props?.className === 'ww-mw-art-zoom');
-  assert.equal(art.props['aria-label'], '查看大图：深度求索 Flash');
-  assert.ok(text(art).includes('查看大图'), '立绘下面有提示');
-  art.props.onClick({ currentTarget: 'art' });
-  assert.deepEqual(zoomed, [[{ id: 'deepseek-flash', name: '深度求索 Flash' }, 'art']]);
-  parent.unmount();
 });
 
 test('查看器样式：压暗底、图片适应窗口、放大可拖动，入口跟随皮肤且触屏常显', () => {

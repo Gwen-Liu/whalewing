@@ -20,13 +20,34 @@ export const zh = {
   "generalScope": "未选笔记 · {assistantShort}会按需查找知识",
   "noteScope": "当前资料",
   "assistantHistory": "在主会话打开",
+  "assistantNew": "新对话",
+  "assistantMenu": "{assistant}的更多操作",
+  "assistantDetail": "详情、技能和记忆",
+  "assistantEdit": "改名字、头像和说明",
+  "assistantReset": "恢复原版",
+  "assistantNewDone": "已开始一段新对话，原来那段还在 DSH 侧栏里",
   "citeNotes": "引用所选笔记",
   "citeLabel": "{count} 篇笔记",
   "citeHelp": "点击输入框旁的引用按钮，将这些笔记加入当前问题。实际发送范围以输入框中的资料标签为准",
   "citeQuestion": "请结合所附资料回答本条消息中的用户问题",
   "citeFailed": "资料未加入输入框，请保持原问题后重试",
   "assistantTagline": "让知识成为你的工作伙伴",
-  "citePathUnsupported": "这篇笔记的路径无法作为附件引用，请修改文件名后重试；你的问题还在"
+  "citePathUnsupported": "这篇笔记的路径无法作为附件引用，请修改文件名后重试；你的问题还在",
+  "dispatchStrip": "派出去的事",
+  "dispatchStripHelp": "{assistantShort}最近 7 天派给专家的事：在做的、等你审批的都在这里，做完的留最近 3 件",
+  "dispatchWaitingCount": "{count} 件等你审批",
+  "dispatchActiveCount": "{count} 件在做",
+  "dispatchDoneCount": "最近做完 {count} 件",
+  "dispatchState_queued": "已派出",
+  "dispatchState_running": "在做",
+  "dispatchState_waiting": "等你审批",
+  "dispatchState_completed": "做完了",
+  "dispatchState_error": "出错了",
+  "dispatchState_interrupted": "被停下",
+  "dispatchState_incomplete": "没写完",
+  "dispatchState_unknown": "结果未知",
+  "dispatchOpen": "打开",
+  "dispatchApprove": "去审批"
 };
 export const en = {
   "draftPrepared": "The discussion proposal is in your draft. Edit it before sending",
@@ -38,6 +59,7 @@ export const handoffText = {
   running: { zh: '正在为专家新建任务：{title}', en: 'Creating the expert task: {title}' },
   stopped: { zh: '交接已停止，没有确认新任务', en: 'Handoff stopped. No task was confirmed' },
   error: { zh: '没有交给专家：{message}', en: 'Not handed off: {message}' },
+  declined: { zh: '你没有批准，没有交给专家', en: 'You declined, so nothing was handed off' },
   errorUnknown: { zh: '原因见助手的回复', en: 'see the assistant reply for the reason' },
   done: { zh: '已交给{expert}：{title}', en: 'Handed off to {expert}: {title}' },
   open: { zh: '打开任务', en: 'Open task' },
@@ -52,22 +74,51 @@ export const handoffText = {
   retry: { zh: '重试', en: 'Retry' },
   copied: { zh: '交接说明已复制', en: 'Handoff note copied' },
   copyFailed: { zh: '没能复制，请展开「交接说明」手动复制', en: 'Could not copy. Expand the handoff note and copy it manually' },
+  // 派出去直接开工后的进度（取自那个任务的记录）。
+  dispatch_queued: { zh: '已派给{expert}：{title}', en: 'Sent to {expert}: {title}' },
+  dispatch_running: { zh: '{expert}正在做：{title}', en: '{expert} is working on: {title}' },
+  dispatch_waiting: { zh: '{expert}在等你审批：{title}', en: '{expert} is waiting for your approval: {title}' },
+  dispatch_completed: { zh: '{expert}做完了：{title}', en: '{expert} finished: {title}' },
+  dispatch_error: { zh: '{expert}出错了：{title}', en: '{expert} hit an error: {title}' },
+  dispatch_interrupted: { zh: '{expert}被停下了：{title}', en: '{expert} was stopped: {title}' },
+  dispatch_incomplete: { zh: '{expert}没写完（输出写满了）：{title}', en: '{expert} ran out of output: {title}' },
+  dispatch_unknown: { zh: '已派给{expert}：{title}', en: 'Sent to {expert}: {title}' },
+  approve: { zh: '去审批', en: 'Review approval' },
+  reply: { zh: '交付开头', en: 'Start of the delivery' },
+};
+/** 小鲸建专家、改专家的卡片。 */
+export const expertEditText = {
+  saving: { zh: '正在保存专家…', en: 'Saving the expert…' },
+  running: { zh: '正在保存专家「{name}」…', en: 'Saving the expert “{name}”…' },
+  stopped: { zh: '已停止，专家没有保存', en: 'Stopped. The expert was not saved' },
+  error: { zh: '专家没有保存：{message}', en: 'Expert not saved: {message}' },
+  declined: { zh: '你没有批准，专家没有保存', en: 'You declined, so the expert was not saved' },
+  created: { zh: '已建好专家「{name}」', en: 'Created the expert “{name}”' },
+  updated: { zh: '已修改「{name}」：{fields}', en: 'Updated “{name}”: {fields}' },
+  view: { zh: '到专家团队看看', en: 'View in Experts' },
+  scheduleRunning: { zh: '正在加定时任务…', en: 'Adding the scheduled task…' },
+  scheduleError: { zh: '定时任务没有加上：{message}', en: 'Scheduled task not added: {message}' },
+  scheduleDeclined: { zh: '你没有批准，定时任务没有加上', en: 'You declined, so the scheduled task was not added' },
+  scheduleDone: { zh: '已给「{name}」加了定时任务「{title}」', en: 'Added the scheduled task “{title}” for “{name}”' },
+  scheduleView: { zh: '到定时任务看看', en: 'View in Schedule' },
+  name: { zh: '名字', en: 'name' }, description: { zh: '介绍', en: 'description' }, prompt: { zh: '岗位说明', en: 'role guide' }, skills: { zh: '技能', en: 'skills' }, avatar: { zh: '头像', en: 'avatar' },
+  separator: { zh: '、', en: ', ' },
 };
 export const styles = [
 `.ww-page h1:where(:not(.ww-assistant-conversation *)),.ww-page h2:where(:not(.ww-assistant-conversation *)),.ww-page h3:where(:not(.ww-assistant-conversation *)){font-weight:500;margin:0}.ww-page h1:where(:not(.ww-assistant-conversation *)){font-size:22px}.ww-page h2:where(:not(.ww-assistant-conversation *)){font-size:16px}.ww-page h3:where(:not(.ww-assistant-conversation *)){font-size:14px}`,
 `
     .ww-page button:where(:not(.ww-assistant-conversation *))[aria-selected=true],.ww-page .ww-selected{border-color:var(--dsw-alias-brand-primary);background:var(--dsw-alias-bg-layer-2)}`,
-`.ww-page label:where(:not(.ww-assistant-conversation *)){display:flex;gap:6px;flex-direction:column;min-width:0}.ww-page label:where(:not(.ww-assistant-conversation *)).ww-check{flex-direction:row;align-items:center}
+`.ww-page label:where(:not(.ww-assistant-conversation *)){display:flex;gap:6px;flex-direction:column;min-width:0}
     .ww-page input:where(:not(.ww-assistant-conversation *))[type=checkbox]{width:16px;height:16px}.ww-page input:where(:not(.ww-assistant-conversation *)):not([type=checkbox]),.ww-page select:where(:not(.ww-assistant-conversation *)){width:100%}`,
-`.ww-page textarea:where(:not(.ww-assistant-conversation *)){width:100%;min-height:320px;resize:vertical;font-family:ui-monospace,monospace;margin:8px 0;white-space:pre-wrap}.ww-page pre:where(:not(.ww-assistant-conversation *)){white-space:pre-wrap;overflow-wrap:anywhere}`,
+`.ww-page textarea:where(:not(.ww-assistant-conversation *)){width:100%;min-height:clamp(8rem,30dvh,20rem);resize:vertical;font-family:ui-monospace,monospace;margin:8px 0;white-space:pre-wrap}.ww-page pre:where(:not(.ww-assistant-conversation *)){white-space:pre-wrap;overflow-wrap:anywhere}`,
 `
     .ww-assistant{border:1px solid var(--dsw-alias-border-l1);border-radius:20px;overflow:hidden;display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--dsw-alias-bg-layer-2);box-shadow:0 4px 18px var(--dsw-alias-border-l1);transition:box-shadow .18s ease}.ww-assistant[hidden]{display:none}.ww-assistant-header{display:flex;align-items:center;gap:10px;padding:18px 16px 10px}.ww-assistant-header h2{font-size:15px}.ww-assistant-header small{display:block;font-size:11px;color:var(--dsw-alias-label-secondary)}.ww-assistant-tools{padding:0 12px 10px;gap:4px}.ww-page .ww-assistant-tools button{border:0;background:transparent;font-size:11px;padding:3px 6px}.ww-assistant-context{padding:8px 14px;border-top:1px solid var(--dsw-alias-border-l1);border-bottom:1px solid var(--dsw-alias-border-l1);font-size:12px;flex:none;max-height:40%;overflow:auto}.ww-assistant-context ul{margin:8px 0;padding-left:16px}.ww-assistant-context li{overflow-wrap:anywhere}.ww-assistant-context textarea{min-height:64px;height:72px;margin:6px 0;font-family:inherit}.ww-assistant-context button{font-size:11px;padding:4px 7px}.ww-assistant-welcome{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:28px;flex:1;text-align:center}.ww-assistant-welcome p{font-size:12px}`,
-`.ww-assistant-conversation{display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden;position:relative}.ww-assistant-float{position:fixed;bottom:24px;right:24px;width:min(460px,calc(100vw - 32px));height:min(760px,calc(100dvh - 80px));z-index:100;resize:both;max-width:calc(100vw - 32px);max-height:calc(100dvh - 80px)}.ww-page .ww-assistant-bubble{position:absolute;right:28px;bottom:28px;z-index:90;touch-action:none;user-select:none;cursor:grab;border-radius:24px;padding:12px 18px;box-shadow:0 6px 20px var(--dsw-alias-border-l3);background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-1)}`,
+`.ww-assistant-conversation{display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden;position:relative}.ww-assistant-float{position:fixed;bottom:24px;right:24px;width:min(calc(100vw - 32px),clamp(22.5rem,30vw,35rem));height:min(calc(100dvh - 80px),clamp(26rem,80dvh,56rem));z-index:100;resize:both;max-width:calc(100vw - 32px);max-height:calc(100dvh - 80px)}.ww-page .ww-assistant-bubble{position:absolute;right:28px;bottom:28px;z-index:90;touch-action:none;user-select:none;cursor:grab;border-radius:24px;padding:12px 18px;box-shadow:0 6px 20px var(--dsw-alias-border-l3);background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-1)}`,
 `
     .ww-page button:where(:not(.ww-assistant-conversation *)){transition:background .12s ease,transform .12s ease}.ww-page button:where(:not(.ww-assistant-conversation *)):active:not(:disabled){transform:scale(.98)}`,
 `.ww-page pre:where(:not(.ww-assistant-conversation *)){font-size:12px}`,
 `
-    .ww-assistant{border-radius:16px;background:var(--dsw-alias-bg-layer-1);box-shadow:0 3px 16px var(--dsw-alias-border-l1)}.ww-assistant-header{padding:14px 14px 8px}.ww-assistant-header small{line-height:18px}.ww-assistant-tools{padding:0 10px 8px}.ww-assistant-context{padding:8px 12px;font-size:11px}.ww-assistant-context .ww-row{gap:3px}.ww-assistant-context button{border:0;background:var(--dsw-alias-interactive-bg-hover);padding:4px 6px}.ww-assistant-context .ww-muted{font-size:11px;line-height:18px;margin:8px 0 0}.ww-assistant-welcome{justify-content:flex-start;padding:64px 28px 24px;gap:12px}.ww-assistant-welcome h3{font-size:17px}.ww-assistant-welcome p{max-width:235px;line-height:22px;margin:0}.ww-assistant-welcome .ww-primary{margin-top:12px;border-radius:9px;padding:8px 16px;font-size:12px}.ww-assistant-welcome .ww-avatar{width:60px;height:60px}.ww-assistant-float{width:min(440px,calc(100vw - 32px))}`,
+    .ww-assistant{border-radius:16px;background:var(--dsw-alias-bg-layer-1);box-shadow:0 3px 16px var(--dsw-alias-border-l1)}.ww-assistant-header{padding:14px 14px 8px}.ww-assistant-header small{line-height:18px}.ww-assistant-tools{padding:0 10px 8px}.ww-assistant-context{padding:8px 12px;font-size:11px}.ww-assistant-context .ww-row{gap:3px}.ww-assistant-context button{border:0;background:var(--dsw-alias-interactive-bg-hover);padding:4px 6px}.ww-assistant-context .ww-muted{font-size:11px;line-height:18px;margin:8px 0 0}.ww-assistant-welcome{justify-content:flex-start;padding:min(4rem,8dvh) 1.75rem 1.5rem;gap:12px}.ww-assistant-welcome h3{font-size:17px}.ww-assistant-welcome p{max-width:32ch;line-height:22px;margin:0}.ww-assistant-welcome .ww-primary{margin-top:12px;border-radius:9px;padding:8px 16px;font-size:12px}.ww-assistant-welcome .ww-avatar{width:60px;height:60px}`,
 `
     .ww-assistant-chat{display:flex;flex-direction:column;flex:1 0 auto;min-height:0}.ww-assistant-float{resize:none}.ww-assistant-float .ww-assistant-header{cursor:move;touch-action:none;user-select:none}.ww-page .ww-assistant-minimize{margin-left:auto;flex:none;width:30px;height:30px;padding:0;border:0;background:transparent;font-size:0;border-radius:8px}.ww-assistant-minimize::before{content:'−';font-size:20px;line-height:1}.ww-resize{position:absolute;z-index:110;touch-action:none}.ww-resize-n,.ww-resize-s{height:8px;left:10px;right:10px;cursor:ns-resize}.ww-resize-n{top:0}.ww-resize-s{bottom:0}.ww-resize-e,.ww-resize-w{width:8px;top:10px;bottom:10px;cursor:ew-resize}.ww-resize-e{right:0}.ww-resize-w{left:0}.ww-resize-ne,.ww-resize-se,.ww-resize-sw,.ww-resize-nw{width:14px;height:14px}.ww-resize-ne{top:0;right:0;cursor:nesw-resize}.ww-resize-se{bottom:0;right:0;cursor:nwse-resize}.ww-resize-sw{bottom:0;left:0;cursor:nesw-resize}.ww-resize-nw{top:0;left:0;cursor:nwse-resize}
     .ww-assistant-float{max-width:none;max-height:none}.ww-resize:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:-2px}`,
@@ -75,7 +126,9 @@ export const styles = [
 `
     .ww-page button:where(:not(.ww-assistant-conversation *)):disabled{transition:opacity .15s ease .5s}.ww-assistant-bubble:active{cursor:grabbing}`,
 `
-    .ww-page .ww-assistant-bubble{position:fixed}`
+    .ww-page .ww-assistant-bubble{position:fixed}`,
+// 2026-11-08 小鲸面板上的“派出去的事”。
+`.ww-dispatch-strip{flex:none;padding:8px 12px;border-bottom:1px solid var(--dsw-alias-border-l1);font-size:11px;max-height:32%;overflow:auto}.ww-dispatch-strip summary{cursor:pointer;color:var(--dsw-alias-label-primary)}.ww-dispatch-strip summary small{margin-left:6px;font-size:11px;color:var(--dsw-alias-label-secondary)}.ww-dispatch-strip ul{list-style:none;margin:6px 0 2px;padding:0;display:flex;flex-direction:column;gap:4px}.ww-dispatch-strip li{display:flex;align-items:center;gap:8px;min-width:0}.ww-dispatch-state{--ww-tone:var(--dsw-alias-label-secondary);flex:none;padding:0 7px;border-radius:999px;font-size:11px;line-height:18px;color:var(--ww-tone);background:color-mix(in srgb,var(--ww-tone) 12%,transparent)}.ww-dispatch-strip li[data-status=waiting] .ww-dispatch-state{--ww-tone:var(--ww-warn,#d97706)}.ww-dispatch-strip li:is([data-status=running],[data-status=queued]) .ww-dispatch-state{--ww-tone:var(--dsw-alias-state-business-primary,#2563eb)}.ww-dispatch-strip li[data-status=completed] .ww-dispatch-state{--ww-tone:var(--ww-ok,#16a34a)}.ww-dispatch-strip li:is([data-status=error],[data-status=incomplete]) .ww-dispatch-state{--ww-tone:var(--ww-err,#dc2626)}.ww-dispatch-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-primary)}.ww-page .ww-dispatch-strip button{flex:none;border:0;border-radius:7px;padding:2px 8px;font-size:11px;background:var(--dsw-alias-interactive-bg-hover)}`
 ];
 
 // 专属错误只解释本领域；输入原文与公共运输错误由共用呈现机制处理。

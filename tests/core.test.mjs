@@ -370,6 +370,9 @@ test('来源与覆盖：选入前拒绝、逐页不跳跃、失败不推进、�
   const model = { ...human, kind: 'model' };
   await assert.rejects(core.execute({ action: 'initialize' }, model), { code: 'USER_ONLY' });
   await core.execute({ action: 'initialize' }, human);
+  // 知识积累右栏和快速切换用的总览只给员工的界面，模型不调。
+  await assert.rejects(core.execute({ action: 'overview' }, model), { code: 'USER_ONLY' });
+  assert.ok((await core.execute({ action: 'overview' }, human)).notes.length > 0);
   await assert.rejects(core.execute({ action: 'source_read', sessionId: 'source' }, model), { code: 'SOURCE_SCOPE' });
   await core.execute({ action: 'source_add', sessionId: 'source' }, human);
   const page = await core.execute({ action: 'source_read', sessionId: 'source' }, model);

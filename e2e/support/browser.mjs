@@ -65,8 +65,16 @@ export async function withPage(browser, t, options, run) {
   try { await run(session); failed = false; } finally { await session.close(failed); }
 }
 
-/** 打开 DSH，点左侧“鲸翼”，等顶栏页签出来。desktop 为真时先模拟 Windows 桌面版的标题栏。 */
-export async function openWhaleWing(page, url, { desktop = false } = {}) {
+/** 小鲸停靠还是悬浮记在本机存储的这一项里（features/assistant/client.js）。 */
+export const assistantFormKey = 'whalewing.assistantForm.v1';
+
+/**
+ * 打开 DSH，点左侧“鲸翼”，等顶栏页签出来。desktop 为真时先模拟 Windows 桌面版的标题栏。
+ * 进鲸翼先到专家团队页，小鲸只留气泡，不自己打开（2026-11-10 用户定）。
+ * assistant 传 'float' 或 'dock' 是当成员工上次选过悬浮或停靠：点气泡打开时照这个样子；只在本机存储里还没有这一项时写入。
+ */
+export async function openWhaleWing(page, url, { desktop = false, assistant } = {}) {
+  if (assistant) await page.addInitScript(([key, form]) => { try { if (!window.localStorage.getItem(key)) window.localStorage.setItem(key, form); } catch { /* 存储用不了时照产品默认 */ } }, [assistantFormKey, assistant]);
   // 新环境没有登录模型，DSH 会弹“开始使用”提示登录或添加 API Key；功能测试不用模型，出现就关掉。
   // 它在侧栏出来后约 0.1 秒弹出，每次打开页面都会弹；先等它出来关掉，并等淡出结束，免得后面量位置时被它的遮罩挡住。
   // 之后再弹（例如刷新页面）由处理器在下一次操作前关掉。
@@ -83,10 +91,19 @@ export async function openWhaleWing(page, url, { desktop = false } = {}) {
   await page.locator('.ww-workbench-header button[data-tab]').first().waitFor();
 }
 
-/** 切到某个页签，等它成为选中状态。 */
+/**
+ * 切到某个页签，等它成为选中状态。
+ * 页头只放钉住的常用页签（2026-11-13）：页头上看得见就点页头的；没钉住的、窗口窄被收进“更多”的，从“全部功能”里打开，
+ * 打开后页头上会有它（没钉住的是一个虚线的临时页签）。
+ */
 export async function openTab(page, name) {
   const tab = page.locator('.ww-workbench-header button[data-tab]', { hasText: name });
-  await tab.click();
+  if (await tab.first().isVisible()) await tab.first().click();
+  else {
+    const launcher = page.locator('.ww-launcher');
+    if (!(await launcher.evaluate(element => element.matches(':popover-open')))) await page.locator('.ww-workbench-header .ww-launch').click();
+    await launcher.locator('.ww-launcher-open', { has: page.locator('.ww-launcher-name', { hasText: name }) }).first().click();
+  }
   await page.waitForFunction(label => [...document.querySelectorAll('.ww-workbench-header button[data-tab]')].some(button => button.textContent.includes(label) && button.getAttribute('aria-pressed') === 'true'), name);
   return tab;
 }

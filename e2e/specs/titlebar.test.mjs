@@ -48,17 +48,18 @@ test('电子书阅读器：小窗和大窗里顶栏的“目录”“字号”�
   const file = files.file('鲸翼测试标题栏.txt', bookText(['第一章 起点', '第二章 中段'].map(heading => [heading, paragraphs(heading, 40)]), { lead: '鲸翼测试标题栏\n作者：鲸翼测试' }));
   await withPage(browser, t, small, async ({ page }) => {
     await openWhaleWing(page, dsh.url, { desktop: true });
-    await openTab(page, '知识卡片');
-    await page.locator('.ww-learning:not(.ww-skeleton)').getByRole('button', { name: '打开书架' }).click();
+    await openTab(page, '每日阅读');
+    await page.locator('.ww-read > .ww-news-header').getByRole('button', { name: '书架', exact: true }).click();
     await page.locator('.ww-library input[type=file]').setInputFiles(file);
     await page.locator('.ww-toast').filter({ hasText: '已导入' }).waitFor({ timeout: 60_000 });
-    await page.locator('.ww-library .ww-crumb', { hasText: '知识卡片' }).click();
-    await page.locator('.ww-learning:not(.ww-skeleton)').getByRole('button', { name: /^读《鲸翼测试标题栏》/ }).click();
+    await page.locator('.ww-library .ww-crumb', { hasText: '每日阅读' }).click();
+    await page.locator('.ww-read .ww-read-book').getByRole('button', { name: /^读《鲸翼测试标题栏》/ }).click();
     const reader = page.getByRole('dialog', { name: '鲸翼测试标题栏' });
     await reader.getByRole('button', { name: '关闭', exact: true }).waitFor();
     const results = await checkBothSizes(page, reader, '阅读器');
     assert.notEqual(results.小窗.rule.startsWith('顶边'), true, `阅读器应居中：${results.小窗.rule}`);
-    assert.ok(results.大窗.bottom - results.大窗.top <= 900 + 1, '大窗时高度仍是上限 900');
+    // 2026-11-08 尺寸不写死：阅读器不再卡 900 上限，大窗时铺满标题栏以下的区域（上下各留 24px）。
+    assert.ok(results.大窗.bottom - results.大窗.top >= results.大窗.height - windowsTitlebar.height - 48 - 2, `大窗时铺满标题栏以下的区域（${Math.round(results.大窗.bottom - results.大窗.top)}px）`);
     assert.ok(results.小窗.bottom - results.小窗.top < results.大窗.bottom - results.大窗.top, '小窗时只是显示区域变矮');
   });
 });
@@ -68,8 +69,8 @@ test('反例：阅读器在小窗不让出标题栏时，检查能报出顶栏�
   const file = files.file('鲸翼测试自检.txt', bookText(['第一章 起点'].map(heading => [heading, paragraphs(heading, 40)]), { lead: '鲸翼测试自检\n作者：鲸翼测试' }));
   await withPage(browser, t, small, async ({ page }) => {
     await openWhaleWing(page, dsh.url, { desktop: true });
-    await openTab(page, '知识卡片');
-    await page.locator('.ww-learning:not(.ww-skeleton)').getByRole('button', { name: '打开书架' }).click();
+    await openTab(page, '每日阅读');
+    await page.locator('.ww-read > .ww-news-header').getByRole('button', { name: '书架', exact: true }).click();
     await page.locator('.ww-library input[type=file]').setInputFiles(file);
     await page.locator('.ww-toast').filter({ hasText: '已导入' }).waitFor({ timeout: 60_000 });
     await page.locator('.ww-library-book[title="鲸翼测试自检"]').click();
@@ -87,7 +88,9 @@ test('反例：阅读器在小窗不让出标题栏时，检查能报出顶栏�
 test('右侧抽屉：小窗和大窗里都从标题栏下面开始，右上角“×”不被窗口按钮挡住', async t => {
   await withPage(browser, t, small, async ({ page }) => {
     await openWhaleWing(page, dsh.url, { desktop: true });
-    await page.locator('.ww-add-card', { hasText: '添加专家' }).click();
+    // 2026-11-13 起添加专家在专家团队页头右边的“＋ 添加”菜单里（原来在左栏顶上）。
+    await page.locator('section.ww-experts > header.ww-pagehead').getByRole('button', { name: '添加专家', exact: true }).click();
+    await page.getByRole('button', { name: '自己填写', exact: true }).click();
     const editor = drawer(page, '添加专家');
     await editor.waitFor();
     const results = await checkBothSizes(page, editor, '添加专家抽屉');
@@ -96,30 +99,37 @@ test('右侧抽屉：小窗和大窗里都从标题栏下面开始，右上角�
   });
 });
 
-// 需求§办公工坊；决策 2026-10-27
-test('办公工坊窗口：小窗和大窗里都在标题栏下面，位置规则一致', async t => {
+// 需求§办公工坊·怎么用（“全部功能项”从右侧拉出抽屉，分类默认收起，点功能项标签打开它的窗口，2026-11-12 改版）；需求§界面通用约定·让出窗口标题栏；决策 2026-10-27
+test('办公工坊：“全部功能项”抽屉和功能项窗口在小窗和大窗里都在标题栏下面，位置规则一致', async t => {
   await withPage(browser, t, small, async ({ page }) => {
     await openWhaleWing(page, dsh.url, { desktop: true });
     await openTab(page, '办公工坊');
-    await page.getByRole('button', { name: '二维码：生成二维码', exact: true }).click();
+    await page.locator('.ww-ws-head').getByRole('button', { name: '全部功能项', exact: true }).click();
+    const shelf = page.getByRole('dialog', { name: '全部功能项', exact: true });
+    await shelf.getByRole('button', { name: '关闭', exact: true }).waitFor();
+    const drawerResults = await checkBothSizes(page, shelf, '全部功能项抽屉');
+    assert.equal(Math.round(drawerResults.小窗.top), Math.round(drawerResults.大窗.top), '两种窗口里抽屉顶边一样');
+    assert.equal(Math.round(drawerResults.小窗.width - drawerResults.小窗.right), Math.round(drawerResults.大窗.width - drawerResults.大窗.right), '右边距一样');
+    await page.setViewportSize(small);
+    // 分类默认收起：点开“二维码”才看得到它的功能项标签。
+    await shelf.getByRole('button', { name: /^二维码，\d+ 个功能项$/ }).click();
+    await shelf.getByRole('button', { name: '二维码：生成二维码', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: '二维码', exact: true });
     await dialog.locator('.ww-tool-body h3', { hasText: '生成二维码' }).waitFor();
     await checkBothSizes(page, dialog, '办公工坊窗口');
   });
 });
 
-// 需求§模型世界；决策 2026-10-27
+// 需求§模型世界·新模型（2026-11-12 改版：默认在“我的模型”，型号名是可点的按钮，点了看详情）；需求§界面通用约定·让出窗口标题栏；决策 2026-10-27
 test('模型详情窗口：小窗和大窗里都在标题栏下面，位置规则一致', async t => {
   await withPage(browser, t, small, async ({ page }) => {
     await openWhaleWing(page, dsh.url, { desktop: true });
     await openTab(page, '模型世界');
-    await page.getByPlaceholder('搜索模型或厂商').fill('DeepSeek V4 Flash');
-    await page.getByRole('button', { name: '查找', exact: true }).click();
-    const row = page.locator('.ww-mw-model-row').filter({ has: page.locator('strong', { hasText: /^DeepSeek V4 Flash$/ }) }).first();
-    await row.hover();
-    await row.getByRole('button', { name: '详情 DeepSeek V4 Flash' }).click();
-    const dialog = page.locator('dialog.ww-mw-dialog[open]');
-    await dialog.locator('h2', { hasText: 'DeepSeek V4 Flash' }).waitFor();
+    await page.locator('.ww-mw-tabs button', { hasText: '新模型' }).click();
+    const row = page.locator('.ww-mw-model-row').filter({ has: page.locator('.ww-mw-name', { hasText: /^DeepSeek V4 Flash$/ }) }).first();
+    await row.locator('.ww-mw-name').click();
+    const dialog = page.locator('dialog.ww-modal[open]').filter({ has: page.locator('header h2', { hasText: /^DeepSeek V4 Flash$/ }) });
+    await dialog.waitFor();
     await checkBothSizes(page, dialog, '模型详情窗口');
   });
 });
@@ -128,7 +138,7 @@ test('模型详情窗口：小窗和大窗里都在标题栏下面，位置规�
 test('居中弹窗（知识检查）：小窗和大窗里都在标题栏下面，位置规则一致', async t => {
   await withPage(browser, t, small, async ({ page }) => {
     await openWhaleWing(page, dsh.url, { desktop: true });
-    await openTab(page, '个人知识');
+    await openTab(page, '知识积累');
     await page.getByRole('button', { name: '知识库工具' }).click();
     await page.getByRole('dialog', { name: '知识库工具' }).getByRole('button', { name: '检查属性与链接', exact: true }).click();
     const dialog = page.locator('dialog.ww-modal[open]');

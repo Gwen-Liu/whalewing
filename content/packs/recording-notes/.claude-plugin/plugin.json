@@ -1,0 +1,7 @@
+{
+  "name": "recording-notes",
+  "displayName": "录音进第二大脑",
+  "version": "1.0.0",
+  "description": "连上 Plaud 录音卡，把会议和随口说的想法整理成要点、决定和待办，按知识库规则存进第二大脑。",
+  "author": { "name": "鲸翼" }
+}

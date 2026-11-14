@@ -1,0 +1,21 @@
+{
+  "name": "web-search",
+  "displayName": "联网搜索",
+  "version": "1.0.0",
+  "description": "接上百炼联网搜索和 Tavily，国内资讯和海外资料都能查，配合内置的调研技能用。",
+  "author": { "name": "鲸翼" },
+  "userConfig": {
+    "dashscopeKey": {
+      "type": "string",
+      "title": "百炼 API Key",
+      "description": "sk- 开头的通用 Key；先在阿里云百炼的 MCP 广场开通“联网搜索”。",
+      "sensitive": true
+    },
+    "tavilyKey": {
+      "type": "string",
+      "title": "Tavily API Key",
+      "description": "tvly- 开头，在 app.tavily.com 申请，每月有免费额度。",
+      "sensitive": true
+    }
+  }
+}

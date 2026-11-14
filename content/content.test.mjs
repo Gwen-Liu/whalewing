@@ -61,6 +61,14 @@ test('内置专家和随包模板库的标识、名称和专业提示词完整',
     for (const name of role.skills.filter(name => !skillNames.includes(name))) assert.ok(routed.includes(name), `${role.id} 绑定了 ${name} 却没写什么情况下加载`);
   }
   for (const phrase of ['主会话', '全部专家', '当前授权', '同一文件', '原生子代理', '不上传个人知识', '先调查', '先看再改', '失败两次', '不编', '亲自验证', '先加载再动手', '原样转达']) assert.ok(commonPrompt.includes(phrase), phrase);
+  // 2026-11-14 专家改前改后两轮对比里两轮都出现的问题：每次跑测试都要放宽权限、临时文件留在工作区根目录、用例漏界线。
+  for (const phrase of ['--test-isolation=none', '一次说清要做哪几件', '临时脚本、截图、调试输出放系统临时目录', '用完删掉']) assert.ok(commonPrompt.includes(phrase), phrase);
+  // 2026-11-14 用户定：小鲸是员工的超级助理，员工开口让它改配置、开关功能就替员工改（照常经批准、改完核对），没开口不主动改。
+  const manager = roles.find(r => r.id === 'manager').prompt;
+  for (const phrase of ['员工开口才替他改', '员工明确让你做时替他做', '每次照常经员工批准', '做完回读核对', '怎么改回去', '员工没开口时只提建议，不主动改']) assert.ok(manager.includes(phrase), phrase);
+  assert.ok(!manager.includes('只说明怎么做，不替员工做'), '旧的“只说明不替员工做”去掉了');
+  const testing = roles.find(r => r.id === 'testing').prompt;
+  for (const phrase of ['界线本身和两侧各测一个', '列成待确认问题', '不自己定一个当成需求']) assert.ok(testing.includes(phrase), phrase);
   const development = roles.find(r => r.id === 'development').prompt;
   for (const phrase of ['不打补丁', '根因', '简单优先', '改动精准', '注释写“为什么”', '不逐行翻译']) assert.ok(development.includes(phrase), phrase);
   assert.match(expertTemplates.find(r => r.id === 'implementation').prompt, /Excel.*脚本/u);
@@ -182,10 +190,12 @@ test('收录的开源技能与来源清单逐项一致：中文说明、固定�
 
 test('小鲸默认保留原技能并绑定可复制的插件管理方法', async () => {
   const manager = roles.find(role => role.id === 'manager');
-  assert.deepEqual(manager.skills, [...skillNames, 'whalewing-clarify', 'whalewing-writing', 'office', 'whalewing-plugin-management', 'obsidian-markdown', 'obsidian-bases', 'json-canvas']);
+  assert.deepEqual(manager.skills, [...skillNames, 'whalewing-clarify', 'whalewing-writing', 'office', 'whalewing-plugin-management', 'whalewing-toolbox', 'obsidian-markdown', 'obsidian-bases', 'json-canvas']);
   assert.ok(roles.filter(role => role.id !== 'manager').every(role => !role.skills.includes('whalewing-plugin-management')));
   const features = await readFile(join(root, '../features/index.js'), 'utf8');
   assert.match(features, /id: 'assistant', kind: 'base', skills: \['whalewing-plugin-management'\]/u);
+  // 办公工坊技能跟着办公工坊这项可选功能走，关掉功能时技能也藏起来（2026-11-12）。
+  assert.match(features, /id: 'toolbox', kind: 'optional', skills: \['whalewing-toolbox'\]/u);
   const body = await readFile(join(root, 'skills/whalewing-plugin-management/SKILL.md'), 'utf8');
   assert.match(body, /^---\nname: whalewing-plugin-management\ndescription: [^\n]+\n---\n/u);
   for (const boundary of ['plugin_manager', 'nextOffset', 'entryId', 'EXTENDING.md', 'MAINTAINING.md', 'examples/feature-starter', 'examples/stateful-feature', 'link:', '审批', '退出']) assert.ok(body.includes(boundary), boundary);

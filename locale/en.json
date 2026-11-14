@@ -1,6 +1,7 @@
 {
   "meta": {
     "title": "Whalewing",
-    "description": "Core features: expert team, Whalewing assistant, personal knowledge, skill growth and scheduled tasks. AI web, toolbox, knowledge cards and model world can be switched independently. Disabling the core stops the workbench; use the master switch on the Whalewing card."
+    "description": "Core features: expert team, Whalewing assistant, knowledge, Skill Center, and scheduled tasks. AI web, toolbox, daily reading and model world can be switched independently. Disabling the core stops the workbench; use the master switch on the Whalewing card.",
+    "detail": "locale/detail.en.md"
   }
 }

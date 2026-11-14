@@ -1,5 +1,11 @@
-/** 自动任务的四种用途：每日记忆（knowledge）、每周思考（thinking）、自建任务和每日资讯。前后端和会话身份共用这一份。 */
-export const automationPurposes = ['knowledge', 'thinking', 'custom', 'news'];
+/**
+ * 自动任务的五种用途：每日记忆（knowledge）、每周思考（thinking）、自建任务、每日资讯，
+ * 和扩展登记的任务（extension，2026-11-10 起）。前后端和会话身份共用这一份。
+ */
+export const automationPurposes = ['knowledge', 'thinking', 'custom', 'news', 'extension'];
+
+/** 扩展登记的任务在会话里记下是谁的：`功能id/任务id`，两段都是小写字母、数字和夹在中间的单个连字符。 */
+export const taskOwnerPattern = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*\/[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 /** 工作区身份由宿主登记表持有；全选保留排除项以覆盖后续新增工作区。 */
 export function workspaceScopeContract(z) {
@@ -19,7 +25,7 @@ export function workspaceScopeContract(z) {
  * - error：那一轮因模型或工具出错而结束
  * - interrupted：被手动停止，或 DSH 关闭打断
  * - incomplete：输出达到长度上限，结果可能不完整
- * - skipped：送达后没有执行（被跳过、被拦下或从排队中移除，如知识卡片关闭时的资讯）
+ * - skipped：送达后没有执行（被跳过、被拦下或从排队中移除，如每日阅读关闭时的资讯）
  * - unknown：送达已确认，但会话记录读不到或没有这次的记录
  */
 export const runStatuses = ['waiting', 'running', 'completed', 'error', 'interrupted', 'incomplete', 'skipped', 'unknown'];
@@ -39,7 +45,8 @@ export function automationContract(z) {
   const record = z.strictObject({ id: text, kind: z.enum(['after', 'at', 'every', 'daily', 'weekly', 'cron', 'rrule']), title: text, prompt: text, scheduledAt: text,
     afterSeconds: z.number().optional(), everySeconds: z.number().optional(), time: text.optional(), timeZone: text.optional(), weekdays: z.array(z.number()).optional(), expression: text.optional(), rrule: text.optional() });
   const input = z.union([
-    z.strictObject({ action: z.literal('create'), sessionId: id, purpose: z.literal('custom'), spec, workspaceScope: workspaceScope.optional() }),
+    // 自建任务可以挂到某位专家名下（2026-11-08）：任务会话选好这位专家，每次运行带上它的说明、记忆和模型。
+    z.strictObject({ action: z.literal('create'), sessionId: id, purpose: z.literal('custom'), spec, workspaceScope: workspaceScope.optional(), expertId: id.optional() }),
     z.strictObject({ action: z.literal('create'), sessionId: id, purpose: z.literal('knowledge'), spec: timing, workspaceScope: workspaceScope.optional() }),
     // 每周思考只读知识库，不读会话，没有处理范围。
     z.strictObject({ action: z.literal('create'), sessionId: id, purpose: z.literal('thinking'), spec: timing }),
@@ -58,12 +65,17 @@ export function automationContract(z) {
   const runStatus = z.enum(runStatuses);
   const entry = record.extend({ sessionId: text, status: z.enum(['active', 'paused', 'inactive']), lastDelivery: delivery.optional(), lastRun: delivery.extend({ status: runStatus }).optional() });
   const presentation = { workspaceScope: workspaceScope.optional(), displayPrompt: text };
+  // 扩展登记的任务：哪个扩展、现在开没开（没开时到点跳过）、给员工看的说明、读不读会话和从什么时候起读。
+  const owner = z.strictObject({
+    feature: text, task: text, package: text.optional(), label: z.strictObject({ zh: text, en: text }).optional(),
+    registered: z.boolean(), description: text.optional(), readSessions: z.boolean().optional(), since: z.number().optional(),
+  });
   // outdated：内置任务的指令不是当前版本（比如升级前建的“DSH 工作知识整理”），页面提示员工点一下换成新版。
-  const managed = entry.extend({ purpose, ...presentation, outdated: z.literal(true).optional() });
+  const managed = entry.extend({ purpose, ...presentation, outdated: z.literal(true).optional(), extension: owner.optional() });
   const result = z.union([
     z.strictObject({ available: z.boolean(), controls: z.boolean().optional(), tasks: z.array(managed), legacyTasks: z.array(entry), issues: z.array(z.strictObject({ sessionId: text, message: text })) }),
     z.strictObject({ task: z.union([record, managed]), recovered: z.boolean() }),
-    z.strictObject({ task: record, purpose, status: z.enum(['active', 'paused', 'inactive']), ...presentation }), z.strictObject({ task: record, legacy: z.literal(true), status: z.enum(['active', 'paused', 'inactive']) }),
+    z.strictObject({ task: record, purpose, status: z.enum(['active', 'paused', 'inactive']), ...presentation, extension: owner.optional() }), z.strictObject({ task: record, legacy: z.literal(true), status: z.enum(['active', 'paused', 'inactive']) }),
     z.strictObject({ id: text, records: z.array(delivery.extend({ prompt: text.optional(), status: runStatus.optional() })), earlierRecordsUnavailable: z.boolean(), earlierRecordsPruned: z.boolean(), retention: z.strictObject({ days: z.number(), records: z.number() }), nextBefore: text.optional() }),
     z.strictObject({ id: text, updated: z.boolean(), record: record.optional(), code: text.optional() }),
     z.strictObject({ id: text, deleted: z.boolean(), code: text.optional() }),

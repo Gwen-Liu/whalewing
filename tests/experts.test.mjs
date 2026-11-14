@@ -36,7 +36,7 @@ import Whalewing from '../index.js';
 import AiWeb from '../features/ai-web/host.js';
 import Cards from '../features/cards/host.js';
 import ModelWorld from '../features/model-world/host.js';
-import * as Toolbox from '../features/toolbox/host.js';
+import Toolbox from '../features/toolbox/host.js';
 import { automationProjection } from '../src/identity.js';
 
 // DSH 0.2.2 起 dsh-tools 不再导出测试用的 defineContentToolFixture；照它原来的定义在本地写：内容块就是工具的输出值。
@@ -57,7 +57,7 @@ class Adapter extends LlmAdapter {
   }
 }
 
-async function harness(t, persistence = true, expertConfig = {}) {
+async function harness(t, persistence = true, expertConfig = {}, beforeMount = null) {
   const ctx = new Context();
   const directory = await mkdtemp(path.join(os.tmpdir(), 'whalewing-experts-'));
   t.after(async () => {
@@ -102,6 +102,7 @@ async function harness(t, persistence = true, expertConfig = {}) {
     saved.set(session.id, session.snapshotEvents());
   });
   // 专家操作自己有 15 秒时限；测试只验证对错，放宽到上限，慢电脑、全量并行时不因为慢而报错（要测时限的用例自己传 operationMs）。
+  await beforeMount?.(ctx);
   const mounted = await mountFeatures(ctx, directory, { experts: { operationMs: 120000, ...expertConfig } }, false);
   const expertPlugin = mounted.service.registry.bases.get('experts').fiber;
   await expertPlugin.await();
@@ -996,11 +997,11 @@ test('没装专家来源时专家列表、模型工具和管理列表与原来�
   const h = await harness(t);
   const registry = h.ctx.whalewingExperts;
   assert.deepEqual(registry.list(), registry.store.list());
-  assert.deepEqual(await registry.manage({ action: 'list' }), registry.store.list(true));
+  assert.deepEqual(await registry.manage({ action: 'list' }), { ...registry.store.list(true), roster: { marks: {}, idleDays: 14 } });
   assert.ok((await registry.manage({ action: 'list' })).experts.every(expert => !Object.hasOwn(expert, 'source') && !Object.hasOwn(expert, 'readOnly')));
   // 只登记功能、不登记专家来源的扩展也不改变列表。
   await h.ctx.plugin({ inject: ['whalewing'], apply(current) { current.whalewing.features.register(current, { id: 'plain', api: 1, package: 'dsh-fixture-plain' }); } });
-  assert.deepEqual(await registry.manage({ action: 'list' }), registry.store.list(true));
+  assert.deepEqual(await registry.manage({ action: 'list' }), { ...registry.store.list(true), roster: { marks: {}, idleDays: 14 } });
 });
 
 test('来源专家和自己的专家一起列出，可以选来开会话并注入团队提示词', async t => {
@@ -1106,4 +1107,170 @@ test('扩展给小鲸起名：列表和读取换成新名字，保存不把它�
   assert.deepEqual([restored.name, restored.description], ['小鲸助手', '改过的介绍']);
   await turn(h.ctx, h.agent);
   assert.doesNotMatch(context(), /在这里助手叫/);
+});
+
+test('专家说明带上关于员工和自己的记忆；记忆工具写完下一轮重发全文，只有小鲸能改别人的记忆，审批拒绝就不写', async t => {
+  const h = await harness(t);
+  const { default: SandboxPolicy } = await import('@deepseek-ai/dsh-sandbox-policy');
+  let answer = 'allowed-once';
+  h.ctx.provide('approval', { request: async () => answer });
+  await h.ctx.plugin(SandboxPolicy, { mode: 'workspace-write' });
+  await new Promise(resolve => setImmediate(resolve));
+  const contexts = () => h.adapter.requests.at(-1).messages.filter(message => message.source.kind === 'whalewing-expert').map(message => message.content[0].text);
+  const memory = (args, agent = h.agent) => h.ctx.tools.execute({ calls: [{ id: `memory-${Math.random()}`, name: 'whalewing_memory', arguments: JSON.stringify(args) }], agent, signal: new AbortController().signal }).then(batch => batch.results[0].result);
+  const text = result => result.content?.[0]?.text ?? JSON.stringify(result);
+
+  // 没选专家时没有“自己的记忆”。
+  assert.equal((await memory({ action: 'add', section: '规矩', text: 'x' })).isError, true);
+  await h.run({ expertId: 'development' });
+  await turn(h.ctx, h.agent);
+  const first = contexts().at(-1);
+  assert.match(first, /【关于员工】个人知识「关于我」还没写/);
+  assert.match(first, /【你的记忆】（00-系统\/专家记忆\/研发专家\.md）\n还没有记过。/);
+  assert.match(first, /记到你的记忆/);
+
+  const added = await memory({ action: 'add', section: '规矩', text: '前端项目都用 pnpm' });
+  assert.ok(!added.isError, text(added));
+  await turn(h.ctx, h.agent);
+  const second = contexts().at(-1);
+  assert.match(second, /【鲸翼专家上下文 · 非用户原话】\n本轮专家身份：研发专家[\s\S]*## 规矩\n- \d{4}-\d{2}-\d{2} 前端项目都用 pnpm/);
+  // 记忆没再变：只发短提醒。
+  await turn(h.ctx, h.agent);
+  assert.match(contexts().at(-1), /前面那条完整的鲸翼专家上下文继续有效/);
+
+  // 研发专家不能改设计专家的记忆；小鲸可以。
+  assert.match(text(await memory({ action: 'add', section: '规矩', text: 'x', expertId: 'design' })), /只能读写自己的记忆/);
+  await h.run({ expertId: 'manager' });
+  const forDesign = await memory({ action: 'add', section: '进度', text: '品牌色已定为天青', expertId: 'design' });
+  assert.ok(!forDesign.isError, text(forDesign));
+  assert.match(text(await memory({ action: 'read', expertId: 'design' })), /品牌色已定为天青/);
+
+  // 记到全局记忆：写进关于我的“怎样和我协作”，之后每位专家都带上。
+  assert.ok(!(await memory({ action: 'add_global', text: '回答先说结论' })).isError);
+  await h.run({ expertId: 'design' });
+  await turn(h.ctx, h.agent);
+  assert.match(contexts().at(-1), /【关于员工】个人知识「关于我」（30-领域\/个人管理\/关于我\.md）里员工自己写的：\n### 怎样和我协作\n- \d{4}-\d{2}-\d{2} 回答先说结论/);
+  assert.match(contexts().at(-1), /品牌色已定为天青/);
+
+  // 审批拒绝：不写。
+  answer = 'rejected';
+  const before = text(await memory({ action: 'read' }));
+  assert.equal((await memory({ action: 'add', section: '规矩', text: '不该写进去' })).isError, true);
+  assert.equal(text(await memory({ action: 'read' })), before);
+});
+
+test('定时任务会话挂到专家名下：用正式命令选专家、标题改成“专家名 · 任务名”，专家说明里提醒跑完更新记忆；小鲸不挂', async t => {
+  const h = await harness(t);
+  const automation = h.ctx.get('whalewingAutomation');
+  assert.ok(automation, '定时任务功能已加载');
+  const task = await h.create('whalewing-auto-expert');
+  const claimed = await h.ctx.commands.execute(task, `/whalewing ${JSON.stringify({ action: 'automation_claim', purpose: 'custom' })}`, [], new AbortController().signal);
+  assert.equal(claimed.result.kind, 'success', claimed.result.text);
+  await assert.rejects(automation.bindExpert(task.id, 'manager', '不该挂'), { code: 'AUTOMATION_EXPERT' });
+  await automation.bindExpert(task.id, 'research', '每天看 DSH 新版本');
+  assert.equal(h.state(task).view.expertId, 'research');
+  assert.equal(h.ctx.whalewingExperts.selectedFor(task), 'research');
+  const listed = (await h.ctx.sessionController.list({})).items?.find?.(item => item.sessionId === task.id) ?? null;
+  if (listed?.title !== undefined) assert.equal(listed.title, '研究专家 · 每天看 DSH 新版本');
+  await turn(h.ctx, task);
+  const context = h.adapter.requests.at(-1).messages.filter(message => message.source.kind === 'whalewing-expert').at(-1).content[0].text;
+  assert.match(context, /本轮专家身份：研究专家/);
+  assert.match(context, /【这是员工给你的定时任务】[\s\S]*whalewing_memory[\s\S]*不用先问员工/);
+  // 普通会话里没有这段提醒。
+  await h.run({ expertId: 'research' });
+  await turn(h.ctx, h.agent);
+  assert.doesNotMatch(h.adapter.requests.at(-1).messages.filter(message => message.source.kind === 'whalewing-expert').at(-1).content[0].text, /这是员工给你的定时任务/);
+});
+
+test('专家自己的定时任务里记“进度”不用审批，记“规矩”照样要批；内置定时任务不能选专家', async t => {
+  const h = await harness(t);
+  const { default: SandboxPolicy } = await import('@deepseek-ai/dsh-sandbox-policy');
+  const asked = [];
+  h.ctx.provide('approval', { request: async request => { asked.push(request); return 'allowed-once'; } });
+  await h.ctx.plugin(SandboxPolicy, { mode: 'workspace-write' });
+  await new Promise(resolve => setImmediate(resolve));
+  const automation = h.ctx.get('whalewingAutomation');
+  const claim = async (id, purpose) => {
+    const session = await h.create(id);
+    const claimed = await h.ctx.commands.execute(session, `/whalewing ${JSON.stringify({ action: 'automation_claim', purpose })}`, [], new AbortController().signal);
+    assert.equal(claimed.result.kind, 'success', claimed.result.text);
+    return session;
+  };
+  const memory = (args, agent) => h.ctx.tools.execute({ calls: [{ id: `memory-${Math.random()}`, name: 'whalewing_memory', arguments: JSON.stringify(args) }], agent, signal: new AbortController().signal }).then(batch => batch.results[0].result);
+  const task = await claim('whalewing-auto-progress', 'custom');
+  await automation.bindExpert(task.id, 'research', '每天看 DSH 新版本');
+  const progress = await memory({ action: 'add', section: '进度', text: '2026-11-08：看到 0.2.2-rc.1' }, task);
+  assert.ok(!progress.isError, progress.content?.[0]?.text);
+  assert.equal(asked.length, 0, '定时任务里记进度不弹审批');
+  // 模型把日期写进正文时不重复记两个日期。
+  assert.match(JSON.parse(progress.content[0].text).entry, /^- \d{4}-\d{2}-\d{2} 看到 0\.2\.2-rc\.1$/);
+  assert.ok(!(await memory({ action: 'rewrite', section: '进度', entries: ['2026-11-08 已看到 0.2.2-rc.1'] }, task)).isError);
+  assert.equal(asked.length, 0);
+  assert.ok(!(await memory({ action: 'add', section: '规矩', text: '只看正式版' }, task)).isError);
+  assert.equal(asked.length, 1, '规矩照样要批');
+  assert.match(asked[0].displayReason.zh, /研究专家的记忆（知识库“00-系统\/专家记忆”里的一篇）/);
+  assert.doesNotMatch(asked[0].displayReason.zh, /[A-Za-z]:[\/]/, '审批说明不写本机完整路径');
+  // 普通会话里记进度照样要批。
+  await h.run({ expertId: 'research' });
+  assert.ok(!(await memory({ action: 'add', section: '进度', text: '普通会话里记一条' }, h.agent)).isError);
+  assert.equal(asked.length, 2);
+
+  const builtin = await claim('whalewing-auto-knowledge', 'knowledge');
+  const picked = await h.ctx.commands.execute(builtin, `/whalewing-expert ${JSON.stringify({ expertId: 'research' })}`, [], new AbortController().signal);
+  assert.equal(picked.result.kind, 'error');
+  assert.match(picked.result.text, /内置的定时任务/);
+  assert.equal(h.ctx.whalewingExperts.selectedFor(builtin), null);
+  // 以前（没拦之前）选上过专家的内置任务：先选专家、再认领成内置任务，也当没选。
+  const earlier = await h.create('whalewing-auto-thinking');
+  const chosen = await h.ctx.commands.execute(earlier, `/whalewing-expert ${JSON.stringify({ expertId: 'research' })}`, [], new AbortController().signal);
+  assert.equal(chosen.result.kind, 'success', chosen.result.text);
+  assert.equal(h.ctx.whalewingExperts.selectedFor(earlier), 'research');
+  const claimed = await h.ctx.commands.execute(earlier, `/whalewing ${JSON.stringify({ action: 'automation_claim', purpose: 'thinking' })}`, [], new AbortController().signal);
+  assert.equal(claimed.result.kind, 'success', claimed.result.text);
+  assert.equal(h.ctx.whalewingExperts.selectedFor(earlier), null);
+  await turn(h.ctx, earlier);
+  const context = h.adapter.requests.at(-1).messages.filter(message => message.source.kind === 'whalewing-expert').at(-1)?.content[0].text ?? '';
+  assert.doesNotMatch(context, /本轮专家身份：研究专家/);
+});
+
+test('以前置顶过的专家第一次记成选用，之后不再迁移', async t => {
+  const { pinDomain } = await import('../features/experts/host.js');
+  const h = await harness(t, true, {}, async ctx => {
+    const pins = await ctx.storageDomain.open(pinDomain);
+    await pins.table('pins').put('research', { at: 1 });
+    await pins.close();
+  });
+  const roster = (await h.ctx.whalewingExperts.manage({ action: 'list' })).roster;
+  assert.deepEqual(Object.keys(roster.marks), ['research']);
+  assert.equal(roster.marks.research.state, 'picked');
+  assert.ok(roster.marks.research.at > 1, '记成迁移那一刻刚选用，不沿用当初置顶的时间');
+});
+
+test('选用、放回和天数另存，不在了的不列，小鲸不收；详情里读写记忆，名帖拿到各专家记了几条', async t => {
+  const h = await harness(t);
+  const registry = h.ctx.whalewingExperts;
+  const before = Date.now();
+  const picked = (await registry.manage({ action: 'roster_mark', id: 'writing', state: 'picked' })).roster;
+  assert.deepEqual(Object.keys(picked.marks), ['writing']);
+  assert.equal(picked.marks.writing.state, 'picked'); assert.ok(picked.marks.writing.at >= before);
+  assert.equal(picked.idleDays, 14);
+  assert.equal((await registry.manage({ action: 'roster_mark', id: 'writing', state: 'returned' })).roster.marks.writing.state, 'returned');
+  assert.equal((await registry.manage({ action: 'roster_settings', idleDays: 30 })).roster.idleDays, 30);
+  assert.equal((await registry.manage({ action: 'roster_settings', idleDays: 0 })).roster.idleDays, 0, '0 是不自动放回');
+  assert.deepEqual((await registry.manage({ action: 'list' })).roster.marks.writing.state, 'returned');
+  await assert.rejects(registry.manage({ action: 'roster_mark', id: 'missing-expert', state: 'picked' }));
+  await assert.rejects(registry.manage({ action: 'roster_mark', id: 'manager', state: 'picked' }), /小鲸常驻在右边/);
+  await assert.rejects(registry.manage({ action: 'roster_settings', idleDays: 400 }));
+  // 专家记录本身不加字段，旧版插件照常读。
+  assert.equal(Object.hasOwn(registry.get('writing'), 'roster'), false);
+
+  const empty = (await registry.manage({ action: 'memory', id: 'development' })).memory;
+  assert.deepEqual(empty, { path: '00-系统/专家记忆/研发专家.md', empty: true, rules: [], progress: [], over: false });
+  assert.deepEqual((await registry.manage({ action: 'memory_save', id: 'development', rules: [], progress: [] })).memory.empty, true, '两节都空时不建空笔记');
+  const saved = (await registry.manage({ action: 'memory_save', id: 'development', rules: ['前端项目用 pnpm', '2026-11-01 提交信息不加署名'], progress: [] })).memory;
+  assert.equal(saved.empty, false);
+  assert.match(saved.rules[0], /^\d{4}-\d{2}-\d{2} 前端项目用 pnpm$/);
+  assert.equal(saved.rules[1], '2026-11-01 提交信息不加署名');
+  assert.deepEqual((await registry.manage({ action: 'memory_summary' })).memories, { development: 2 });
+  await assert.rejects(registry.manage({ action: 'memory_save', id: 'development', rules: ['长'.repeat(520)], progress: [] }), /一条最多 500 字/);
 });

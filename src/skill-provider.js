@@ -25,8 +25,12 @@ export class WhalewingSkillProvider extends FileSystemSkillProvider {
     return this.active().some(feature => feature.package === 'dsh-whalewing' && feature.skills.some(directory => path.basename(directory) === candidate.name));
   }
 
+  // 扩展带的技能目录，加上开着的插件包里的技能目录：都按随包技能交给 DSH 发现，只读。
   extensionRoots() {
-    return new Set(this.active().filter(feature => feature.kind === 'extension').flatMap(feature => feature.skills.map(directory => path.resolve(directory))));
+    return new Set([
+      ...this.active().filter(feature => feature.kind === 'extension').flatMap(feature => feature.skills.map(directory => path.resolve(directory))),
+      ...(this.library.packs?.enabledRoots ?? []),
+    ]);
   }
 
   prune() {
@@ -43,6 +47,7 @@ export class WhalewingSkillProvider extends FileSystemSkillProvider {
   async list(options) {
     await this.library.ensureReady(options.signal);
     if (this.closed) fail('FEATURE_CLOSED', '技能来源已卸载');
+    await this.library.packs?.load(options.signal);
     const observed = await super.list(options);
     const candidates = Array.isArray(observed) ? observed : observed.candidates;
     const accepted = [];

@@ -5,7 +5,7 @@ const fn = (id, title, brief, accept, extra = {}) => ({ id, title, brief, accept
 
 export const utilityTools = Object.freeze([
   { id: 'convert', title: '格式转换', brief: 'Word、PDF、Excel、图片互相转换', icon: 'convert', color: '#2563eb', functions: [
-    fn('word-pdf', 'Word 转 PDF', '中文正文、表格与图片重新排版', '.docx', { description: '支持 DOCX 正文、基础文字样式、规则表格和普通图片，重新排版为 A4，最多 200 页。不支持公式、图表、浮动图形、修订和合并单元格。' }),
+    fn('office-pdf', 'Office 转 PDF', 'Word、Excel、PPT 转成 PDF', '.doc,.docx,.xls,.xlsx,.ppt,.pptx', { office: true, keywords: 'word转pdf excel转pdf ppt转pdf pptx docx xlsx 文档转pdf', description: '用 DSH 自带的转换（随包 LibreOffice），排版和原文件接近；Excel 按打印设置分页。和 Word、WPS 自己导出的 PDF 在分页、字体上可能略有不同。' }),
     fn('pdf-word', 'PDF 转 Word', '文字型 PDF 转成可编辑文档', '.pdf', { description: '按页重建可编辑的文字，不恢复原排版、图片和表格。扫描件（图片 PDF）无法转换。' }),
     fn('images-pdf', '图片转 PDF', '多张截图、照片按顺序合成 PDF', images, { multiple: true }),
     fn('pdf-images', 'PDF 转图片', '每页导出为 PNG', '.pdf'),
@@ -21,7 +21,7 @@ export const utilityTools = Object.freeze([
     fn('pdf-compress', '压缩 PDF', '缩小扫描件和图片多的 PDF', '.pdf', { keywords: 'pdf压缩 压缩pdf 减小 变小 体积 文件太大', description: '只重新处理 PDF 里的图片：按档位降低分辨率和 JPEG 质量，文字、矢量和页面不变。以文字和字体为主的 PDF 基本压不动，压后没有变小时不生成新文件。' }),
     fn('pdf-pages', '页面整理', '缩略图里拖动排序、旋转、删除页面', '.pdf', { keywords: '排序 删除页 调整顺序 缩略图 页面顺序' }),
     fn('pdf-rotate', '旋转页面', '纠正页面方向', '.pdf'),
-    fn('pdf-number', '添加页码', '页脚标注“第几页 / 共几页”', '.pdf'),
+    fn('pdf-number', '添加页码', '页脚中间印“1 / 24”这样的页码', '.pdf'),
     fn('pdf-watermark', '添加水印', '为文档加中文文字水印', '.pdf'),
     fn('pdf-text', '提取文字', '导出文字型 PDF 中的文字', '.pdf'),
   ] },
@@ -73,7 +73,6 @@ export const utilityGaps = Object.freeze([
   { words: ['tif', 'tiff'], text: 'TIFF 图片尚未内置转换' },
   { words: ['svg'], text: 'SVG 转位图尚未内置；“生成二维码”可以直接输出 SVG' },
   { words: ['ocr', '文字识别', '识别文字', '提字', '扫描件'], text: 'OCR 文字识别（图片、扫描件提取文字）尚未内置' },
-  { words: ['ppt转pdf', 'pptx', 'excel转pdf', 'xlsx转pdf'], text: 'Excel、PPT 转 PDF 尚未内置' },
   { words: ['视频压缩', '压缩视频', '视频转码', '剪视频', '视频剪切'], text: '视频压缩、转码与剪切尚未内置' },
   { words: ['抠图', '去背景', '背景移除'], text: '去背景尚未内置' },
   { words: ['转mp3', '导出mp3', '输出mp3', 'mp3编码'], text: '音频只导出 WAV（无损），不导出 MP3' },

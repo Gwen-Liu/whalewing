@@ -27,10 +27,22 @@ export function createCardsClient(bridge, t, z, automation) {
       if (!Object.hasOwn(result.data, expected)) throw failure(t('badReply'), 'bad_reply');
       return result.data;
     };
+    // 阅读设置、划线、回顾和存一条：同样两头都按契约校验。
+    const readingRequest = async (input, signal) => {
+      const checked = newsSchema.reading.manage.safeParse(input);
+      if (!checked.success) throw failure(readableInput(checked.error.message), 'input');
+      signal?.throwIfAborted();
+      const result = newsSchema.reading.result.safeParse(unwrap(await featureRemote('whalewingCards').manageReading(checked.data, signal)));
+      if (!result.success) throw failure(t('badReply'), 'bad_reply');
+      const expected = { home: 'home', settings: 'settings', highlights: 'highlights', highlight: 'highlight', note: 'highlight', unhighlight: 'removed', restore: 'highlight', looked: 'review', more: 'review', capture: 'capture' }[input.action];
+      if (!Object.hasOwn(result.data, expected)) throw failure(t('badReply'), 'bad_reply');
+      return result.data;
+    };
     const newsScheduleRequest = async (input, signal) => newsSchema.scheduleResult.parse(unwrap(await featureRemote('whalewingCards').manageSchedules(newsSchema.scheduleInput.parse(input), signal)));
 
   return {
-    newsRequest, newsScheduleRequest, libraryRequest, openAutomation: automation.openAutomation,
+    newsRequest, newsScheduleRequest, libraryRequest, readingRequest, openAutomation: automation.openAutomation,
+    showKnowledge: () => bridge.showWorkbench?.('knowledge'),
     scheduleAdapter: Object.freeze({ validate: input => newsSchema.scheduleInput.parse(input), submit: newsScheduleRequest }),
   };
 }

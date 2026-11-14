@@ -36,14 +36,17 @@ export function removeTree(target) {
   fs.unlinkSync(target);
 }
 
-function writeProfile(home, profile) {
+/** extensions：另外要装的扩展包目录（比如 tests/fixtures/team-source 那个测试用团队扩展），和鲸翼一样用联接装进去。 */
+function writeProfile(home, profile, extensions = []) {
   const root = path.join(home, 'profiles', profile);
   fs.mkdirSync(path.join(root, 'node_modules'), { recursive: true });
   fs.symlinkSync(pluginRoot, path.join(root, 'node_modules', 'dsh-whalewing'), 'junction');
+  const extra = extensions.map(dir => ({ dir, name: JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).name }));
+  for (const item of extra) fs.symlinkSync(item.dir, path.join(root, 'node_modules', item.name), 'junction');
   fs.writeFileSync(path.join(root, 'package.json'), `${JSON.stringify({
     name: `whalewing-${profile}`, private: true,
-    dependencies: { 'dsh-whalewing': `link:${slash(pluginRoot)}` },
-    dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-whalewing'] } },
+    dependencies: { 'dsh-whalewing': `link:${slash(pluginRoot)}`, ...Object.fromEntries(extra.map(item => [item.name, `link:${slash(item.dir)}`])) },
+    dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-whalewing', ...extra.map(item => item.name)] } },
   }, null, 2)}\n`);
   fs.writeFileSync(path.join(root, 'cordis.yml'), '[]\n');
   fs.writeFileSync(path.join(root, 'pnpm-workspace.yaml'), 'packages:\n  - .\n\nnodeLinker: hoisted\nautoInstallPeers: false\n');
@@ -89,17 +92,18 @@ export async function startDsh(options = {}) {
   }
 }
 
-async function launch(root, { profile = 'e2e', seed, timeout = 90_000 }) {
-  const dirs = { root, home: path.join(root, 'home'), vault: path.join(root, 'vault'), documents: path.join(root, 'documents') };
-  for (const dir of [dirs.home, dirs.vault, dirs.documents]) fs.mkdirSync(dir, { recursive: true });
-  writeProfile(dirs.home, profile);
+async function launch(root, { profile = 'e2e', seed, timeout = 90_000, port: fixedPort, extensions = [] }) {
+  // agents：DSH 和别的 AI 工具共读的技能目录（~/.agents）换成临时的，不读本机真实的那份。
+  const dirs = { root, home: path.join(root, 'home'), vault: path.join(root, 'vault'), documents: path.join(root, 'documents'), agents: path.join(root, 'agents') };
+  for (const dir of [dirs.home, dirs.vault, dirs.documents, dirs.agents]) fs.mkdirSync(dir, { recursive: true });
+  writeProfile(dirs.home, profile, extensions);
   const patch = path.join(root, 'e2e.patch.yml');
   fs.writeFileSync(patch, patchYaml(dirs));
   await seed?.(dirs);
-  const port = await freePort();
+  const port = fixedPort ?? await freePort();
   const logPath = path.join(root, 'host.log'), log = fs.createWriteStream(logPath);
   const child = spawn(process.execPath, [dshBin(), '--profile', profile, '--patch', patch, '--no-open', '--port', String(port)], {
-    cwd: root, env: { ...testEnv(), DSH_HOME: dirs.home, CI: 'true' }, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'],
+    cwd: root, env: { ...testEnv(), DSH_HOME: dirs.home, DSH_AGENTS_HOME: dirs.agents, CI: 'true' }, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'],
   });
   let output = '', found;
   const url = new Promise((resolve, reject) => {

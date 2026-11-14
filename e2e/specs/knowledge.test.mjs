@@ -20,9 +20,9 @@ const vaultFile = relative => path.join(dsh.vault, ...relative.split('/'));
 const shortId = () => randomUUID().slice(0, 4);
 
 async function openKnowledge(page) {
-  await openWhaleWing(page, dsh.url);
-  await openTab(page, '个人知识');
-  await page.locator('.ww-knowledge-head p', { hasText: '知识库在' }).waitFor();
+  await openWhaleWing(page, dsh.url, { assistant: 'float' });
+  await openTab(page, '知识积累');
+  await page.locator('.ww-knowledge-head p', { hasText: '我的第二大脑在' }).waitFor();
   await directoryLoaded(page, '全部笔记');
 }
 /** 等某个目录读完：里面列出了文件夹或笔记（加载中只有转圈）。 */
@@ -61,7 +61,9 @@ async function openNote(page, relative) {
 const waitReading = async (page, relative) => { await page.locator(`.ww-note-path summary[title="${relative}"]`).waitFor(); await page.locator('.ww-reader').waitFor(); };
 
 // ---- 阅读区右侧栏 ----
-const sideTab = (page, label) => page.locator('.ww-side-tabs [role=tab]', { hasText: label });
+// 2026-11-11 起右栏六页只放图标，名字在 aria-label 里；左栏“文件 / 搜索”两页。
+const sideTab = (page, label) => page.locator('.ww-note-side').getByRole('tab', { name: label, exact: true });
+const leftTab = (page, label) => page.getByRole('complementary', { name: '左侧栏' }).getByRole('tab', { name: label, exact: true });
 async function sideCount(page, label) { const em = sideTab(page, label).locator('em'); return await em.count() ? Number(await em.innerText()) : 0; }
 const moreActions = async page => { const details = page.locator('.ww-note-actions'); if (await details.getAttribute('open') === null) await details.locator('summary').click(); return details; };
 const editor = page => page.getByRole('textbox', { name: 'Markdown 正文' });
@@ -73,12 +75,6 @@ async function libraryTool(page, name) {
   if (!await menu.isVisible()) await page.getByRole('button', { name: '知识库工具' }).click();
   await menu.waitFor();
   return name ? menu.getByRole('button', { name, exact: true }) : menu;
-}
-/** 再点一次“…”收起工具菜单。 */
-async function closeLibraryTools(page) {
-  const menu = page.getByRole('dialog', { name: '知识库工具' });
-  if (await menu.isVisible()) await page.getByRole('button', { name: '知识库工具' }).click();
-  await menu.waitFor({ state: 'hidden' });
 }
 
 /** 放弃编辑区草稿（居中确认后）。 */
@@ -205,24 +201,29 @@ const fadeInSeries = async page => { await page.waitForFunction(() => window.__w
 // ===================== 页面与建库 =====================
 
 // 需求§个人知识·初始化得到什么（员工第一次使用时插件自动建库）、阅读、Wiki 与图谱；需求§界面通用约定·一行排开
-test('第一次打开个人知识自动建库：页头写明知识库位置，查找和工具排成一行，左侧是十区目录，中间是关系图谱，分隔条能拖', async t => {
+test('第一次打开个人知识自动建库：页头写明知识库位置，左边是功能条和“文件 / 搜索”两页、文件页是十区目录，中间页签里是关系图谱，分隔条能拖', async t => {
   await withPage(browser, t, async ({ page, errors, external }) => {
     assert.equal(vaultWasEmpty, true, '启动时知识库目录是空的');
     await openKnowledge(page);
     assert.equal(fs.existsSync(settingsFile()), true, '打开个人知识后插件已建库');
     const head = page.locator('.ww-knowledge-head');
-    assert.equal(await head.locator('h2').innerText(), '个人知识');
-    assert.ok((await head.locator('p').innerText()).includes(`知识库在 ${path.resolve(dsh.vault)}`), '页头写明知识库位置');
+    assert.equal(await head.locator('h2').innerText(), '知识积累');
+    assert.ok((await head.locator('p').innerText()).includes(`我的第二大脑在 ${path.resolve(dsh.vault)}`), '页头写明知识库位置');
 
-    const toolbar = page.locator('.ww-knowledge-toolbar');
-    const parts = [toolbar.getByRole('textbox', { name: '关键词（留空列出笔记）' }), ...['查找笔记', '新建笔记', '关系图谱', '知识库工具'].map(name => toolbar.getByRole('button', { name, exact: true }))];
-    const middles = [];
-    for (const part of parts) { const box = await part.boundingBox(); middles.push(box.y + box.height / 2); }
-    assert.ok(Math.max(...middles) - Math.min(...middles) <= 4, `搜索框和四个按钮在同一行（纵向中线 ${middles.map(Math.round).join('、')}）`);
+    // 2026-11-11 照 Obsidian 的摆法，样子是鲸翼自己的：最左一条功能条（快速切换、关系图谱，底下是知识库工具），
+    // 左栏“文件 / 搜索”两页、文件页上面是新建笔记和全部折叠，中间是页签，一开始只有关系图谱。
+    const ribbon = page.getByRole('navigation', { name: '功能条' });
+    for (const name of ['快速切换', '关系图谱', '知识库工具']) await ribbon.getByRole('button', { name, exact: true }).waitFor();
+    const left = page.getByRole('complementary', { name: '左侧栏' });
+    assert.deepEqual(await left.getByRole('tab').allInnerTexts(), ['文件', '搜索']);
+    assert.equal(await leftTab(page, '文件').getAttribute('aria-selected'), 'true');
+    for (const name of ['新建笔记', '全部折叠']) await left.getByRole('button', { name, exact: true }).waitFor();
+    assert.deepEqual(await page.getByRole('tablist', { name: '打开的页签' }).getByRole('tab').allInnerTexts(), ['关系图谱']);
 
     assert.deepEqual(await listing(page, '全部笔记'), { folders: zones, notes: ['AGENTS'] });
     await page.locator('.ww-note-canvas.ww-graph-mode').getByRole('group', { name: '关系图谱', exact: true }).waitFor();
-    await page.locator('.ww-graph-canvas').getByRole('button', { name: '重置视图' }).waitFor();
+    // 图右上角三颗按钮：图谱设置、看它长出来、重置视图（2026-11-10）。
+    for (const name of ['图谱设置', '看它长出来', '重置视图']) await page.locator('.ww-graph-tools').getByRole('button', { name, exact: true }).waitFor();
 
     const separator = page.getByRole('separator', { name: '调整目录宽度' });
     const before = Number(await separator.getAttribute('aria-valuenow')), treeBefore = (await page.locator('.ww-note-tree').boundingBox()).width;
@@ -396,16 +397,16 @@ test('反例：路径不在十区内时，失败提示说明笔记只能放在�
 });
 
 // 需求§界面通用约定·状态放在原位（“有未保存的修改”以小标记放在所在工具栏）
-test('知识库工具菜单：打开时焦点落在第一个能用的项上；按 Esc 或点别处收起后，点一下“…”就能再打开', async t => {
+test('知识库工具菜单：打开时焦点落在第一个能用的项上；按 Esc 或点别处收起后，点一下功能条底下的齿轮就能再打开', async t => {
   await prepare(t);
   await withPage(browser, t, async ({ page, errors }) => {
     await openKnowledge(page);
     const trigger = page.getByRole('button', { name: '知识库工具' }), menu = page.getByRole('dialog', { name: '知识库工具' });
     // 浏览器收起菜单后，界面要等收起事件到了才记成已关。
     const recordedClosed = () => page.locator('button[aria-label="知识库工具"][aria-expanded="false"]').waitFor({ timeout: 2000 });
-    // 没打开笔记时第一项“当前笔记关系图”不可用，焦点跳过它。
+    // 第一项是“检查属性与链接”（当前笔记关系图 2026-11-11 挪到右栏“局部图谱”）。
     await trigger.click(); await menu.waitFor();
-    assert.equal(await menu.getByRole('button').first().isDisabled(), true, '第一项不可用');
+    assert.equal(await menu.getByRole('button').first().innerText(), '检查属性与链接');
     assert.equal(await menu.evaluate(element => element.contains(document.activeElement) && !document.activeElement.disabled), true, '焦点在菜单里能用的项上');
     await page.keyboard.press('Escape'); await menu.waitFor({ state: 'hidden' });
     assert.equal(await trigger.evaluate(element => element === document.activeElement), true, 'Esc 后焦点回到“…”');
@@ -415,7 +416,7 @@ test('知识库工具菜单：打开时焦点落在第一个能用的项上；�
     await recordedClosed();
     await trigger.click(); await menu.waitFor({ timeout: 3000 });
     // 点页面别处收起。
-    await page.locator('.ww-knowledge-head p', { hasText: '知识库在' }).click(); await menu.waitFor({ state: 'hidden' });
+    await page.locator('.ww-knowledge-head p', { hasText: '我的第二大脑在' }).click(); await menu.waitFor({ state: 'hidden' });
     await recordedClosed();
     await trigger.click(); await menu.waitFor({ timeout: 3000 });
     // 开着时再点“…”收起，不会关了又开。
@@ -426,7 +427,7 @@ test('知识库工具菜单：打开时焦点落在第一个能用的项上；�
   });
 });
 
-test('有未保存的草稿时：工具条上标“有未保存的修改”，不能再新建或看图谱，目录里的笔记点不了', async t => {
+test('有未保存的草稿时：笔记工具条和页签上标出来，不能再新建或看图谱，目录里的笔记点不了', async t => {
   await prepare(t);
   await withPage(browser, t, async ({ page, errors }) => {
     await openKnowledge(page);
@@ -434,7 +435,8 @@ test('有未保存的草稿时：工具条上标“有未保存的修改”，�
     const chip = draftChip(page);
     await chip.getByText('有未保存的修改').waitFor();
     assert.equal(await chip.evaluate(element => Boolean(element.closest('.ww-note-toolbar'))), true, '标记在笔记工具条里');
-    const toolbar = page.locator('.ww-knowledge-toolbar');
+    assert.equal(await page.locator('.ww-kn-tab.ww-active .ww-kn-dot').count(), 1, '页签上有天青小点');
+    const toolbar = page.locator('.ww-knowledge-split');
     assert.equal(await toolbar.getByRole('button', { name: '新建笔记', exact: true }).isDisabled(), true);
     assert.equal(await toolbar.getByRole('button', { name: '关系图谱', exact: true }).isDisabled(), true);
     assert.equal(await noteButton(page, 'AGENTS').isDisabled(), true);
@@ -480,22 +482,23 @@ test('反例：放弃草稿先居中确认，点“取消”草稿原样；确�
 // ===================== 查找 =====================
 
 // 需求§个人知识·知识库位置（检索用目录、属性、关键词和全文）
-test('查找笔记：按关键词列出路径或正文含这个词的笔记，清空再查回到完整目录', async t => {
+test('查找笔记：左栏“搜索”页边敲边搜，列出路径或正文含这个词的笔记；清空后说明怎么搜，切回“文件”是完整目录', async t => {
   await prepare(t, fixtures.link, fixtures.refer);
   const keyword = '知识库';
   const expected = vaultNotes(dsh.vault).filter(name => !name.startsWith('90-归档/') && `${name}\n${fs.readFileSync(vaultFile(name), 'utf8')}`.toLowerCase().includes(keyword)).map(titleOf).sort();
   assert.ok(expected.includes(fixtures.refer.title), '夹具“鲸翼测试-引用”只在正文里有这个词，用来检查全文查找');
   await withPage(browser, t, async ({ page, errors }) => {
     await openKnowledge(page);
-    await page.getByRole('textbox', { name: '关键词（留空列出笔记）' }).fill(keyword);
-    await page.getByRole('button', { name: '查找笔记', exact: true }).click();
-    // 输入关键词后左栏换成结果列表，查完才填进结果。
-    await page.locator('.ww-note-tree .ww-note').first().waitFor();
-    assert.equal(await page.locator('.ww-note-tree .ww-directory').count(), 0, '左栏换成查找结果');
+    await leftTab(page, '搜索').click();
+    // 不用按回车：停手一会儿就搜，搜完才填进结果。
+    await page.getByRole('textbox', { name: '搜索笔记' }).fill(keyword);
+    await page.waitForFunction(count => document.querySelectorAll('.ww-note-tree .ww-note').length === count && !document.querySelector('.ww-kn-searching'), expected.length);
+    assert.equal(await page.locator('.ww-note-tree .ww-directory').count(), 0, '“搜索”页只列结果');
     assert.deepEqual((await page.locator('.ww-note-tree .ww-note .ww-tree-title').allInnerTexts()).sort(), expected);
 
-    await page.getByRole('textbox', { name: '关键词（留空列出笔记）' }).fill('');
-    await page.getByRole('button', { name: '查找笔记', exact: true }).click();
+    await page.getByRole('textbox', { name: '搜索笔记' }).fill('');
+    await page.locator('.ww-kn-search .ww-side-empty', { hasText: '敲关键词' }).waitFor();
+    await leftTab(page, '文件').click();
     await directoryLoaded(page, '全部笔记');
     assert.deepEqual(await listing(page, '全部笔记'), { folders: zones, notes: ['AGENTS'] });
     assert.deepEqual(errors, []);
@@ -532,7 +535,7 @@ test('阅读区右侧栏：目录、反链、出链三页带数量；点目录�
     await sideTab(page, '出链').click();
     await page.locator('.ww-side-panel .ww-side-note', { hasText: '知识库规则' }).click();
     await waitReading(page, '00-系统/规则/知识库规则.md');
-    await page.getByRole('button', { name: '返回上一篇' }).click();
+    await page.getByRole('button', { name: '后退', exact: true }).click();
     await waitReading(page, link.path);
 
     await sideTab(page, '反链').click();
@@ -671,12 +674,12 @@ function expectedGraphTitles() {
 }
 
 // 需求§个人知识·阅读、Wiki 与图谱（关系图谱以笔记为节点、链接为边，可看全库；平移缩放；新图约 0.7 秒淡入）
-test('关系图谱：打开时淡入，按层上色、不画归档模板和没有连线的笔记（缺失节点照画），滚轮缩放、拖动平移后点“重置视图”回到原样', async t => {
+test('关系图谱：打开时淡入，默认什么都画（模板、归档、没有连线的、还没建的、标签都在），按层上色，滚轮缩放、拖动平移后点“重置视图”回到原样', async t => {
   await prepare(t, fixtures.link, fixtures.refer);
   await withPage(browser, t, async ({ page, errors }) => {
-    await openWhaleWing(page, dsh.url);
+    await openWhaleWing(page, dsh.url, { assistant: 'float' });
     await recordFadeIn(page);
-    await openTab(page, '个人知识');
+    await openTab(page, '知识积累');
     const series = await fadeInSeries(page), final = series.at(-1)[1];
     assert.ok(final > 0, '画出了内容');
     assert.ok(series[0][1] < final * 0.5, `第一帧还没显示完整（${series[0][1]} / ${final}）`);
@@ -706,19 +709,21 @@ test('关系图谱：打开时淡入，按层上色、不画归档模板和没�
     await page.mouse.up();
     const panned = await settled(page);
     assert.notEqual(panned.hash, zoomed.hash, '拖动后画面平移了');
-    await page.locator('.ww-graph-canvas').getByRole('button', { name: '重置视图' }).click();
+    await page.locator('.ww-graph-tools').getByRole('button', { name: '重置视图', exact: true }).click();
     assert.equal((await settled(page)).hash, initial.hash, '重置后和打开时一模一样');
 
-    // 2026-11-02 照第二大脑的 Obsidian 图谱：全库图不画归档、模板和没有连线的笔记，左上角图例写明按层上色和没画哪些。
+    // 2026-11-10 用户定“默认全打开、默认全显示”：模板、归档、没有连线的笔记、还没建的笔记、标签都画，左上角图例只列按层上色的组和标签。
     const titles = await graphTitles(page), all = expectedGraphTitles();
     const templates = vaultNotes(dsh.vault).filter(name => name.startsWith('00-系统/模板/')).map(titleOf);
-    assert.ok(titles.every(title => all.includes(title)), `图上只有库里的笔记和缺失节点：${titles.join('、')}`);
-    assert.ok(!titles.some(title => templates.includes(title)), '模板不在图上');
-    for (const title of [fixtures.link.title, fixtures.refer.title, '鲸翼测试-不存在', '知识库规则', '知识库首页', '关于我']) assert.ok(titles.includes(title), `图上有“${title}”`);
+    assert.ok(templates.length > 0, '库里有模板');
+    for (const title of all) assert.ok(titles.includes(title), `图上有“${title}”`);
+    const others = titles.filter(title => !all.includes(title));
+    assert.ok(others.every(title => title.startsWith('#') || /\.[a-z0-9]+$/i.test(title)), `多出来的只有标签和附件：${others.join('、')}`);
     const legend = page.locator('.ww-graph-legend');
     await legend.waitFor();
     const legendText = await legend.innerText();
-    for (const text of ['关于自己', '知识', '时间线和收件箱', '系统和外部索引', `模板 ${templates.length} 篇`]) assert.ok(legendText.includes(text), `图例里有“${text}”：${legendText}`);
+    for (const text of ['关于自己', '知识', '系统和外部索引']) assert.ok(legendText.includes(text), `图例里有“${text}”：${legendText}`);
+    assert.ok(!/没画|篇/.test(legendText), `图例不再写藏了几篇：${legendText}`);
     assert.deepEqual(errors, []);
   });
 });
@@ -727,8 +732,8 @@ test('关系图谱：打开时淡入，按层上色、不画归档模板和没�
 test('关系图谱：按住节点拖动时整图跟着动（鼠标停住画面还在变），松手后约一秒滑回，停下后和拖之前几乎一样', async t => {
   await prepare(t, fixtures.link, fixtures.refer);
   await withPage(browser, t, async ({ page, errors }) => {
-    await openWhaleWing(page, dsh.url);
-    await openTab(page, '个人知识');
+    await openWhaleWing(page, dsh.url, { assistant: 'float' });
+    await openTab(page, '知识积累');
     await settled(page);
     // 记下拖之前的画面；之后按像素比有多少不一样。
     await canvasOf(page).evaluate(canvas => { window.__graphBefore = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data; });
@@ -807,9 +812,9 @@ test('关系图谱：悬停一篇笔记时，不相邻的节点变淡，移开�
 test('系统要求减弱动态效果时：图谱第一帧就是完整的图，悬停时其余节点立即变淡', async t => {
   await prepare(t, fixtures.link, fixtures.refer);
   await withPage(browser, t, { reducedMotion: 'reduce' }, async ({ page, errors }) => {
-    await openWhaleWing(page, dsh.url);
+    await openWhaleWing(page, dsh.url, { assistant: 'float' });
     await recordFadeIn(page);
-    await openTab(page, '个人知识');
+    await openTab(page, '知识积累');
     const series = await fadeInSeries(page), final = series.at(-1)[1];
     assert.ok(final > 0);
     assert.ok(series[0][1] >= final * 0.98, `第一帧就是完整的图（${series[0][1]} / ${final}）`);
@@ -820,18 +825,19 @@ test('系统要求减弱动态效果时：图谱第一帧就是完整的图，�
 });
 
 // 需求§个人知识·阅读、Wiki 与图谱（可以只看当前笔记的关系）
-test('当前笔记关系图：没打开笔记时不可用；打开一篇后只画它和直接相连的笔记（含缺失节点）', async t => {
+test('右栏局部图谱：没打开笔记时说先打开一篇；打开一篇后只画它和直接相连的笔记（含缺失节点）', async t => {
   await prepare(t, fixtures.link, fixtures.refer);
   const { link } = fixtures;
   const linkedFrom = vaultNotes(dsh.vault).filter(name => name !== link.path && fs.readFileSync(vaultFile(name), 'utf8').includes(`[[${link.title}]]`)).map(titleOf);
   const expected = [link.title, ...wikiTargets(link.text), ...linkedFrom].sort();
   await withPage(browser, t, async ({ page, errors }) => {
     await openKnowledge(page);
-    assert.equal(await (await libraryTool(page, '当前笔记关系图')).isDisabled(), true, '没打开笔记时不可用');
-    await closeLibraryTools(page);
+    await sideTab(page, '局部图谱').click();
+    await page.locator('.ww-note-side .ww-side-empty', { hasText: '打开一篇笔记后' }).waitFor();
     await openNote(page, link.path);
-    await (await libraryTool(page, '当前笔记关系图')).click();
-    await page.getByRole('group', { name: '当前笔记关系图', exact: true }).waitFor();
+    // 打开笔记后中间是这篇的页签，全库图不在画面上，画布只有右栏这一张。
+    await page.locator('.ww-note-side').getByRole('group', { name: '当前笔记关系图', exact: true }).waitFor();
+    assert.equal(await canvasOf(page).count(), 1);
     assert.deepEqual((await graphTitles(page)).sort(), expected);
     assert.deepEqual(errors, []);
   });
@@ -942,8 +948,9 @@ test('反例：编辑时文件在别处被改过，保存提示冲突、不覆�
 
 // ===================== 窄宽度 =====================
 
-// 需求§个人知识·阅读、Wiki 与图谱（知识区够宽时右侧栏和正文并排、默认打开，窄时点工具条上的按钮才浮出来，跳转后自动收起）
-test('知识区窄时右侧栏默认收起，点按钮浮出，点目录跳转后自动收起；够宽时并排打开', async t => {
+// 需求§个人知识·阅读、Wiki 与图谱（知识区够宽时右侧栏和正文并排、默认打开，窄时点页签条右头的按钮才浮出来，跳转后自动收起；
+// 2026-11-11 再窄时左栏也改成点了才浮出来，选一篇笔记后自动收起）
+test('知识区窄时右侧栏默认收起，点按钮浮出，点目录跳转后自动收起；够宽时并排打开；再窄左栏也浮出来', async t => {
   await prepare(t, fixtures.link);
   const { link } = fixtures, target = headingsOf(link.text)[2];
   await withPage(browser, t, { width: 1024, height: 700 }, async ({ page, errors }) => {
@@ -953,19 +960,28 @@ test('知识区窄时右侧栏默认收起，点按钮浮出，点目录跳转�
     const toggle = page.locator('.ww-side-toggle');
     assert.equal(await toggle.getAttribute('aria-pressed'), 'false');
     await toggle.click();
-    await page.locator('.ww-note-body.ww-side-overlay .ww-note-side').waitFor();
+    await page.locator('.ww-note-side.ww-overlay').waitFor();
     await page.getByRole('navigation', { name: '目录' }).getByRole('button', { name: target }).click();
     await page.locator('.ww-note-side').waitFor({ state: 'detached' });
     await page.waitForFunction(text => {
       const box = document.querySelector('.ww-note-scroll'), heading = [...box.querySelectorAll('.ww-reader h2')].find(h => h.textContent === text);
       return heading && Math.abs(heading.getBoundingClientRect().top - box.getBoundingClientRect().top) <= 40;
     }, target);
+    // 再窄（知识区不到 640px）左栏也收起来，点页签条左头的按钮浮出来，选一篇笔记后自动收起。
+    await page.setViewportSize({ width: 600, height: 700 });
+    await page.locator('.ww-note-tree').waitFor({ state: 'detached' });
+    await page.getByRole('button', { name: '显示左侧栏', exact: true }).click();
+    await page.locator('.ww-note-tree.ww-overlay').waitFor();
+    await expand(page, '00-系统');
+    await noteButton(page, '知识库首页').click();
+    await waitReading(page, '00-系统/知识库首页.md');
+    await page.locator('.ww-note-tree').waitFor({ state: 'detached' });
     assert.deepEqual(errors, []);
   });
   await withPage(browser, t, async ({ page }) => {
     await openKnowledge(page);
     await openNote(page, link.path);
-    await page.locator('.ww-note-body.ww-with-side .ww-note-side').waitFor();
+    await page.locator('.ww-note-side:not(.ww-overlay)').waitFor();
     assert.equal(await page.locator('.ww-side-toggle').getAttribute('aria-pressed'), 'true', '够宽时默认并排打开');
   });
 });

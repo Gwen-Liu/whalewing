@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { isExactProjection } from '../../src/session-projection.js';
-import { newsSkippedNotice } from '../../src/news-gate.js';
+import { skippedNotices } from '../../src/news-gate.js';
 import { runStatuses } from './contract.js';
 import { isScheduledDelivery } from '../../src/schedule-notice.js';
 
@@ -56,9 +56,9 @@ function step(state, event) {
       return runs === state.runs ? state : { ...state, runs };
     }
     case 'command/done': {
-      // 资讯门写下的跳过说明指向送达这条消息的事件序号；其它命令不改变运行结果。
+      // 运行门写下的跳过说明（资讯、扩展任务）指向送达这条消息的事件序号；其它命令不改变运行结果。
       const data = event.data;
-      if (data?.kind !== 'success' || data.text !== newsSkippedNotice || !Number.isSafeInteger(data.sourceEventSeq)) return state;
+      if (data?.kind !== 'success' || !skippedNotices.has(data.text) || !Number.isSafeInteger(data.sourceEventSeq)) return state;
       const runs = update(state.runs, row => row.seq === data.sourceEventSeq && pendingStates.has(row.state), () => 'skipped');
       return runs === state.runs ? state : { ...state, runs };
     }

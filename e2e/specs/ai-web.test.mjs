@@ -1,13 +1,18 @@
 import { test, before, after } from 'node:test';
+import fs from 'node:fs';
+import path from 'node:path';
 import assert from 'node:assert/strict';
 import { startDsh } from '../support/dsh.mjs';
 import { launchBrowser, withPage, openWhaleWing, openTab, textOf, toast, drawer, modal, dialogButton, isCentered, isRed, discardDrawer } from '../support/browser.mjs';
 import { enableBuiltinBrowser, startLocalSite, storedAiWebEntries } from '../support/ai-web-fixture.mjs';
+import { aiWebEntries, aiWebGuide } from '../../features/ai-web/catalog.js';
 
-// 需求§AI 网页：内置 10 个官方入口，按“国内”“海外 · 需海外网络”分组。
+// 需求§AI 网页：内置 10 个官方入口，聊天类按“聊天 · 国内”“聊天 · 海外，需海外网络”分组。
 const domestic = ['DeepSeek', '豆包', 'Kimi', '千问', '腾讯元宝', '智谱清言', '文心助手'];
 const overseas = ['ChatGPT', 'Gemini', 'Claude'];
-const builtinCount = domestic.length + overseas.length;
+// 专门的工具（2026-11-13 加入）：国内三个，海外两个。
+const tools = ['即梦', '海螺视频', '秘塔 AI 搜索'], toolsAbroad = ['Perplexity', 'Gemini Notebook'];
+const builtinCount = domestic.length + overseas.length + tools.length + toolsAbroad.length;
 
 // 自建入口一律指向本机替身网页，绝不点真实厂商的磁贴。
 let dsh, browser, site;
@@ -111,8 +116,8 @@ async function removeEntry(page, name) {
   await toast(page, `已删除“${name}”`, 'success').waitFor();
 }
 
-// AIW-01 需求§AI 网页（内置 10 个入口；分组；磁贴只写图标、名字、厂商；加号卡片在“我的入口”末尾；标题右侧同一行是查找框）；决策 2026-10-15、2026-10-25
-test('按国内、海外、我的入口分组列出 10 个内置入口，磁贴只写图标、名字和厂商，加号卡片在我的入口末尾', async t => {
+// AIW-01 需求§AI 网页·入口目录（内置入口分组；“全部”是只有头像和名字的小块，场景里是带称号和拿手戏的大卡；加号卡片在“我的入口”末尾；标题右侧同一行是查找框）；决策 2026-10-15、2026-10-25、2026-11-13
+test('“全部”是紧凑名录：内置入口按聊天、专门的工具分组，小块只有头像和名字，整页一屏放得下；选了场景是带拿手戏的大卡；加号卡片在我的入口末尾', async t => {
   await withPage(browser, t, async ({ page, errors, external }) => {
     const total = await openAiWeb(page);
     const view = aiView(page);
@@ -121,21 +126,42 @@ test('按国内、海外、我的入口分组列出 10 个内置入口，磁贴�
     const title = await view.locator('.ww-pagehead h2').boundingBox(), search = await searchBox(page).boundingBox();
     assert.ok(search.x > title.x + title.width, '查找框在标题右侧');
     assert.ok(search.y < title.y + title.height && search.y + search.height > title.y, '查找框和标题在同一行');
-    assert.deepEqual(await view.locator('section.ww-ai-group').evaluateAll(groups => groups.map(item => item.getAttribute('aria-label'))), ['国内', '海外 · 需海外网络', '我的入口']);
-    assert.deepEqual(await tileNames(group(page, '国内')), domestic);
-    assert.deepEqual(await tileNames(group(page, '海外 · 需海外网络')), overseas);
-    // 每块磁贴：一个图标，下面两行是名字和厂商；网址、用途都不写在磁贴上（用途只留在悬停说明里供查找）。
-    const tiles = await view.locator('section.ww-ai-group:not([aria-label="我的入口"]) .ww-ai-tile').evaluateAll(items => items.map(tile => ({
-      icons: tile.querySelectorAll('img').length, lines: tile.innerText.split('\n').map(line => line.trim()).filter(Boolean),
-      purpose: tile.querySelector('.ww-ai-open')?.title ?? '',
-    })));
+    assert.deepEqual(await view.locator('section.ww-ai-group').evaluateAll(groups => groups.map(item => item.getAttribute('aria-label'))), ['聊天 · 国内', '聊天 · 海外，需海外网络', '专门的工具', '专门的工具 · 海外，需海外网络', '我的入口']);
+    assert.deepEqual(await tileNames(group(page, '聊天 · 国内')), domestic);
+    assert.deepEqual(await tileNames(group(page, '聊天 · 海外，需海外网络')), overseas);
+    assert.deepEqual(await tileNames(group(page, '专门的工具')), tools);
+    assert.deepEqual(await tileNames(group(page, '专门的工具 · 海外，需海外网络')), toolsAbroad);
+    // “全部”是紧凑名录：每个小块只有头像（有立绘的是角色小像，右下角叠官方图标）、名字和一个“+”；称号和拿手戏在悬停说明里，网址不写。
+    const read = items => items.map(tile => ({
+      name: tile.querySelector('.ww-ai-name strong')?.textContent ?? '', sub: tile.querySelector('.ww-ai-name small')?.textContent ?? '',
+      line: tile.querySelector('.ww-ai-line')?.textContent ?? '', avatars: tile.querySelectorAll('.ww-ai-open .ww-avatar').length,
+      face: !!tile.querySelector('.ww-ai-face'), badge: !!tile.querySelector('.ww-ai-badge'), pick: tile.querySelector('.ww-ai-pick')?.textContent ?? '', text: tile.innerText,
+      mini: tile.classList.contains('ww-ai-mini'), hint: tile.querySelector('.ww-ai-open').title, height: Math.round(tile.getBoundingClientRect().height),
+    }));
+    const tiles = await view.locator('section.ww-ai-group:not([aria-label="我的入口"]) .ww-ai-tile').evaluateAll(read);
     assert.equal(tiles.length, builtinCount);
     for (const tile of tiles) {
-      assert.equal(tile.icons, 1, `${tile.lines[0]} 有图标`);
-      assert.equal(tile.lines.length, 2, `${tile.lines[0]} 只写名字和厂商：${tile.lines.join(' / ')}`);
-      assert.doesNotMatch(tile.lines.join(' '), /https?:|www\.|\.com/, `${tile.lines[0]} 不写网址`);
-      assert.ok(tile.purpose && !tile.lines.join(' ').includes(tile.purpose), `${tile.lines[0]} 不写用途`);
+      assert.equal(tile.mini, true, `${tile.name} 是名录里的小块`);
+      assert.equal(tile.avatars, 1, `${tile.name} 有一个头像`);
+      assert.equal(tile.sub + tile.line, '', `${tile.name} 小块上只有名字`);
+      assert.ok(tile.hint, `${tile.name} 悬停有说明`);
+      assert.equal(tile.pick, '+', `${tile.name} 有“+”`);
+      assert.ok(tile.height < 60, `${tile.name} 是矮的小块：${tile.height}`);
+      assert.doesNotMatch(tile.text, /https?:|www\.|\.com/, `${tile.name} 不写网址`);
     }
+    // 十个聊天入口都有立绘：角色小像加官方图标角标，称号在悬停说明里。
+    const chat = tiles.filter(tile => [...domestic, ...overseas].includes(tile.name));
+    assert.equal(chat.every(tile => tile.face && tile.badge), true, '聊天入口用角色小像，右下角叠官方图标');
+    assert.match(chat.find(tile => tile.name === 'DeepSeek').hint, /^大飞鱼姐姐 · /);
+    // 入口再多也不把页面拉长：1440×900 的窗口里，“全部”整页一屏放得下。
+    assert.ok((await view.locator('.ww-ai-dir').evaluate(element => element.getBoundingClientRect().bottom)) < 900, '“全部”的名录在一屏以内，不用往下滚');
+    // 选一个场景：换成大卡，写着称号和这件事上的拿手戏；回到“全部”又是名录。
+    await view.getByRole('button', { name: '写东西', exact: true }).click();
+    const big = await view.locator('.ww-ai-tile').evaluateAll(read);
+    assert.ok(big.length > 0 && big.every(tile => !tile.mini && tile.sub && tile.line), '场景里是带称号和拿手戏的大卡');
+    assert.equal(big.find(tile => tile.name === '豆包').sub, '包子铺掌柜');
+    await view.getByRole('button', { name: '全部', exact: true }).click();
+    await settled(() => view.locator('.ww-ai-dir .ww-ai-mini').count(), total, '回到“全部”又是名录');
     const mine = group(page, '我的入口').locator('.ww-ai-grid > *');
     assert.match(await textOf(mine.last()), /^\+ 添加 AI$/);
     assert.match(await mine.last().getAttribute('class'), /ww-add-card/);
@@ -160,8 +186,8 @@ test('反例：内置入口没有编辑、删除菜单，键盘按 Delete 也删
     await page.getByRole('button', { name: '打开 DeepSeek', exact: true }).focus();
     await page.keyboard.press('Delete');
     assert.equal(await page.locator('dialog[open]').count(), 0, '没有弹出任何确认或编辑窗口');
-    assert.deepEqual(await tileNames(group(page, '国内')), domestic);
-    assert.deepEqual(await tileNames(group(page, '海外 · 需海外网络')), overseas);
+    assert.deepEqual(await tileNames(group(page, '聊天 · 国内')), domestic);
+    assert.deepEqual(await tileNames(group(page, '聊天 · 海外，需海外网络')), overseas);
     assert.doesNotMatch(await page.title(), /^AI 网页/, '没有打开 DeepSeek');
     assert.deepEqual(storedAiWebEntries(dsh.home), stored);
     assert.deepEqual(errors, []);
@@ -174,10 +200,9 @@ test('按名字、厂商或用途查找，不分大小写，清空后恢复全�
   await withPage(browser, t, async ({ page, errors, external }) => {
     await openAiWeb(page);
     const all = await shownNames(page);
-    // 用途写在磁贴的悬停说明里，查找要能查到。
-    const purposes = await aiView(page).locator('.ww-ai-open').evaluateAll(buttons => buttons.map(button => [button.getAttribute('aria-label').replace(/^打开 /, ''), button.title || '']));
-    const byPurpose = purposes.filter(([, purpose]) => purpose.includes('写作')).map(([name]) => name);
-    assert.ok(byPurpose.length > 0, '有用途写着“写作”的入口');
+    // 用途写在磁贴的悬停说明里，拿手戏写在目录指引里（一句总的，加各场景下的），查找都要能查到。
+    const byPurpose = aiWebEntries.filter(entry => `${entry.description} ${aiWebGuide[entry.id].line ?? ''} ${Object.values(aiWebGuide[entry.id].scenes ?? {}).join(' ')}`.includes('写作')).map(entry => entry.name);
+    assert.ok(byPurpose.length > 3, '有用途或拿手戏写着“写作”的入口');
     await searchBox(page).fill('KIMI');
     await settled(() => shownNames(page), ['Kimi'], '按名字查，不分大小写');
     await searchBox(page).fill('阿里');
@@ -227,7 +252,7 @@ test('反例：查找框里输入网页代码或通配符只当普通文字，�
 });
 
 // AIW-05 需求§AI 网页（只需要名称和网址；加号卡片在“我的入口”末尾）；需求§界面通用约定（编辑用右侧抽屉、按钮写具体动作“添加”、结果用右上角提示）；需求§数据与隐私（写入后回读）
-test('添加自建入口：右侧抽屉只要名字和网址，添加后出现在我的入口、厂商写“自定义”，存进本机', async t => {
+test('添加自建入口：右侧抽屉只要名字和网址，添加后出现在我的入口，存进本机', async t => {
   await withPage(browser, t, async ({ page, errors, external }) => {
     const name = `鲸翼测试-AIW05-${suffix()}`, url = site.url('aiw05.html');
     const total = await openAiWeb(page);
@@ -247,7 +272,8 @@ test('添加自建入口：右侧抽屉只要名字和网址，添加后出现�
     await toast(page, `已添加“${name}”`, 'success').waitFor();
     const mine = group(page, '我的入口');
     const tile = mine.locator('.ww-ai-tile').filter({ has: page.getByRole('button', { name: `打开 ${name}`, exact: true }) });
-    assert.equal(await textOf(tile.locator('.ww-ai-name')), `${name} 自定义`);
+    // 名录里的小块只写名字；它在“我的入口”这一组里，不另写“自定义”。
+    assert.equal(await textOf(tile.locator('.ww-ai-name')), name);
     assert.match(await mine.locator('.ww-ai-grid > *').last().getAttribute('class'), /ww-add-card/, '加号卡片仍在最后');
     assert.match(await textOf(aiView(page).locator('.ww-pagehead p')), new RegExp(`^${total + 1} 个入口`));
     const added = storedAiWebEntries(dsh.home).filter(entry => !before.some(old => old.id === entry.id));
@@ -444,7 +470,7 @@ test('再次选择已经开着的 AI，切回它原来的标签，不新开', as
     await backToAiWeb(page);
     const names = await tileNames(group(page, '我的入口'));
     assert.ok(names.includes(a.name) && names.includes(b.name), '回到 AI 网页页签时入口照常列着');
-    assert.deepEqual(await tileNames(group(page, '国内')), domestic);
+    assert.deepEqual(await tileNames(group(page, '聊天 · 国内')), domestic);
     // 换另一个 AI：新开它自己的标签。
     await openEntry(page, b.name, b.url);
     assert.equal(await browserTabs(page).count(), 2);
@@ -503,8 +529,8 @@ test('打开入口后回到 AI 网页页签：这个入口标“正在用”，�
     await settled(() => selectedTab(page).getAttribute('data-dockkit-tab'), otherTab, '右栏切到了乙的标签');
     // 回到鲸翼 AI 网页页签。
     const total = await backToAiWeb(page);
-    assert.deepEqual(await tileNames(group(page, '国内')), domestic, '入口照常列着');
-    assert.deepEqual(await tileNames(group(page, '海外 · 需海外网络')), overseas);
+    assert.deepEqual(await tileNames(group(page, '聊天 · 国内')), domestic, '入口照常列着');
+    assert.deepEqual(await tileNames(group(page, '聊天 · 海外，需海外网络')), overseas);
     await settled(() => currentNames(page), [name], '只有最后打开的这个标“正在用”');
     assert.equal(await textOf(tileOf(page, name).locator('.ww-ai-name')), `${name} 正在用`);
     assert.match(await textOf(aiView(page).locator('.ww-pagehead p')), new RegExp(`^正在用 ${name} · `));
@@ -575,6 +601,107 @@ test('反例：正在用的入口被删除后，AI 网页页签不再标“正�
     await page.reload();
     await backToAiWeb(page);
     await nothingInUse('刷新后回来');
+    assert.deepEqual(errors, []);
+    assert.deepEqual(external, []);
+  });
+});
+
+/** 「AI 网页」会话开始页上鲸翼的那排小按钮（“返回鲸翼”旁边）。 */
+const heroButton = (page, name) => page.getByRole('button', { name, exact: true });
+
+/** 提问台：写问题、把几个自建入口加进“发给”。入口都指向本机替身网页。 */
+async function composeAsk(page, question, names) {
+  const desk = aiView(page).locator('.ww-ai-desk');
+  await desk.getByRole('textbox', { name: '想问什么' }).fill(question);
+  for (const name of names) await aiView(page).getByRole('button', { name: `加进提问台 ${name}`, exact: true }).click();
+  return desk;
+}
+
+// AIW-13 需求§AI 网页·提问台（问题写一次，点卡片“+”选几家；发之前能看一眼；发出去全部内容进剪贴板、依次打开，前两家并排）；决策 2026-11-13
+test('提问台：写问题、点“+”选两家，看一眼后发出去；问题在剪贴板里，两家在「AI 网页」会话右侧并排打开', async t => {
+  await withPage(browser, t, { width: 1600 }, async ({ page, errors, external }) => {
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+    await openAiWeb(page);
+    const tag = suffix(), first = `提问甲${tag}`, second = `提问乙${tag}`, question = `帮我列一个季度复盘的提纲 ${tag}`;
+    const urls = [site.url(`aiw13a-${tag}.html`), site.url(`aiw13b-${tag}.html`)];
+    await addEntry(page, first, urls[0]); await addEntry(page, second, urls[1]);
+    const desk = aiView(page).locator('.ww-ai-desk');
+    assert.equal(await desk.getByRole('button', { name: '发给…', exact: true }).isDisabled(), true, '没选人时发不出去');
+    await composeAsk(page, question, [first, second]);
+    assert.deepEqual(await desk.locator('.ww-ai-to').evaluateAll(items => items.map(item => item.firstChild.textContent)), [first, second]);
+    assert.equal(await aiView(page).getByRole('button', { name: `从提问台去掉 ${first}`, exact: true }).getAttribute('aria-pressed'), 'true');
+    await desk.getByRole('button', { name: '看一眼要发的内容', exact: true }).click();
+    const preview = modal(page, '发之前看一眼');
+    await preview.waitFor();
+    assert.equal(await isCentered(page, preview), true, '看一眼是居中弹窗');
+    assert.equal(await textOf(preview.locator('.ww-ai-payload')), question, '只有问题时原样带过去');
+    assert.equal(site.hits(`aiw13a-${tag}.html`), 0, '看一眼不打开网页');
+    await dialogButton(preview, '复制并打开 2 家').click();
+    await page.waitForFunction(() => document.title.startsWith('AI 网页'), null, { timeout: 30_000 });
+    for (const url of urls) await page.frameLocator(`iframe[src="${url}"]`).locator('#marker').waitFor({ timeout: 30_000 });
+    const boxes = await Promise.all(urls.map(url => page.locator(`iframe[src="${url}"]`).boundingBox()));
+    assert.ok(boxes[0].width > 100 && boxes[1].width > 100, `两家都看得见：${JSON.stringify(boxes)}`);
+    assert.ok(boxes[0].x + boxes[0].width <= boxes[1].x + 1, `两家各占一栏、不重叠：${JSON.stringify(boxes)}`);
+    assert.equal((await page.evaluate(() => navigator.clipboard.readText())).replace(/\r\n/g, '\n'), question, '问题在剪贴板里');
+    await toast(page, `已复制问题。到 ${first}、${second} 的输入框里各按一次 Ctrl V，再按发送`, 'success').waitFor();
+    // 开始页“返回鲸翼”旁边：再复制问题、贴进来。
+    for (const name of ['返回鲸翼', '再复制问题', '贴进来']) await heroButton(page, name).waitFor();
+    // 员工复制了别的东西之后，“再复制问题”把问题放回剪贴板。
+    await page.evaluate(() => navigator.clipboard.writeText('别的内容'));
+    await heroButton(page, '再复制问题').click();
+    await settled(async () => (await page.evaluate(() => navigator.clipboard.readText())).replace(/\r\n/g, '\n'), question, '问题又回到剪贴板');
+    // 回到鲸翼：上一问填回提问台，第一家标“正在用”。
+    await backToAiWeb(page);
+    assert.equal(await aiView(page).locator('.ww-ai-desk textarea').inputValue(), question);
+    assert.deepEqual(await currentNames(page), [first]);
+    await removeEntry(page, first); await removeEntry(page, second);
+    assert.deepEqual(errors, []);
+    assert.deepEqual(external, []);
+  });
+});
+
+// AIW-14 需求§AI 网页·带回来（员工自己复制回答，点“贴进来”，存进知识积累收件箱：哪家答的、问的什么、哪天；同一问接着存同一篇）；决策 2026-11-13
+test('带回来：在「AI 网页」会话开始页点“贴进来”，复制的回答存进知识积累的收件箱；同一问的第二段接着存进同一篇', async t => {
+  await withPage(browser, t, async ({ page, errors, external }) => {
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+    await openAiWeb(page);
+    const tag = suffix(), name = `带回${tag}`, question = `帮我把周报改简洁 ${tag}`, url = site.url(`aiw14-${tag}.html`);
+    await addEntry(page, name, url);
+    const desk = await composeAsk(page, question, [name]);
+    await desk.getByRole('button', { name: '发给 1 家', exact: true }).click();
+    await page.frameLocator(`iframe[src="${url}"]`).locator('#marker').waitFor({ timeout: 30_000 });
+    // 刚发出去时剪贴板里还是问题：贴进来的框是空的，请员工粘贴，不把问题当成回答。
+    await heroButton(page, '贴进来').click();
+    const paste = modal(page, '贴进来');
+    await paste.waitFor();
+    assert.equal(await isCentered(page, paste), true, '贴进来是居中弹窗');
+    await settled(() => textOf(paste.locator('p[role=status]')), '没读到剪贴板。在下面的框里按 Ctrl V 贴进来。', '剪贴板里还是那一问时不放进框里');
+    assert.equal(await dialogButton(paste, '存进知识积累').isDisabled(), true, '没有内容时不能存');
+    assert.match(await textOf(paste.locator('.ww-ai-paste-ask')), new RegExp(`^问的：${question}`));
+    assert.deepEqual(await paste.locator('select option').allInnerTexts(), [name], '“哪家答的”列这个会话里开着的');
+    await dialogButton(paste, '取消').click();
+    await paste.waitFor({ state: 'detached' });
+    // 员工在网页里复制了一段回答。
+    await page.evaluate(() => navigator.clipboard.writeText('第一段回答：先说结果，再说原因。'));
+    await heroButton(page, '贴进来').click();
+    await paste.waitFor();
+    await settled(() => paste.locator('textarea').inputValue(), '第一段回答：先说结果，再说原因。', '读到剪贴板就直接放进框里');
+    await dialogButton(paste, '存进知识积累').click();
+    await toast(page, `已存进知识积累的收件箱：《${question}》`, 'success').waitFor();
+    const file = path.join(dsh.vault, '10-收件箱', `${question}.md`);
+    const today = await page.evaluate(() => { const now = new Date(), two = value => String(value).padStart(2, '0'); return `${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())}`; });
+    assert.equal(fs.readFileSync(file, 'utf8'), `---\ntype: capture\nstatus: inbox\ncreated: ${today}\nupdated: ${today}\naliases: []\n---\n\n# ${question}\n\n问的：\n\n> ${question}\n\n## ${name} 的回答\n\n来源：${name} 网页（${url}），${today} 贴回\n\n第一段回答：先说结果，再说原因。\n`);
+    // 同一问再贴一段：接着存进同一篇，不另起一篇。
+    await page.evaluate(() => navigator.clipboard.writeText('第二段回答：补一个数字。'));
+    await heroButton(page, '贴进来').click();
+    await paste.waitFor();
+    await settled(() => paste.locator('textarea').inputValue(), '第二段回答：补一个数字。', '第二段也读到了');
+    await dialogButton(paste, '存进知识积累').click();
+    await toast(page, `已接着存进《${question}》`, 'success').waitFor();
+    assert.match(fs.readFileSync(file, 'utf8'), /第一段回答：先说结果，再说原因。\n\n## .+ 的回答\n\n来源：.+ 贴回\n\n第二段回答：补一个数字。\n$/);
+    assert.deepEqual(fs.readdirSync(path.join(dsh.vault, '10-收件箱')).filter(item => item.includes(tag)), [`${question}.md`]);
+    await backToAiWeb(page);
+    await removeEntry(page, name);
     assert.deepEqual(errors, []);
     assert.deepEqual(external, []);
   });

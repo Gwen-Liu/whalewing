@@ -1,4 +1,5 @@
-// 书架报错和知识卡片首页页头在员工眼前的样子：书架服务的原因要原样送到界面，空文件说清是空的，页头有一句现状摘要。
+// 书架报错和每日阅读首页页头在员工眼前的样子：书架服务的原因要原样送到界面，空文件说清是空的，页头有一句现状摘要。
+// 2026-11-14 首页改成每天一期：摘要换成“今天这一期几条资讯、看过几条、存下几条、书里划线几条”，书架几本写在“接着读”那一块的标题旁。
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
@@ -92,7 +93,7 @@ const button = (tree, label) => {
   assert.ok(found, `按钮 ${label} 存在`);
   return found;
 };
-/** 知识卡片首页页头：标题和它下面那句摘要。 */
+/** 每日阅读首页页头：标题和它下面那句摘要。 */
 function pageHead(tree) {
   const head = nodes(tree).find(node => node.type === 'header' && String(node.props.className).split(' ').includes('ww-pagehead'));
   assert.ok(head, '有页头');
@@ -100,49 +101,54 @@ function pageHead(tree) {
   return { title: texts('h2')[0], summary: texts('p')[0] };
 }
 
-test('知识卡片首页标题下有一句现状摘要：书架几本、常看几本，今日资讯几条或尚未生成，再说哪里有问题', async () => {
+/** “接着读”那一块标题旁的小字：常看几本、书架几本。 */
+const shelfLine = tree => { const pane = nodes(tree).find(node => node.type === 'section' && String(node.props.className).includes('ww-read-book')); assert.ok(pane, '有接着读这一块'); return [nodes(pane).find(node => node.type === 'small').props.children].flat().join(''); };
+
+test('每日阅读首页标题下有一句现状摘要：今天这一期几条资讯或还没出，存下和划线各几条，再说哪里有问题；书架几本写在接着读旁边', async () => {
   let value = home();
   const f = await fixture({ news: async input => {
     if (input.action !== 'home') throw new Error('unexpected news action ' + input.action);
     return ok(value);
   } });
-  await button(f.render(), '知识卡片').props.onClick();
-  assert.deepEqual(pageHead(f.render()), { title: '知识卡片', summary: '书架 2 本，常看 1 本 · 今日日报尚未生成' });
+  await button(f.render(), '每日阅读').props.onClick();
+  assert.deepEqual(pageHead(f.render()), { title: '每日阅读', summary: '今天这一期还没出 · 存下 0 条 · 书里划线 0 条' });
+  assert.equal(shelfLine(f.render()), '常看 1 / 2 本 · 书架 2 本');
   // 今天那期出了：条数按首页显示的算（每个领域最多 8 条），昨天那期不算今天的；部分来源失败点出来。
   value = home([report({ items: 10, status: 'partial' }), report({ fieldId: 'e2e-stale', fieldName: '昨日领域', date: '2026-10-11', items: 2, status: 'partial' })]);
   await button(f.render(), '刷新').props.onClick();
-  assert.equal(pageHead(f.render()).summary, '书架 2 本，常看 1 本 · 今日资讯 8 条 · 1 个领域部分来源失败');
+  assert.equal(pageHead(f.render()).summary, '今天这一期 8 条资讯，看过 0 条 · 存下 0 条 · 书里划线 0 条 · 1 个领域部分来源失败');
   // 只有旧的一期：仍说今天的尚未生成，不把旧日报当成今天的。
   value = home([report({ date: '2026-10-11', items: 3 })]);
   await button(f.render(), '刷新').props.onClick();
-  assert.equal(pageHead(f.render()).summary, '书架 2 本，常看 1 本 · 今日日报尚未生成');
+  assert.equal(pageHead(f.render()).summary, '今天这一期还没出，下面是 10/11 那一期 · 存下 0 条 · 书里划线 0 条');
   // 今天那期是空的。
   value = home([report({ items: 0, status: 'empty' })]);
   await button(f.render(), '刷新').props.onClick();
-  assert.equal(pageHead(f.render()).summary, '书架 2 本，常看 1 本 · 今日资讯没有符合条件的条目');
+  assert.equal(pageHead(f.render()).summary, '今天这一期没有符合条件的条目 · 存下 0 条 · 书里划线 0 条');
   // 书架空、常看书的阅读副本丢失、书架读不出来。
   value = home([], { total: 0, daily: 0, books: [] });
   await button(f.render(), '刷新').props.onClick();
-  assert.equal(pageHead(f.render()).summary, '书架还是空的 · 今日日报尚未生成');
+  assert.equal(pageHead(f.render()).summary, '今天这一期还没出 · 存下 0 条 · 书里划线 0 条');
+  assert.equal(shelfLine(f.render()), '书架还是空的');
   const { chapter: _chapter, ...withoutChapter } = dailyBook;
   value = home([], { books: [{ ...withoutChapter, missing: true, next: [] }] });
   await button(f.render(), '刷新').props.onClick();
-  assert.equal(pageHead(f.render()).summary, '书架 2 本，常看 1 本 · 今日日报尚未生成 · 1 本常看书的阅读副本不见了');
+  assert.equal(pageHead(f.render()).summary, '今天这一期还没出 · 存下 0 条 · 书里划线 0 条 · 1 本常看书的阅读副本不见了');
   value = home([], { total: 0, daily: 0, books: [], issue: '书架读取失败：磁盘被占用' });
   await button(f.render(), '刷新').props.onClick();
-  assert.equal(pageHead(f.render()).summary, '书架没读出来 · 今日日报尚未生成');
+  assert.equal(pageHead(f.render()).summary, '今天这一期还没出 · 存下 0 条 · 书里划线 0 条 · 书架没读出来');
   f.unmount();
 });
 
-test('知识卡片首页第一次读取时，标题下先写正在读取，读完换成现状摘要', async () => {
+test('每日阅读首页第一次读取时，标题下先写正在读取，读完换成现状摘要', async () => {
   let release;
   const waiting = new Promise(resolve => { release = resolve; });
   const f = await fixture({ news: async () => { await waiting; return ok(home()); } });
-  const opening = button(f.render(), '知识卡片').props.onClick();
+  const opening = button(f.render(), '每日阅读').props.onClick();
   await new Promise(setImmediate);
-  assert.deepEqual(pageHead(f.render()), { title: '知识卡片', summary: '正在读取书架和每日资讯' });
+  assert.deepEqual(pageHead(f.render()), { title: '每日阅读', summary: '正在读取书架和每日资讯' });
   release(); await opening;
-  assert.equal(pageHead(f.render()).summary, '书架 2 本，常看 1 本 · 今日日报尚未生成');
+  assert.equal(pageHead(f.render()).summary, '今天这一期还没出 · 存下 0 条 · 书里划线 0 条');
   f.unmount();
 });
 
@@ -155,8 +161,8 @@ test('导入 0 字节的文件不上传，右上角说明文件是空的；书�
     if (input.action === 'uploadCancel') return ok({ cancelled: true });
     throw new Error('unexpected library action ' + input.action);
   } });
-  await button(f.render(), '知识卡片').props.onClick();
-  await button(f.render(), '打开书架').props.onClick();
+  await button(f.render(), '每日阅读').props.onClick();
+  await button(f.render(), '书架').props.onClick();
   const input = nodes(f.render()).find(node => node.type === 'input' && node.props.type === 'file');
   await input.props.onChange({ target: { files: [new File([], 'empty.txt'), new File([new Uint8Array(16)], 'x.rar')], value: 'C:\\fakepath\\empty.txt' } });
   const uploads = f.calls.filter(([kind, item]) => kind === 'library' && item.action.startsWith('upload')).map(([, item]) => [item.action, item.name ?? null]);

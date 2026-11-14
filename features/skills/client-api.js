@@ -15,7 +15,17 @@ export function createSkillsClient(bridge, t) {
       return target;
     };
 
+    const mcpRequest = async (input, signal) => {
+      const reply = await featureRemote('whalewingSkills').manageMcp(input, signal);
+      try { return unwrap(reply); } catch (error) { throw Object.assign(error, { answered: true }); }
+    };
+
+    const packRequest = async (input, signal) => {
+      const reply = await featureRemote('whalewingSkills').managePacks(input, signal);
+      try { return unwrap(reply); } catch (error) { throw Object.assign(error, { answered: true }); }
+    };
+
   return {
-    skillRequest, resolveSkillEdit,
+    skillRequest, resolveSkillEdit, mcpRequest, packRequest,
   };
 }

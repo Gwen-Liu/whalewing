@@ -2,7 +2,9 @@ import * as fs from 'node:fs/promises';
 import yaml from 'js-yaml';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { unzipSync } from 'fflate';
 import { SkillFiles, skillArea, stat } from './skill-files.js';
+import { PluginPacks } from './plugin-packs.js';
 import { abort, digest, fail, frontmatter } from './vault.js';
 import { isSkillIdentifier } from '../features/skills/contract.js';
 
@@ -10,6 +12,26 @@ const folders = { candidate: 'candidates', active: 'active', disabled: 'disabled
 const bundledRoot = fileURLToPath(new URL('../content/skills', import.meta.url));
 // 写给员工看的规则说明：标识和技能内容里的名称是同一条规则。
 const identifierRule = '只能用英文小写字母、数字和连字符（如 my-skill），连字符不能在开头、结尾或连用，最长 80 个字符';
+// 从 skills.sh 装进来的技能在自己的文件夹里多放这一个小文件，记下从哪来；DSH 只读 SKILL.md，不受影响。
+export const sourceFile = '.whalewing-source.json';
+const utf8 = new TextDecoder('utf-8', { fatal: true });
+
+/** 上传的压缩包或单个 SKILL.md 摊成文件清单；压缩包外面套了一层文件夹时去掉这一层。系统自动加的垃圾文件不要。 */
+export function unpackUpload(bytes) {
+  const zipped = bytes.length > 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04;
+  if (!zipped) return [{ path: 'SKILL.md', bytes: Buffer.from(bytes) }];
+  let entries;
+  try { entries = unzipSync(bytes, { filter: file => file.originalSize <= 16 * 1024 * 1024 }); }
+  catch { fail('SKILL_FORMAT', '压缩包打不开，请重新打包成 .zip 再上传'); }
+  let list = Object.entries(entries).filter(([name]) => !name.endsWith('/') && !/(^|\/)(__MACOSX|\.git)(\/|$)/.test(name) && !/(^|\/)(\.DS_Store|Thumbs\.db)$/.test(name)).map(([name, data]) => ({ path: name.replaceAll('\\', '/').replace(/^\.\//, ''), bytes: Buffer.from(data) }));
+  if (!list.some(file => file.path === 'SKILL.md')) {
+    const tops = new Set(list.map(file => file.path.split('/')[0]));
+    const [top] = tops;
+    if (tops.size === 1 && list.every(file => file.path.startsWith(`${top}/`))) list = list.map(file => ({ ...file, path: file.path.slice(top.length + 1) }));
+  }
+  if (list.length > 500) fail('SKILL_SIZE', '技能里的文件太多（最多 500 个）');
+  return list;
+}
 
 /** 新增技能只接受合规标识：目录形式“标识/SKILL.md”或平铺形式“标识.md”。已有目录（如企业技能包）不受此限，照常读写。 */
 function newSkillIdentifier(id) {
@@ -33,6 +55,8 @@ export class SkillLibrary {
   constructor(vault, root, dependencies = {}) {
     this.vault = vault; this.files = new SkillFiles(root, vault.limits); this.root = this.files.root; this.dependencies = dependencies;
     this.builtinDir = path.join(this.root, skillArea, 'builtin'); this.activeDir = path.join(this.root, skillArea, 'active');
+    // 装好的插件包：技能目录交给鲸翼的技能来源发现，记录也在技能目录的鲸翼区。
+    this.packs = new PluginPacks(this);
   }
 
   async ensureReady(signal) {
@@ -128,8 +152,11 @@ export class SkillLibrary {
       // 原件随插件升级换成新版后，员工的覆盖照常生效、可编辑可重置：编辑时按新原件重记指纹，重置就回到新原件。
       origin = 'override'; baseHash = base.hash; baseUpdated = base.hash !== marker.hash;
     }
+    let source;
+    const sidecar = origin === 'user' && identity.bundle !== id && bundle.files.find(file => file.path === sourceFile);
+    if (sidecar) try { const value = JSON.parse(utf8.decode(sidecar.bytes)); if (value?.kind === 'skills.sh' && typeof value.id === 'string' && value.id.length <= 300) source = { kind: 'skills.sh', id: value.id }; } catch { /* 记录坏了就当普通个人技能。 */ }
     const value = {
-      id, name: data.name, description: data.description, origin, hash: origin === 'evolution' ? raw.hash : bundle.hash,
+      id, name: data.name, description: data.description, origin, hash: origin === 'evolution' ? raw.hash : bundle.hash, ...(source ? { source } : {}),
       actions: origin === 'builtin' ? ['read', 'update'] : origin === 'override' ? ['read', 'update', 'reset'] : origin === 'evolution' ? ['read', 'evolve'] : ['read', 'update', 'remove'],
       discovery: 'unknown', content: raw.content,
       ...(origin === 'builtin' ? { editId: `${data.name}/SKILL.md` } : {}), ...(baseId ? { baseId, baseHash } : {}), ...(baseUpdated ? { baseUpdated } : {}),
@@ -235,6 +262,29 @@ export class SkillLibrary {
       if (known.entries.some(entry => entry.id !== exceptId && entry.name === name)) fail('CONFLICT', '技能名称已存在，请编辑原技能或使用不同名称');
       offset += this.vault.limits.maxResults;
     } while (known.truncated);
+  }
+
+  /**
+   * 上传的技能、从 skills.sh 装的技能：整个文件夹装成“我的”里的普通个人技能，文件夹名就是技能名（SKILL.md 里的 name）。
+   * 不覆盖已有的同名技能；记录来源时多放一个来源小文件。
+   */
+  async importBundle(list, origin, signal) {
+    await this.ensureReady(signal);
+    const instruction = list.find(file => file.path === 'SKILL.md');
+    if (!instruction) fail('SKILL_FORMAT', '技能最上层要有一个 SKILL.md（压缩包里可以再套一层文件夹）');
+    let content;
+    try { content = utf8.decode(instruction.bytes); } catch { fail('SKILL_FORMAT', 'SKILL.md 不是 UTF-8 文本，请另存为 UTF-8 再上传'); }
+    const { data } = this.parseText(content.replace(/^\uFEFF/, ''));
+    if (data.metadata?.whalewingBuiltin || data.metadata?.whalewingSources) fail('SKILL_ORIGIN', '这份技能带着鲸翼内部的来源标记，不能当新技能装');
+    const files = list.filter(file => file.path !== sourceFile);
+    if (origin) files.push({ path: sourceFile, bytes: Buffer.from(`${JSON.stringify(origin, null, 2)}\n`) });
+    const snapshot = this.files.snapshotFromList(files);
+    return this.files.locked(async () => {
+      if (await stat(await this.files.resolve(data.name)) || await stat(await this.files.resolve(`${data.name}.md`))) fail('SKILL_EXISTS', `已经有叫「${data.name}」的技能了，没有覆盖；要换成新的，先删掉原来那个`);
+      await this.assertUniqueName(data.name, undefined, signal).catch(error => { if (error.code === 'CONFLICT') fail('SKILL_EXISTS', `已经有叫「${data.name}」的技能了，没有覆盖；要换成新的，先删掉原来那个`); throw error; });
+      await this.files.install(data.name, snapshot, signal);
+      return { entry: await this.entry(`${data.name}/SKILL.md`, signal) };
+    }, signal);
   }
 
   async manage(input, signal) {

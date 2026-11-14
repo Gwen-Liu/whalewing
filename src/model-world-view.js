@@ -4,6 +4,9 @@ import { watermarkedJpeg, portraitFileName } from './model-world-watermark.js';
 import { worldEfforts, worldIndexAsOf } from './model-world-index.js';
 import { aaLinks } from './model-world-aa.js';
 import { isDomesticVendor, worldCnyPriceAsOf, worldPriceText } from './model-world-cny-prices.js';
+import { createBattle } from './model-world-battle.js';
+import { createModelWorldPages } from './model-world-pages.js';
+import { worldPagesCss } from './model-world-style.js';
 
 /** 角色只表达厂商身份；评测、日期与价格始终消费模型数据服务的已接纳事实。 */
 export const worldViewCopy = Object.freeze({
@@ -18,7 +21,7 @@ export const worldViewCopy = Object.freeze({
   valueMethod: '性价比：每个“模型 + 思考强度”算一个方案。先看消耗：相对消耗是跑一次评测任务的花费，以 GPT-5.6 Luna 轻度 = 1；同一消耗档位里推荐能力分最高的方案。“同价最强”表示没有其他方案比它更省又不比它弱。',
   artCredit: '立绘 © 鲸翼 WhaleWing，依 CC BY-NC-SA 4.0 授权，商用需先取得作者授权；身上的模型标识归各厂商所有，角色为非官方拟人形象，与厂商无关。', overall: '综合实力', tier: '梯队', benchmarks: '评测成绩',
   effort: '思考强度', efforts: '各档成绩', index: '能力分', cost: '相对消耗', band: '消耗档位', recommend: '推荐方案', alternatives: '同档其他选择', frontier: '同价最强', plans: '方案', showAll: '显示全部方案', showFrontier: '只看同价最强', strongestTier: '最强档', noCost: '未公布',
-  dealt: '造成', duelRule: '对决只看综合实力：双方互相出手，分高的一方每回合都打得更重，最后把对方击倒；分差越大，胜方剩余体力越多。下方的推理、编程、智能体来自另一组第三方评测，个别单项由低分方领先属于正常。', duelBasis: '综合实力', duelFallback: '双方缺少综合实力分，按分项百分位判定',
+  dealt: '造成', duelRule: '谁赢、胜方剩多少体力只看综合实力：分高的一方赢，分差越大剩得越多。过程每一场现排：谁先出手、用哪一招、每一击多重、有没有闪开和对拼都不固定，再来一次不会一模一样；伤害不超过 6 的一击算格挡。下方的推理、编程、智能体来自另一组第三方评测，个别单项由低分方领先属于正常。', duelBasis: '综合实力', duelFallback: '双方缺少综合实力分，按分项百分位判定',
   release: '发布日期', context: '上下文', output: '最大输出', cutoff: '知识截止', weights: '开放权重', license: '许可证', input: '输入模态', outputModal: '输出模态',
   priceInput: '输入价格', priceCached: '缓存输入价格', priceOutput: '输出价格', priceUnit: '海外模型价格：美元 / 百万 tokens，取自公开目录', priceUnitCny: `国产模型价格：人民币 / 百万 tokens，按厂商官网标价（${worldCnyPriceAsOf} 核对），官网未单列或尚未核对的不显示`, yes: '是', no: '否',
   generated: '数据生成于', accepted: '本机更新于', previous: '上一页', next: '下一页', descending: '从高到低', ascending: '从低到高', sortToggle: '切换排序方向', unrated: '评测不足',
@@ -72,7 +75,8 @@ const duelWeights = [0.2, 0.22, 0.24, 0.34];
 export const worldEffortText = (effort, c = worldViewCopy) => effort ? c[`effort_${effort}`] ?? effort : '';
 
 /**
- * 确定性的对决剧本：胜负和每一击的轻重都只看综合实力（双方都缺时按分项加权百分位）。
+ * 确定性的对决剧本：胜负和每一方全场打出多少伤害只看综合实力（双方都缺时按分项加权百分位）。
+ * 台上怎么演（谁先手、用哪招、每回合各打多少、闪开和对拼）由 model-world-battle.js 的 battlePlan 每场现排，结果不变。
  * 双方每回合各出手一次，先后手轮换；高分方每回合都比低分方打得重，最后一回合补上终结一击。
  * 胜方剩余体力 = 12 + 综合分差 × 6（上限 70），即低分方全场合计造成 100 − 剩余体力的伤害。综合实力相同则平局，双方各剩 35。
  */
@@ -137,13 +141,12 @@ export function worldMetricRows(model, c = worldViewCopy, { known = false } = {}
 export const worldViewCss = `
 .ww-mw-header-actions{display:flex;align-items:center;gap:10px}.ww-mw-status{display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--dsw-alias-label-secondary)}.ww-mw-status-late{animation:ww-mw-late .2s ease-out .8s both}@keyframes ww-mw-late{from{opacity:0;visibility:hidden}to{opacity:1;visibility:visible}}@media(prefers-reduced-motion:reduce){.ww-mw-status-late{animation-duration:.01s}}.ww-mw-status-warn{color:#b45309}
 .ww-mw-boards .ww-mw-sort{margin-left:auto;border-radius:8px!important}
-.ww-page .ww-mw-toolbar{flex-wrap:nowrap}.ww-page .ww-mw-toolbar input{flex:1 1 auto;width:auto;min-width:160px}.ww-page .ww-mw-toolbar select{flex:0 0 auto;width:auto;min-width:140px;max-width:220px}.ww-page .ww-mw-toolbar button{flex:none}
-@media(max-width:720px){.ww-page .ww-mw-toolbar{flex-wrap:wrap}}
+.ww-page .ww-mw-toolbar{flex-wrap:wrap}.ww-page .ww-mw-toolbar input{flex:1 1 12.5rem;width:auto;min-width:min(100%,10rem)}.ww-page .ww-mw-toolbar select{flex:0 1 auto;width:auto;min-width:min(100%,8.75rem);max-width:min(100%,13.75rem)}.ww-page .ww-mw-toolbar button{flex:none}
 .ww-mw{color:var(--dsw-alias-label-primary);display:flex;flex-direction:column;gap:18px;min-width:0;font-size:13px}.ww-mw h2,.ww-mw h3,.ww-mw-dialog h2,.ww-mw-dialog h3{font-weight:500;margin:0}.ww-mw p,.ww-mw-dialog p{margin:0}.ww-mw small,.ww-mw-dialog small{color:var(--dsw-alias-label-secondary);font-size:12px}
-.ww-mw-header,.ww-mw-toolbar,.ww-mw-tabs,.ww-mw-page,.ww-mw-selected,.ww-mw-actions,.ww-mw-boards{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.ww-mw-header{justify-content:space-between}.ww-mw-header h2{font-size:24px}.ww-mw-toolbar input{flex:1;min-width:160px}.ww-mw-toolbar select{max-width:200px}.ww-mw button,.ww-mw-dialog button,.ww-mw input,.ww-mw select{font:inherit}
+.ww-mw-header,.ww-mw-toolbar,.ww-mw-tabs,.ww-mw-page,.ww-mw-selected,.ww-mw-actions,.ww-mw-boards{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.ww-mw-header{justify-content:space-between}.ww-mw-header h2{font-size:24px}.ww-mw button,.ww-mw-dialog button,.ww-mw input,.ww-mw select{font:inherit}
 .ww-mw-tabs{border-bottom:1px solid var(--dsw-alias-border-l2);padding-bottom:10px}.ww-mw-tabs button[aria-pressed=true],.ww-mw-boards button[aria-pressed=true]{background:var(--dsw-alias-bg-layer-3);border-color:var(--dsw-alias-brand-primary)}.ww-mw-boards{gap:6px}.ww-mw-boards button{border-radius:999px;padding:5px 14px}
-.ww-mw-deck{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:14px}.ww-mw .ww-mw-role{padding:0!important;display:flex;flex-direction:column;overflow:hidden;min-height:276px;border-radius:16px;text-align:left;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);transition:transform .18s,border-color .18s,box-shadow .18s}.ww-mw .ww-mw-role:hover{transform:translateY(-3px);border-color:var(--dsw-alias-brand-primary);box-shadow:var(--dsw-elevation-prominent)}
-.ww-mw-role-art{width:100%;height:212px;display:flex;align-items:center;justify-content:center;background:radial-gradient(ellipse 80% 45% at 50% 100%,color-mix(in srgb,var(--dsw-alias-brand-primary) 22%,transparent),transparent 75%),linear-gradient(180deg,var(--dsw-alias-bg-layer-2),var(--dsw-alias-bg-layer-3));position:relative;overflow:hidden}.ww-mw-monogram{display:flex!important;align-items:center;justify-content:center;font-size:52px;font-weight:500;color:var(--dsw-alias-label-secondary)}.ww-mw-persona{width:104px;height:140px;object-fit:contain;display:block;position:relative;z-index:1}.ww-mw-role-art img.ww-mw-persona{width:100%;height:100%;object-fit:cover;object-position:50% 10%}
+.ww-mw-deck{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,10.5rem),1fr));gap:14px}.ww-mw .ww-mw-role{padding:0!important;display:flex;flex-direction:column;overflow:hidden;border-radius:16px;text-align:left;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);transition:transform .18s,border-color .18s,box-shadow .18s}.ww-mw .ww-mw-role:hover{transform:translateY(-3px);border-color:var(--dsw-alias-brand-primary);box-shadow:var(--dsw-elevation-prominent)}
+.ww-mw-role-art{width:100%;flex:none;aspect-ratio:4/5;display:flex;align-items:center;justify-content:center;background:radial-gradient(ellipse 80% 45% at 50% 100%,color-mix(in srgb,var(--dsw-alias-brand-primary) 22%,transparent),transparent 75%),linear-gradient(180deg,var(--dsw-alias-bg-layer-2),var(--dsw-alias-bg-layer-3));position:relative;overflow:hidden}.ww-mw-monogram{display:flex!important;align-items:center;justify-content:center;font-size:52px;font-weight:500;color:var(--dsw-alias-label-secondary)}.ww-mw-persona{width:104px;height:140px;object-fit:contain;display:block;position:relative;z-index:1}.ww-mw-role-art img.ww-mw-persona{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:50% 10%}
 .ww-mw-role-text{padding:10px 14px 12px;width:100%;box-sizing:border-box;display:grid;gap:3px;background:var(--dsw-alias-bg-layer-1)}.ww-mw-role-text strong{font-size:15px;font-weight:500}.ww-mw-role-top{display:flex;gap:6px;align-items:center;min-width:0}.ww-mw-role-top span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--dsw-alias-label-secondary)}
 .ww-mw-tier{display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:20px;padding:0 6px;border-radius:6px;font-size:11px;font-weight:500;letter-spacing:.3px;color:#fff;background:#8a8f98;flex:none}.ww-mw-tier[data-tier=T0]{background:linear-gradient(135deg,#f59e0b,#ef4444)}.ww-mw-tier[data-tier=T1]{background:linear-gradient(135deg,#8b5cf6,#6366f1)}.ww-mw-tier[data-tier=T2]{background:linear-gradient(135deg,#0ea5e9,#14b8a6)}
 .ww-mw-row-list{display:flex;flex-direction:column;border:1px solid var(--dsw-alias-border-l2);border-radius:14px;overflow:hidden}.ww-mw-model-row{display:flex;align-items:center;gap:14px;padding:10px 16px;background:var(--dsw-alias-bg-layer-1);border-bottom:1px solid var(--dsw-alias-border-l1)}.ww-mw-model-row:last-child{border-bottom:0}.ww-mw-model-name{flex:1;min-width:0;display:grid;gap:4px;overflow-wrap:anywhere}.ww-mw-model-name strong{font-weight:500;font-size:14px}
@@ -154,40 +157,28 @@ export const worldViewCss = `
 .ww-mw-table td .ww-mw-actions{flex-wrap:nowrap}.ww-mw-rank{font-variant-numeric:tabular-nums;font-size:16px;font-weight:500;color:var(--dsw-alias-label-secondary);text-align:center}.ww-mw-rank[data-top=true]{color:var(--dsw-alias-brand-primary)}.ww-mw-score{font-variant-numeric:tabular-nums;font-size:16px;font-weight:500}
 .ww-mw-bar{display:grid;grid-template-columns:42px 72px;gap:8px;align-items:center;font-variant-numeric:tabular-nums}.ww-mw-bar i{display:block;height:6px;border-radius:3px;background:var(--dsw-alias-bg-layer-3);overflow:hidden}.ww-mw-bar i b{display:block;height:100%;border-radius:3px;background:linear-gradient(90deg,#6366f1,#22d3ee)}
 .ww-mw-selected{position:sticky;bottom:0;z-index:2;padding:12px 16px;border:1px solid var(--dsw-alias-border-l2);border-radius:14px;background:var(--dsw-alias-bg-layer-1);box-shadow:var(--dsw-elevation-prominent)}.ww-mw-selected>span{flex:1}.ww-mw-chip{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ww-mw-empty{padding:44px 20px;text-align:center;border:1px dashed var(--dsw-alias-border-l2);border-radius:16px;color:var(--dsw-alias-label-secondary)}.ww-mw-notice{padding:10px 14px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px}.ww-mw-skeleton{height:240px;border-radius:14px;background:var(--dsw-alias-bg-layer-2)}.ww-mw-about{color:var(--dsw-alias-label-secondary);font-size:12px}.ww-mw-about summary{cursor:pointer}.ww-mw-about p{margin-top:10px;line-height:1.7}
-.ww-mw-dialog{position:fixed;inset:0;margin:auto;box-sizing:border-box;width:min(1240px,calc(100vw - 40px));height:fit-content;max-height:calc(100dvh - 48px);padding:0;border:1px solid var(--dsw-alias-border-l2);border-radius:20px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-1);box-shadow:var(--dsw-elevation-prominent);overflow:auto;font:inherit}.ww-mw-dialog:not([open]){display:none}.ww-mw-dialog::backdrop{background:color-mix(in srgb,var(--dsw-alias-label-primary) 28%,transparent);backdrop-filter:blur(4px)}.ww-mw-dialog>header{display:flex;gap:16px;align-items:center;padding:16px 22px;border-bottom:1px solid var(--dsw-alias-border-l2);position:sticky;top:0;background:var(--dsw-alias-bg-layer-1);z-index:5}.ww-mw-dialog>header h2{flex:1;font-size:18px}.ww-mw-dialog-body{padding:22px}
-.ww-mw-key{width:min(560px,calc(100vw - 40px))}.ww-mw-key .ww-mw-dialog-body{display:grid;gap:12px;line-height:1.7}.ww-mw-key ol{margin:0;padding-left:20px}.ww-mw-key-form,.ww-mw-key-confirm{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.ww-mw-key-form input{flex:1;min-width:200px;padding:8px 10px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}.ww-mw-key-confirm>span{flex-basis:100%}.ww-mw-key-alert{color:var(--dsw-alias-danger-primary,#d14343)}
+.ww-mw-empty{padding:44px 20px;text-align:center;border:1px dashed var(--dsw-alias-border-l2);border-radius:16px;color:var(--dsw-alias-label-secondary)}.ww-mw-notice{padding:10px 14px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px}.ww-mw-skeleton{height:clamp(10rem,32dvh,20rem);border-radius:14px;background:var(--dsw-alias-bg-layer-2)}.ww-mw-about{color:var(--dsw-alias-label-secondary);font-size:12px}.ww-mw-about summary{cursor:pointer}.ww-mw-about p{margin-top:10px;line-height:1.7}
+.ww-mw-dialog{position:fixed;inset:0;margin:auto;box-sizing:border-box;width:min(calc(100vw - 40px),105rem);height:fit-content;max-height:calc(100dvh - 48px);padding:0;border:1px solid var(--dsw-alias-border-l2);border-radius:20px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-1);box-shadow:var(--dsw-elevation-prominent);overflow:auto;font:inherit}.ww-mw-dialog:not([open]){display:none}.ww-mw-dialog::backdrop{background:color-mix(in srgb,var(--dsw-alias-label-primary) 28%,transparent);backdrop-filter:blur(4px)}.ww-mw-dialog>header{display:flex;gap:16px;align-items:center;padding:16px 22px;border-bottom:1px solid var(--dsw-alias-border-l2);position:sticky;top:0;background:var(--dsw-alias-bg-layer-1);z-index:5}.ww-mw-dialog>header h2{flex:1;font-size:18px}.ww-mw-dialog-body{padding:22px;container:ww-mw-dialog/inline-size}
+.ww-mw-key{width:min(35rem,calc(100vw - 40px))}.ww-mw-key .ww-mw-dialog-body{display:grid;gap:12px;line-height:1.7}.ww-mw-key ol{margin:0;padding-left:20px}.ww-mw-key-form,.ww-mw-key-confirm{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.ww-mw-key-form input{flex:1;min-width:min(100%,12.5rem);padding:8px 10px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}.ww-mw-key-confirm>span{flex-basis:100%}.ww-mw-key-alert{color:var(--dsw-alias-danger-primary,#d14343)}
 .ww-mw-dialog button{padding:8px 12px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);cursor:pointer}.ww-mw-dialog button:disabled{opacity:.5;cursor:default}.ww-mw-dialog button:focus-visible,.ww-mw button:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:3px}.ww-mw-dialog a,.ww-mw-about a{color:var(--dsw-alias-brand-primary)}
-.ww-mw-detail{display:grid;grid-template-columns:220px 1fr;gap:26px}.ww-mw-detail-art{display:grid;justify-items:center;align-content:start;gap:10px;padding:14px;background:radial-gradient(ellipse 80% 45% at 50% 100%,color-mix(in srgb,var(--dsw-alias-brand-primary) 22%,transparent),transparent 75%),linear-gradient(180deg,var(--dsw-alias-bg-layer-2),var(--dsw-alias-bg-layer-3));border-radius:16px;border:1px solid var(--dsw-alias-border-l1)}.ww-mw-detail-art .ww-mw-persona{width:180px;height:320px}.ww-mw-detail-main{display:grid;gap:22px;align-content:start}
-.ww-mw-rating{display:grid;grid-template-columns:auto 1fr;gap:20px;align-items:center;padding:16px 18px;border-radius:14px;background:var(--dsw-alias-bg-layer-2)}.ww-mw-rating-score{display:grid;justify-items:center;gap:6px}.ww-mw-rating-score strong{font-size:40px;line-height:1;font-weight:500;font-variant-numeric:tabular-nums}.ww-mw-dims{display:grid;gap:8px}.ww-mw-dim{display:grid;grid-template-columns:96px 1fr 44px;gap:10px;align-items:center;font-size:12px}.ww-mw-dim i{display:block;height:8px;border-radius:4px;background:var(--dsw-alias-bg-layer-3);overflow:hidden}.ww-mw-dim i b{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,#6366f1,#22d3ee)}.ww-mw-dim span:last-child{text-align:right;font-variant-numeric:tabular-nums}
-.ww-mw-benches{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px}.ww-mw-bench{display:flex;justify-content:space-between;gap:10px;padding:8px 12px;border-radius:10px;border:1px solid var(--dsw-alias-border-l1);font-size:12px}.ww-mw-bench b{font-weight:500;font-variant-numeric:tabular-nums}
-.ww-mw-metrics{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px 16px;font-size:13px;margin:0}.ww-mw-metrics>div{display:grid;gap:2px}.ww-mw-metrics dt{color:var(--dsw-alias-label-secondary);font-size:12px}.ww-mw-metrics dd{margin:0;overflow-wrap:anywhere}.ww-mw-duel-help{color:var(--dsw-alias-label-secondary);font-size:12px}
-.ww-mw-stage{position:relative;height:460px;overflow:hidden;border-radius:18px;background:radial-gradient(ellipse 70% 40% at 50% 92%,rgba(99,102,241,.35),transparent 70%),linear-gradient(180deg,#0f172a 0%,#1e1b4b 55%,#312e81 100%);color:#fff;isolation:isolate}.ww-mw-stage:before{content:'';position:absolute;left:6%;right:6%;bottom:34px;height:70px;border-radius:50%;background:radial-gradient(ellipse at center,rgba(255,255,255,.18),transparent 70%)}.ww-mw-stage:after{content:'';position:absolute;inset:0;background-image:radial-gradient(1px 1px at 20% 30%,#fff8,transparent),radial-gradient(1px 1px at 70% 20%,#fff6,transparent),radial-gradient(1.5px 1.5px at 40% 12%,#fff7,transparent),radial-gradient(1px 1px at 85% 45%,#fff5,transparent);z-index:-1}
+.ww-mw-detail{display:grid;grid-template-columns:clamp(10rem,24%,16.25rem) minmax(0,1fr);gap:26px}.ww-mw-detail-art{display:grid;justify-items:center;align-content:start;gap:10px;padding:14px;background:radial-gradient(ellipse 80% 45% at 50% 100%,color-mix(in srgb,var(--dsw-alias-brand-primary) 22%,transparent),transparent 75%),linear-gradient(180deg,var(--dsw-alias-bg-layer-2),var(--dsw-alias-bg-layer-3));border-radius:16px;border:1px solid var(--dsw-alias-border-l1)}.ww-mw-detail-art .ww-mw-persona{width:100%;height:auto;aspect-ratio:9/16;max-height:50dvh}.ww-mw-detail-art>.ww-mw-art-zoom{justify-self:stretch}.ww-mw-detail-main{display:grid;gap:22px;align-content:start}
+.ww-mw-rating{display:grid;grid-template-columns:auto 1fr;gap:20px;align-items:center;padding:16px 18px;border-radius:14px;background:var(--dsw-alias-bg-layer-2)}.ww-mw-rating-score{display:grid;justify-items:center;gap:6px}.ww-mw-rating-score strong{font-size:40px;line-height:1;font-weight:500;font-variant-numeric:tabular-nums}.ww-mw-dims{display:grid;gap:8px}.ww-mw-dim{display:grid;grid-template-columns:minmax(5em,max-content) minmax(0,1fr) minmax(3.5em,max-content);gap:10px;align-items:center;font-size:12px}.ww-mw-dim i{display:block;height:8px;border-radius:4px;background:var(--dsw-alias-bg-layer-3);overflow:hidden}.ww-mw-dim i b{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,#6366f1,#22d3ee)}.ww-mw-dim span:last-child{text-align:right;font-variant-numeric:tabular-nums}
+.ww-mw-benches{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,12.5rem),1fr));gap:8px}.ww-mw-bench{display:flex;justify-content:space-between;gap:10px;padding:8px 12px;border-radius:10px;border:1px solid var(--dsw-alias-border-l1);font-size:12px}.ww-mw-bench b{font-weight:500;font-variant-numeric:tabular-nums}
+.ww-mw-metrics{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,9.375rem),1fr));gap:10px 16px;font-size:13px;margin:0}.ww-mw-metrics>div{display:grid;gap:2px}.ww-mw-metrics dt{color:var(--dsw-alias-label-secondary);font-size:12px}.ww-mw-metrics dd{margin:0;overflow-wrap:anywhere}.ww-mw-duel-help{color:var(--dsw-alias-label-secondary);font-size:12px}.ww-mw-kits{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,17rem),1fr));gap:6px 16px;margin:0 0 8px;font-size:12px}.ww-mw-kits p{margin:0;display:grid;gap:2px}.ww-mw-kits span{color:var(--dsw-alias-label-secondary)}
 .ww-mw-hud{position:absolute;top:16px;left:18px;right:18px;display:grid;grid-template-columns:1fr auto 1fr;gap:16px;align-items:start;z-index:4}.ww-mw-hud-side{display:grid;gap:6px;min-width:0}.ww-mw-hud-side.right{text-align:right}.ww-mw-hud-name{font-size:15px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ww-mw-hud-name small{color:#c7d2fe!important;font-weight:400;margin:0 6px}.ww-mw-hp{height:12px;border-radius:6px;background:rgba(255,255,255,.15);overflow:hidden;box-shadow:inset 0 0 0 1px rgba(255,255,255,.2)}.ww-mw-hp b{display:block;height:100%;background:linear-gradient(90deg,#22c55e,#a3e635);transition:width .5s cubic-bezier(.2,.8,.2,1) .6s}.ww-mw-hp[data-low=true] b{background:linear-gradient(90deg,#ef4444,#f97316)}.ww-mw-hud-side.right .ww-mw-hp{transform:scaleX(-1)}.ww-mw-hp-num{font-size:12px;color:#c7d2fe;font-variant-numeric:tabular-nums}
 .ww-mw-vs{font-size:30px;font-weight:500;letter-spacing:2px;background:linear-gradient(180deg,#fde68a,#f59e0b);-webkit-background-clip:text;background-clip:text;color:transparent;text-shadow:0 0 24px rgba(245,158,11,.4)}
-.ww-mw-banner{position:absolute;top:84px;left:50%;transform:translateX(-50%);padding:6px 18px;border-radius:999px;background:rgba(15,23,42,.7);border:1px solid rgba(255,255,255,.2);font-size:13px;white-space:nowrap;z-index:4;animation:ww-mw-banner .5s ease-out}
-.ww-mw-fighter{position:absolute;bottom:30px;width:210px;height:374px;z-index:2;transition:transform .3s,filter .3s,opacity .5s}.ww-mw-fighter.left{left:10%}.ww-mw-fighter.right{right:10%}.ww-mw-fighter .ww-mw-body{width:100%;height:100%;display:flex;align-items:flex-end;justify-content:center}.ww-mw-fighter.right .ww-mw-body{transform:scaleX(-1)}.ww-mw-fighter .ww-mw-persona{width:210px;height:374px;object-fit:contain;filter:drop-shadow(0 10px 18px rgba(0,0,0,.45))}.ww-mw-fighter .ww-mw-monogram{background:rgba(255,255,255,.1);border-radius:20px;color:#fff;font-size:72px}
-.ww-mw-fighter[data-act=attack].left{animation:ww-mw-lunge-left 1.1s cubic-bezier(.3,.7,.3,1)}.ww-mw-fighter[data-act=attack].right{animation:ww-mw-lunge-right 1.1s cubic-bezier(.3,.7,.3,1)}.ww-mw-fighter[data-act=hit]{animation:ww-mw-hit 1.1s ease-out}.ww-mw-fighter[data-act=idle]{animation:ww-mw-idle 2.4s ease-in-out infinite}
-.ww-mw-fighter[data-result=lost]{transform:translateY(40px) rotate(var(--fall,-12deg));filter:grayscale(.8) brightness(.6);opacity:.75}.ww-mw-fighter.right[data-result=lost]{--fall:12deg}.ww-mw-fighter[data-result=won]{filter:drop-shadow(0 0 22px rgba(250,204,21,.7))}
-.ww-mw-slash{position:absolute;bottom:150px;width:240px;height:240px;z-index:3;pointer-events:none;opacity:0;animation:ww-mw-slash 1.1s ease-out}.ww-mw-slash.on-left{left:calc(10% - 10px)}.ww-mw-slash.on-right{right:calc(10% - 10px);transform:scaleX(-1)}
-.ww-mw-dmg{position:absolute;bottom:330px;font-size:34px;font-weight:500;color:#fca5a5;text-shadow:0 2px 0 #7f1d1d,0 0 16px rgba(239,68,68,.6);z-index:4;animation:ww-mw-dmg 1.1s ease-out forwards}.ww-mw-dmg.on-left{left:calc(10% + 70px)}.ww-mw-dmg.on-right{right:calc(10% + 70px)}
-.ww-mw-final{position:absolute;inset:auto 0 18px;text-align:center;z-index:4;font-size:22px;font-weight:500;text-shadow:0 2px 10px rgba(0,0,0,.6);animation:ww-mw-banner .6s ease-out}
-.ww-mw-duel-bar{display:flex;gap:10px;justify-content:center;align-items:center;margin:14px 0}.ww-mw-duel-log{display:grid;gap:6px;margin:0 0 18px;padding:0;list-style:none}.ww-mw-duel-log li{display:grid;grid-template-columns:150px 1fr 140px 1fr;gap:12px;align-items:center;padding:8px 12px;border-radius:10px;background:var(--dsw-alias-bg-layer-2);font-size:12px;font-variant-numeric:tabular-nums}.ww-mw-duel-log li>span:nth-child(2){text-align:right}.ww-mw-duel-log li>span:nth-child(3){text-align:center;color:var(--dsw-alias-label-secondary)}.ww-mw-duel-log li[data-win=left]>span:nth-child(2),.ww-mw-duel-log li[data-win=right]>span:nth-child(4){color:var(--dsw-alias-brand-primary);font-weight:500}.ww-mw-duel-log em{font-style:normal;color:var(--dsw-alias-label-secondary)}
-.ww-mw-compare{display:grid;grid-template-columns:1fr 1fr;gap:18px}.ww-mw-compare section{padding:14px 16px;border-radius:14px;background:var(--dsw-alias-bg-layer-2);display:grid;gap:12px;min-width:0}.ww-mw-compare h3{font-size:15px;overflow-wrap:anywhere}
-@keyframes ww-mw-idle{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}@keyframes ww-mw-lunge-left{0%{transform:translateX(0)}30%{transform:translateX(-18px) rotate(-3deg)}55%{transform:translateX(min(26vw,300px)) rotate(4deg)}70%{transform:translateX(min(24vw,280px))}100%{transform:translateX(0)}}@keyframes ww-mw-lunge-right{0%{transform:translateX(0)}30%{transform:translateX(18px) rotate(3deg)}55%{transform:translateX(max(-26vw,-300px)) rotate(-4deg)}70%{transform:translateX(max(-24vw,-280px))}100%{transform:translateX(0)}}
-@keyframes ww-mw-hit{0%,45%{transform:translateX(0);filter:none}52%{transform:translateX(10px);filter:brightness(2) saturate(.2)}60%{transform:translateX(-10px);filter:brightness(1.4) hue-rotate(-30deg)}70%{transform:translateX(6px)}80%,100%{transform:translateX(0);filter:none}}
-@keyframes ww-mw-slash{0%,40%{opacity:0;transform:scale(.6) rotate(-30deg)}52%{opacity:1;transform:scale(1.05) rotate(0)}75%{opacity:.8}100%{opacity:0;transform:scale(1.2) rotate(18deg)}}.ww-mw-slash.on-right{animation-name:ww-mw-slash-r}@keyframes ww-mw-slash-r{0%,40%{opacity:0;transform:scaleX(-1) scale(.6) rotate(-30deg)}52%{opacity:1;transform:scaleX(-1) scale(1.05)}75%{opacity:.8}100%{opacity:0;transform:scaleX(-1) scale(1.2) rotate(18deg)}}
-@keyframes ww-mw-dmg{0%,45%{opacity:0;transform:translateY(10px) scale(.6)}55%{opacity:1;transform:translateY(0) scale(1.25)}100%{opacity:0;transform:translateY(-50px) scale(1)}}@keyframes ww-mw-banner{from{opacity:0;transform:translate(-50%,-8px)}to{opacity:1}}.ww-mw-final{animation-name:ww-mw-final}@keyframes ww-mw-final{from{opacity:0;transform:scale(.8)}to{opacity:1;transform:none}}
-@media(max-width:950px){.ww-mw-stage{height:400px}.ww-mw-fighter{width:160px;height:285px}.ww-mw-fighter .ww-mw-persona{width:160px;height:285px}.ww-mw-fighter.left{left:4%}.ww-mw-fighter.right{right:4%}.ww-mw-dmg{bottom:250px}.ww-mw-slash{bottom:110px;width:180px;height:180px}}
-@media(max-width:550px){.ww-mw-detail,.ww-mw-compare{grid-template-columns:1fr}.ww-mw-detail-art{display:none}.ww-mw-dialog{width:calc(100vw - 20px)}.ww-mw-dialog-body{padding:14px}.ww-mw-model-row{flex-wrap:wrap}.ww-mw-role-art{height:160px}.ww-mw-role{min-height:220px!important}.ww-mw-toolbar select{max-width:100%}.ww-mw-stage{height:330px}.ww-mw-fighter{width:120px;height:214px}.ww-mw-fighter .ww-mw-persona{width:120px;height:214px}.ww-mw-duel-log li{grid-template-columns:70px 1fr auto 1fr}}
-html:is([data-platform=darwin],[data-windows-titlebar]) .ww-mw-dialog{max-height:calc(100dvh - var(--dsh-frame-top-clearance,0px) - 48px)}@media(prefers-reduced-motion:reduce){.ww-mw-stage *,.ww-mw-role{animation:none!important;transition:none!important}}
-.ww-mw-header{align-items:flex-end;margin:22px 0 18px}.ww-mw-summary{margin:6px 0 0;font-size:13.5px;line-height:1.5;color:var(--dsw-alias-label-secondary)}.ww-mw-header h2{margin:0;font:500 26px/1.3 var(--ww-serif);letter-spacing:.02em}.ww-mw-status-warn{color:var(--ww-warn)}
+.ww-mw-duel-bar{display:flex;gap:10px;justify-content:center;align-items:center;margin:14px 0}.ww-mw-duel-log{display:grid;grid-template-columns:minmax(min-content,max-content) minmax(max-content,1fr) max-content minmax(max-content,1fr);gap:6px 12px;margin:0 0 18px;padding:0;list-style:none}.ww-mw-duel-log li{display:grid;grid-column:1/-1;grid-template-columns:minmax(min-content,max-content) minmax(max-content,1fr) max-content minmax(max-content,1fr);grid-template-columns:subgrid;gap:12px;align-items:center;padding:8px 12px;border-radius:10px;background:var(--dsw-alias-bg-layer-2);font-size:12px;font-variant-numeric:tabular-nums}.ww-mw-duel-log li>span:nth-child(2){text-align:right}.ww-mw-duel-log li>span:nth-child(3){text-align:center;color:var(--dsw-alias-label-secondary)}.ww-mw-duel-log li[data-win=left]>span:nth-child(2),.ww-mw-duel-log li[data-win=right]>span:nth-child(4){color:var(--dsw-alias-brand-primary);font-weight:500}.ww-mw-duel-log em{font-style:normal;color:var(--dsw-alias-label-secondary)}
+.ww-mw-compare{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,17.5rem),1fr));gap:18px}.ww-mw-compare section{padding:14px 16px;border-radius:14px;background:var(--dsw-alias-bg-layer-2);display:grid;gap:12px;min-width:0}.ww-mw-compare h3{font-size:15px;overflow-wrap:anywhere}
+@media(max-width:550px){.ww-mw-dialog{width:calc(100vw - 20px)}.ww-mw-dialog-body{padding:14px}}
+@container ww-mw-dialog (max-width:32rem){.ww-mw-detail{grid-template-columns:minmax(0,1fr)}.ww-mw-detail-art{display:none}}@container ww-main (max-width:32rem){.ww-mw-model-row{flex-wrap:wrap}}
+html:is([data-platform=darwin],[data-windows-titlebar]) .ww-mw-dialog{max-height:calc(100dvh - var(--dsh-frame-top-clearance,0px) - 48px)}@media(prefers-reduced-motion:reduce){.ww-mw-role{animation:none!important;transition:none!important}}
+.ww-mw-header{align-items:flex-end;margin:22px 0 20px}.ww-mw-summary{margin:6px 0 0;font-size:13.5px;line-height:1.5;color:var(--dsw-alias-label-secondary)}.ww-mw-header h2{margin:0;font:600 26px/1.3 var(--ww-serif);letter-spacing:.02em}.ww-mw-status-warn{color:var(--ww-warn)}
 .ww-mw-tabs{display:inline-flex;flex-wrap:wrap;gap:2px;width:max-content;max-width:100%;padding:3px;border:1px solid var(--ww-line);border-radius:12px;background:var(--ww-surface-2)}.ww-page .ww-mw-tabs button{min-height:30px;padding:0 14px;border:0;border-radius:9px;background:transparent;color:var(--ww-ink-2)}.ww-page .ww-mw-tabs button[aria-pressed=true]{background:var(--ww-surface);border:0;color:var(--ww-ink);font-weight:500;box-shadow:0 1px 2px #0000001a}
 .ww-page .ww-mw-boards button{min-height:30px;padding:0 12px;border:1px solid var(--ww-line-2);border-radius:999px;background:transparent;color:var(--ww-ink-2);font-weight:400}.ww-page .ww-mw-boards button[aria-pressed=true]{border-color:transparent;background:var(--ww-tint);color:var(--ww-ink);font-weight:500}
 .ww-mw-role-art,.ww-mw-mini,.ww-mw-detail-art{background:var(--ww-surface-2)}.ww-mw-tier{color:var(--ww-ink-2);background:transparent;border:1px solid var(--ww-line-3);font-weight:500}.ww-mw-tier[data-tier=T0]{background:transparent;color:var(--ww-ink);border-color:var(--ww-ink)}.ww-mw-tier[data-tier=T1]{background:transparent;color:var(--ww-ink);border-color:var(--ww-ink-2);border-style:dashed}.ww-mw-tier[data-tier=T2]{background:transparent;color:var(--ww-ink-2);border-color:var(--ww-line-3)}
 .ww-mw-bar i b,.ww-mw-dim i b{background:color-mix(in srgb,var(--ww-brand) 72%,transparent)}.ww-mw-row-list{border-color:var(--ww-line)}.ww-mw-model-row{background:var(--ww-surface);border-bottom-color:var(--ww-line)}.ww-mw-model-row .ww-mw-actions{opacity:0;transition:opacity .15s ease}.ww-mw-model-row:is(:hover,:focus-within) .ww-mw-actions{opacity:1}
 .ww-mw-selected{margin-right:var(--ww-fab-safe);background:var(--ww-raised);border-color:var(--ww-line-2)}
-.ww-mw-stage{background:linear-gradient(180deg,#171a22,#232838)}.ww-mw-vs{background:none;color:#fde68a;text-shadow:none}.ww-mw-hp b{background:#4ade80}.ww-mw-hp[data-low=true] b{background:#f87171}.ww-mw-hud-name small,.ww-mw-hp-num{color:#cbd5e1!important}
+.ww-mw-vs{background:none;color:#fde68a;text-shadow:none}.ww-mw-hp b{background:#4ade80}.ww-mw-hp[data-low=true] b{background:#f87171}.ww-mw-hud-name small,.ww-mw-hp-num{color:#cbd5e1!important}
 @media(hover:none){.ww-mw-model-row .ww-mw-actions{opacity:1}}
 /* 查看大图入口：图鉴卡片右上角一个半透明圆钮，跟着卡片一起浮起；详情里的立绘本身可点，立绘下面一枚小标签提示（不压在立绘上）。 */
 .ww-mw-role-slot{position:relative;display:flex;min-width:0}.ww-mw-role-slot>.ww-mw-role{flex:1;min-width:0}.ww-mw .ww-mw-role-slot:hover>.ww-mw-role{transform:translateY(-3px);border-color:var(--dsw-alias-brand-primary);box-shadow:var(--dsw-elevation-prominent)}
@@ -207,11 +198,8 @@ html:is([data-platform=darwin],[data-windows-titlebar]) .ww-mw-dialog{max-height
 @media(max-width:640px){.ww-mw-viewer-stage,.ww-mw-viewer-stage.ww-zoomed{padding:0 10px}.ww-mw .ww-mw-viewer .ww-mw-viewer-nav{top:auto;bottom:64px;transform:none}.ww-mw-viewer-bar{gap:8px;padding:10px 12px}}
 @media(hover:none){.ww-mw .ww-mw-zoom{opacity:1}}`;
 
-// 刀光：一道带渐变的弧线，配合攻击时机出现在受击方身前。
-const slashSvg = h => h('svg', { viewBox: '0 0 200 200', width: '100%', height: '100%' },
-  h('defs', null, h('linearGradient', { id: 'ww-mw-slash-g', x1: '0', y1: '0', x2: '1', y2: '1' }, h('stop', { offset: '0', stopColor: '#fff', stopOpacity: 0 }), h('stop', { offset: '.5', stopColor: '#fde68a' }), h('stop', { offset: '1', stopColor: '#f97316', stopOpacity: 0 }))),
-  h('path', { d: 'M20 170 Q 90 20 185 30', stroke: 'url(#ww-mw-slash-g)', strokeWidth: 14, fill: 'none', strokeLinecap: 'round' }),
-  h('path', { d: 'M40 180 Q 110 60 190 60', stroke: '#fff', strokeOpacity: .6, strokeWidth: 3, fill: 'none', strokeLinecap: 'round' }));
+/** 打斗画布要用解码好的立绘；载不出来就空着上场，不挡对决。 */
+const loadPortraitImage = source => new Promise(resolve => { if (!source || typeof Image !== 'function') { resolve(null); return; } const image = new Image(); image.onload = () => resolve(image); image.onerror = () => resolve(null); image.src = source; });
 
 /** 用页面里的隐藏链接触发浏览器下载，文件进浏览器的下载目录。 */
 const downloadUrl = (url, name) => {
@@ -222,7 +210,7 @@ const downloadUrl = (url, name) => {
 const objectUrls = { create: blob => URL.createObjectURL(blob), revoke: url => URL.revokeObjectURL(url) };
 
 /** loadLarge 按立绘 id 取 4K 原图（数据地址）；不传就不提供查看大图。其余选项只为测试替换浏览器能力。 */
-export function createModelWorldView(React, approvedPortraits = {}, { loadLarge, watermark = watermarkedJpeg, download = downloadUrl, objectUrl = objectUrls } = {}) {
+export function createModelWorldView(React, approvedPortraits = {}, { loadLarge, watermark = watermarkedJpeg, download = downloadUrl, objectUrl = objectUrls, ui, battle = createBattle, loadImage = loadPortraitImage } = {}) {
   const { createElement: h, useState, useRef, useEffect } = React;
   const link = (url, label) => h('a', { href: url, target: '_blank', rel: 'noopener noreferrer' }, label);
   const button = (label, onClick, props = {}) => h('button', { type: 'button', onClick, ...props }, label);
@@ -349,78 +337,6 @@ export function createModelWorldView(React, approvedPortraits = {}, { loadLarge,
     return model.scores.length > 0 && h('div', { className: 'ww-mw-benches' }, ...model.scores.map(score => h('div', { key: score.league, className: 'ww-mw-bench' }, score.sourceUrl ? link(score.sourceUrl, worldBenchmarks[score.league].name) : h('span', null, worldBenchmarks[score.league].name), h('b', null, worldScoreText(score)))));
   }
 
-  function ModelWindow({ state, onClose, retry, returnFocus, fallbackFocus, onZoom, copy: c = worldViewCopy }) {
-    const dialog = useRef(null), title = useRef(null), timer = useRef(null);
-    const [phase, setPhase] = useState('ready'), [step, setStep] = useState(-1), [reduced, setReduced] = useState(false), [openError, setOpenError] = useState(false);
-    const models = state.data?.models || [], script = worldDuelScript(models);
-    const playable = ['winner', 'tie'].includes(script.kind);
-    const vendorName = model => { const vendor = state.data?.vendors.find(v => v.id === model.vendorId); return vendor?.nameZh || vendor?.name || model.vendorId; };
-    const stop = () => { clearTimeout(timer.current); timer.current = null; };
-    useEffect(() => {
-      const element = dialog.current;
-      try { if (element && !element.open) { element.showModal(); title.current?.focus(); } } catch { setOpenError(true); }
-      return () => { stop(); if (element?.open) element.close(); const target = returnFocus?.isConnected ? returnFocus : fallbackFocus.current; target?.focus?.(); };
-    }, []);
-    useEffect(() => {
-      const media = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)');
-      const update = () => { setReduced(!!media?.matches); if (media?.matches && timer.current !== null) { stop(); setStep(script.events.length - 1); setPhase('done'); } };
-      update(); media?.addEventListener('change', update);
-      return () => media?.removeEventListener('change', update);
-    }, []);
-    const close = () => { stop(); onClose(); };
-    // 每次出手 1.1 秒：出手、刀光、受击与掉血同步；最后一击后进入结算。
-    const advance = index => {
-      if (index >= script.events.length) { timer.current = null; setPhase('done'); return; }
-      setStep(index); timer.current = setTimeout(() => advance(index + 1), 1100);
-    };
-    const fight = () => {
-      if (!playable || timer.current !== null) return;
-      if (reduced) { setStep(script.events.length - 1); setPhase('done'); return; }
-      setPhase('fighting'); advance(0);
-    };
-    const event = phase === 'fighting' && step >= 0 ? script.events[step] : null;
-    const shownHp = phase === 'ready' || phase === 'cancelled' || step < 0 ? [100, 100] : script.events[step]?.hp ?? [100, 100];
-    const act = index => phase === 'done' || !event || event.attacker === null ? 'idle' : event.attacker === index ? 'attack' : 'hit';
-    const result = index => phase === 'done' && script.kind === 'winner' ? script.winner === index ? 'won' : 'lost' : '';
-    const side = index => ['left', 'right'][index];
-    // 舞台只在对决窗口、且两位模型都已读取时构建。
-    const stage = () => h('div', { className: 'ww-mw-stage', 'aria-hidden': true },
-      h('div', { className: 'ww-mw-hud' },
-        ...[0, 1].flatMap(index => [
-          index === 1 && h('span', { key: 'vs', className: 'ww-mw-vs' }, 'VS'),
-          h('div', { key: `hud-${index}`, className: `ww-mw-hud-side ${side(index)}` },
-            h('div', { className: 'ww-mw-hud-name' }, models[index].name, h('small', null, vendorName(models[index]))),
-            h('div', { className: 'ww-mw-hp', 'data-low': shownHp[index] <= 30 }, h('b', { style: { width: `${shownHp[index]}%` } })),
-            h('span', { className: 'ww-mw-hp-num' }, `${c.hp} ${shownHp[index]} / 100`)),
-        ]).filter(Boolean)),
-      event && h('div', { key: `banner-${event.round}`, className: 'ww-mw-banner' }, `${c.round} ${worldDuelRounds.findIndex(round => round.id === event.round) + 1} · ${event.name}`),
-      ...models.map((model, index) => h('div', { key: `fighter-${model.id}-${step}`, className: `ww-mw-fighter ${side(index)}`, 'data-act': act(index), 'data-result': result(index) }, h('div', { className: 'ww-mw-body' }, h(Portrait, { vendorId: model.vendorId, modelId: model.id })))),
-      event && event.attacker !== null && h('div', { key: `slash-${step}`, className: `ww-mw-slash on-${side(1 - event.attacker)}` }, slashSvg(h)),
-      event && event.attacker !== null && h('div', { key: `dmg-${step}`, className: `ww-mw-dmg on-${side(1 - event.attacker)}` }, `-${event.damage}`),
-      phase === 'done' && h('div', { className: 'ww-mw-final' }, script.kind === 'winner' ? `${models[script.winner].name} ${c.wins}` : c.tie));
-    const shown = phase === 'done' ? script.events : phase === 'fighting' ? script.events.slice(0, step + 1) : [];
-    const log = shown.length > 0 && h('ol', { className: 'ww-mw-duel-log' }, ...worldDuelLog(shown).map((item, index) => h('li', { key: item.round, 'data-win': item.damage[0] === item.damage[1] || item.damage.includes(null) ? '' : item.damage[0] > item.damage[1] ? 'left' : 'right' },
-      h('em', null, `${c.round} ${index + 1} · ${item.name}`), h('span', null, item.damage[0] === null ? '…' : `${c.dealt} ${item.damage[0]}`),
-      h('span', null, `${c.hp} ${item.hp[0]} : ${item.hp[1]}`), h('span', null, item.damage[1] === null ? '…' : `${c.dealt} ${item.damage[1]}`))));
-    const verdict = script.kind === 'winner' ? `${models[script.winner].name} ${c.wins} · ${script.basis === 'overall' ? c.duelBasis : c.duelFallback} ${script.totals[0]} : ${script.totals[1]}` : `${c.tie} · ${c.duelBasis} ${script.totals?.[0]} : ${script.totals?.[1]}`;
-    const duel = h(React.Fragment, null,
-      models.length === 2 && stage(),
-      h('div', { className: 'ww-mw-duel-bar', role: 'status', 'aria-live': 'polite' },
-        h('span', null, phase === 'done' ? verdict : phase === 'fighting' ? c.battling : phase === 'cancelled' ? c.cancelled : playable ? c.selectTwo : c.incomparable),
-        phase === 'fighting' ? button(c.cancelBattle, () => { stop(); setStep(-1); setPhase('cancelled'); }) : button(phase === 'done' ? c.replay : c.start, fight, { disabled: !playable }), reduced && h('small', null, c.reduced)),
-      log, h('p', { className: 'ww-mw-duel-help' }, c.duelRule),
-      h('div', { className: 'ww-mw-compare' }, ...models.map((model, index) => h('section', { key: model.id, 'aria-label': `${index === 0 ? c.left : c.right} ${model.name}` }, h('h3', null, model.name), h('small', null, vendorName(model)), h(Rating, { model, copy: c }), h(Metrics, { model, copy: c })))),
-      ...worldPriceNotes(models, c).map(note => h('p', { key: note, className: 'ww-mw-duel-help' }, note)));
-    const detail = state.data?.model && h('div', { className: 'ww-mw-detail' },
-      h('aside', { className: 'ww-mw-detail-art' }, detailArt(state.data.model, vendorName(state.data.model), onZoom, c), h('h3', null, vendorName(state.data.model))),
-      h('div', { className: 'ww-mw-detail-main' }, h(Rating, { model: state.data.model, copy: c }), h(Efforts, { model: state.data.model, copy: c }), h(Benchmarks, { model: state.data.model }), h(Metrics, { model: state.data.model, copy: c, known: true }),
-        h('p', { className: 'ww-mw-duel-help' }, worldPriceNotes([state.data.model], c)[0])));
-    return h(React.Fragment, null, openError && h('p', { role: 'alert' }, c.modalFailed, button(c.close, close)),
-      h('dialog', { ref: dialog, className: 'ww-mw-dialog', 'aria-label': state.kind === 'compare' ? c.duel : c.detail, onCancel: event => { event.preventDefault(); close(); }, onClick: event => { if (event.target === event.currentTarget) { const rect = event.currentTarget.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) close(); } } },
-        h('header', null, h('h2', { ref: title, tabIndex: -1 }, state.kind === 'compare' ? c.duel : state.data?.model?.name || c.detail), button(c.close, close)),
-        h('div', { className: 'ww-mw-dialog-body', 'aria-busy': state.busy }, state.busy ? h('div', { className: 'ww-mw-skeleton', role: 'progressbar', 'aria-label': c.detail }) : state.error ? h('p', { role: 'alert' }, state.error, ' ', button(c.retry, retry)) : state.data?.available ? state.kind === 'compare' ? duel : detail : h('p', null, c.noSnapshot))));
-  }
-
   /** 综合实力数据的来源和员工自己的 AA Key：保存、替换、清除都走宿主凭据服务，界面从不显示 Key 本身。 */
   function KeyWindow({ index, api, notify, onClose, onChange, returnFocus, fallbackFocus, copy: c }) {
     const dialog = useRef(null), field = useRef(null), mountedKey = useRef(true);
@@ -461,148 +377,8 @@ export function createModelWorldView(React, approvedPortraits = {}, { loadLarge,
           h('small', null, c.indexPrivacy))));
   }
 
-  return function ModelWorldView({ api, t, notify = () => {} }) {
-    const c = t ? Object.fromEntries(Object.keys(worldViewCopy).map(key => [key, t(`modelWorld_${key}`)])) : worldViewCopy;
-    const lastRequest = useRef({ input: { action: 'list', offset: 0, limit: 12 }, refresh: false });
-    const [data, setData] = useState(null), [busy, setBusy] = useState(false), [error, setErrorValue] = useState(null);
-    // 失败只在右上角提示，并带上“重试 / 重新读取”；不在页面里插入整块报错把内容往下挤。
-    const setError = value => {
-      setErrorValue(value);
-      if (!value) return;
-      const text = [value.summary, value.message, value.unknown && c.storageUnknown].filter(Boolean).join(' · ');
-      const label = value.recovery === 'readback' ? c.readback : lastRequest.current.refresh ? c.retryRefresh : c.retry;
-      notify(text, { kind: 'error', action: { label, run: () => load(lastRequest.current.input, value.recovery === 'readback' ? false : lastRequest.current.refresh) } });
-    };
-    const [mode, setMode] = useState('gallery'), [filters, setFilters] = useState({ query: '', vendorId: '', capability: '' }), [applied, setApplied] = useState({ action: 'list', offset: 0, limit: 12 });
-    const [selected, setSelected] = useState([]), [window, setWindow] = useState(null), [allPlans, setAllPlans] = useState(false), [keyWindow, setKeyWindow] = useState(false), [viewer, setViewer] = useState(null);
-    const openViewer = (items, index, element) => setViewer({ items, index, returnFocus: element, key: `${items[index].id}-${Date.now()}` });
-    const pageRequest = useRef(null), modalRequest = useRef(null), mounted = useRef(true), trigger = useRef(null), fallback = useRef(null), windowInput = useRef(null);
-    const load = async (input, refresh = false) => {
-      lastRequest.current = { input, refresh };
-      pageRequest.current?.abort(); const controller = new AbortController(); pageRequest.current = controller; setBusy(true); setError(null);
-      let refreshed = false;
-      try {
-        if (refresh) {
-          await api.worldRequest({ action: 'refresh' }, controller.signal);
-          if (!mounted.current || pageRequest.current !== controller || controller.signal.aborted) return;
-          refreshed = true;
-          // 更新已经接受，后续失败只重试本地读取，不再重复外网更新。
-          lastRequest.current = { input, refresh: false };
-        }
-        let request = input, value = await api.worldRequest(request, controller.signal);
-        if (!mounted.current || pageRequest.current !== controller || controller.signal.aborted) return;
-        // 其他更新可能使当前页越界；最多一次本地纠正读取，不触发网络刷新。
-        if (value.total === 0 && value.offset !== 0 || value.total > 0 && value.offset >= value.total) {
-          request = { ...request, offset: value.total ? Math.floor((value.total - 1) / value.limit) * value.limit : 0 };
-          lastRequest.current = { input: request, refresh: false };
-          value = await api.worldRequest(request, controller.signal);
-          if (!mounted.current || pageRequest.current !== controller || controller.signal.aborted) return;
-        }
-        setData(value); setApplied(request); setMode(request.action === 'list' ? 'gallery' : request.action === 'value' ? 'ranking' : request.action);
-        if (refreshed) { setSelected([]); notify(value.index?.error ? `${c.indexRefreshFailed}${value.index.error}` : c.refreshOk, value.index?.error ? { kind: 'error' } : undefined); }
-      } catch (failure) {
-        if (mounted.current && pageRequest.current === controller && !controller.signal.aborted) {
-          const code = failure.code === undefined ? '' : String(failure.code);
-          const message = failure.message || c.loadFailed;
-          const unknown = code === 'WORLD_STORAGE_UNKNOWN';
-          if (unknown) lastRequest.current = { input, refresh: false };
-          setError({ message, code, summary: refreshed ? c.refreshReadback : refresh ? c.refreshFail : '', unknown, recovery: unknown ? 'readback' : 'retry' });
-        }
-      } finally { if (mounted.current && pageRequest.current === controller) { pageRequest.current = null; setBusy(false); } }
-    };
-    useEffect(() => { mounted.current = true; load({ action: 'list', offset: 0, limit: 12 }); return () => { mounted.current = false; pageRequest.current?.abort(); modalRequest.current?.abort(); }; }, []);
-    const valueInput = (nextFilters = filters) => ({ action: 'value', ...(nextFilters.query ? { query: nextFilters.query } : {}), ...(nextFilters.vendorId ? { vendorId: nextFilters.vendorId } : {}) });
-    const inputFor = (nextMode, nextFilters = filters, board = 'overall') => nextMode === 'ranking' && board === 'value' ? valueInput(nextFilters) : ({ action: nextMode === 'gallery' ? 'list' : nextMode, ...Object.fromEntries(Object.entries(nextFilters).filter(([, value]) => value)), ...(nextMode === 'ranking' ? { league: board, direction: 'desc' } : {}), offset: 0, limit: nextMode === 'ranking' ? 20 : 12 });
-    const navigate = (nextMode, nextFilters = filters) => { setFilters(nextFilters); load(inputFor(nextMode, nextFilters, applied.action === 'value' ? 'value' : applied.league)); };
-    const selectBoard = id => load(id === 'value' ? valueInput() : { ...(applied.action === 'ranking' ? applied : inputFor('ranking')), league: id, offset: 0 });
-    const stopPage = () => { pageRequest.current?.abort(); pageRequest.current = null; lastRequest.current = { ...lastRequest.current, refresh: false }; setBusy(false); setError({ message: c.stopped, code: '', recovery: 'readback' }); };
-    const openWindow = async (input, element) => {
-      modalRequest.current?.abort(); const controller = new AbortController(); modalRequest.current = controller;
-      if (element) trigger.current = element;
-      windowInput.current = input; setWindow({ kind: input.action, busy: true, error: '', data: null });
-      try { const value = await api.worldRequest(input, controller.signal); if (mounted.current && modalRequest.current === controller && !controller.signal.aborted) setWindow({ kind: input.action, busy: false, error: '', data: value }); }
-      catch (failure) { if (mounted.current && modalRequest.current === controller && !controller.signal.aborted) setWindow({ kind: input.action, busy: false, error: failure.message || c.loadFailed, data: null }); }
-      finally { if (modalRequest.current === controller) modalRequest.current = null; }
-    };
-    const closeWindow = () => { modalRequest.current?.abort(); modalRequest.current = null; setWindow(null); };
-    const toggle = model => setSelected(previous => previous.some(item => item.id === model.id) ? previous.filter(item => item.id !== model.id) : previous.length < 2 ? [...previous, model] : previous);
-    const vendorName = model => { const vendor = data?.vendors.find(v => v.id === model.vendorId); return vendor?.nameZh || vendor?.name || model.vendorId; };
-    const pick = model => { const chosen = selected.some(item => item.id === model.id); return button(chosen ? c.picked : c.pick, () => toggle(model), { 'aria-pressed': chosen, 'aria-label': `${chosen ? c.remove : c.pick} ${model.name}`, disabled: !chosen && selected.length >= 2 }); };
-    const modelActions = model => h('div', { className: 'ww-mw-actions' }, button(c.detail, event => openWindow({ action: 'detail', id: model.id }, event.currentTarget), { 'aria-label': `${c.detail} ${model.name}` }), pick(model));
-    const mini = model => h('div', { className: 'ww-mw-mini' }, h(Portrait, { vendorId: model.vendorId, modelId: model.id }));
-    const modelRow = model => h('article', { key: model.id, className: 'ww-mw-model-row' }, mini(model), h('div', { className: 'ww-mw-model-name' }, h('strong', null, model.name), h('small', null, [vendorName(model), model.releaseDate, model.contextWindow !== null && `${worldTokens(model.contextWindow)} ${c.context}`, model.rating?.overall != null && `${c.overall} ${model.rating.overall}`].filter(Boolean).join(' · '))), tierBadge(model.rating?.tier), modelActions(model));
-    const gallery = data?.action === 'list' && !applied.query && !applied.vendorId && !applied.capability;
-    const vendorItems = data ? [...data.vendors].sort((a, b) => Number(!!portraitSource(b.id)) - Number(!!portraitSource(a.id))) : [];
-    // 图鉴里能看大图的角色按图鉴顺序排成一组，查看器里左右切换。
-    const galleryRoles = vendorItems.filter(vendor => zoomable(vendor.id)).map(vendor => ({ id: vendor.id, name: vendor.nameZh || vendor.name }));
-    const pagination = { from: data?.total ? data.offset + 1 : 0, to: data?.total ? Math.min(data.total, (data.offset || 0) + (data.models.length || 0)) : 0, total: data?.total || 0 };
-    const persistedFailure = data?.lastRefresh?.status === 'error' ? data.lastRefresh : null;
-    // 页头一句现状摘要（需求§界面通用约定·页头）：几家厂商、几个模型、数据哪天更新。
-    const updatedDay = data?.acceptedAt ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date(data.acceptedAt)) : '';
-    const summary = !data ? c.summaryLoading : !data.available ? c.summaryEmpty : [c.summary.replace('{vendors}', data.vendors.length).replace('{models}', data.modelCount ?? data.total), updatedDay && c.summaryDate.replace('{date}', updatedDay)].filter(Boolean).join(' · ');
-    const board = applied.action === 'value' ? 'value' : applied.league || 'overall';
-    const planModel = plan => ({ id: plan.modelId, name: plan.name, vendorId: plan.vendorId });
-    const planLabel = plan => [plan.name, worldEffortText(plan.effort, c)].filter(Boolean).join(' · ');
-    const planName = plan => h('div', null, mini(planModel(plan)), h('div', { className: 'ww-mw-model-name' }, h('strong', null, planLabel(plan)), h('small', null, vendorName(plan))));
-    const planActions = plan => modelActions(planModel(plan));
-    const valueBoard = () => h(React.Fragment, null,
-      h('div', { className: 'ww-mw-table-wrap' }, h('table', { className: 'ww-mw-table' },
-        h('thead', null, h('tr', null, ...[c.band, c.recommend, c.index, c.cost, c.alternatives, c.actions].map(label => h('th', { key: label, scope: 'col' }, label)))),
-        h('tbody', null, ...data.bands.filter(band => band.best).map(band => h('tr', { key: band.id },
-          h('td', null, band.name),
-          h('td', { className: 'ww-mw-cell-model' }, planName(band.best)),
-          h('td', { className: 'ww-mw-score' }, band.best.index), h('td', null, worldCostText(band.best.cost)),
-          h('td', { className: 'ww-mw-alt' }, band.alternatives.map(plan => `${planLabel(plan)}：${plan.index} / ${worldCostText(plan.cost)}`).join('；') || c.unknown),
-          h('td', null, planActions(band.best))))))),
-      h('div', { className: 'ww-mw-actions' }, h('h3', null, c.plans), button(allPlans ? c.showFrontier : c.showAll, () => setAllPlans(value => !value))),
-      h('div', { className: 'ww-mw-table-wrap' }, h('table', { className: 'ww-mw-table' },
-        h('thead', null, h('tr', null, ...[c.rank, c.plans, c.index, c.cost, c.frontier, c.actions].map(label => h('th', { key: label, scope: 'col' }, label)))),
-        h('tbody', null, ...data.plans.filter(plan => allPlans || plan.frontier).map((plan, index) => h('tr', { key: plan.key },
-          h('td', { className: 'ww-mw-rank', 'data-top': index < 3 }, index + 1),
-          h('td', { className: 'ww-mw-cell-model' }, planName(plan)),
-          h('td', null, bar(plan.index)), h('td', { className: 'ww-mw-score' }, worldCostText(plan.cost)),
-          h('td', null, plan.frontier ? h('span', { className: 'ww-mw-badge' }, c.frontier) : null),
-          h('td', null, planActions(plan))))))));
-    const rankingTable = () => h('div', { className: 'ww-mw-table-wrap' }, h('table', { className: 'ww-mw-table' },
-      h('thead', null, h('tr', null, ...[c.rank, c.model, c.tier, c.overall, ...Object.entries(worldDimensions).filter(([key]) => key !== 'eci').map(([, dimension]) => dimension.name), c.actions].map(label => h('th', { key: label, scope: 'col' }, label)))),
-      h('tbody', null, ...data.models.map((model, index) => {
-        const rank = data.offset + index + 1;
-        return h('tr', { key: model.id },
-          h('td', { className: 'ww-mw-rank', 'data-top': applied.direction !== 'asc' && rank <= 3 }, rank),
-          h('td', { className: 'ww-mw-cell-model' }, h('div', null, mini(model), h('div', { className: 'ww-mw-model-name' }, h('strong', null, model.name), h('small', null, [vendorName(model), model.releaseDate, model.capabilities.reasoning && c.reasoning].filter(Boolean).join(' · '))))),
-          h('td', null, tierBadge(model.rating.tier)), h('td', { className: 'ww-mw-score' }, model.rating.overall ?? c.noScore, model.rating.effort && h('small', { className: 'ww-mw-effort' }, worldEffortText(model.rating.effort, c))),
-          ...['reasoning', 'coding', 'agent'].map(key => h('td', { key }, bar(model.rating[key]))),
-          h('td', null, modelActions(model)));
-      }))));
-    return h('section', { className: 'ww-mw', 'aria-label': c.title }, h('style', null, worldViewCss),
-      h('header', { className: 'ww-mw-header' }, h('div', null, h('h2', null, c.title), h('p', { className: 'ww-mw-summary' }, summary)), h('div', { className: 'ww-mw-header-actions' },
-        busy && data && h('span', { className: 'ww-mw-status ww-mw-status-late', role: 'status' }, c.updating, button(c.cancel, stopPage)),
-        // 上次更新没完成：标题行留一个小标记和“重新读取”，原因放在悬停提示里，不在内容上方插整块报错。
-        !busy && persistedFailure && !error && h('span', { className: 'ww-mw-status ww-mw-status-warn', title: persistedFailure.message }, c.refreshFail, button(c.readback, () => load(applied, false))),
-        data?.index && button(c.indexButton, event => { trigger.current = event.currentTarget; setKeyWindow(true); }, { 'aria-haspopup': 'dialog' }),
-        button(c.refresh, () => load(applied, true), { disabled: busy }))),
-      h('nav', { className: 'ww-mw-tabs', 'aria-label': c.title }, ...['gallery', 'timeline', 'ranking'].map(item => button(c[item], () => navigate(item), { key: item, 'aria-pressed': mode === item, disabled: busy || item === 'ranking' && !!data && !data.leagues.length }))),
-      h('form', { className: 'ww-mw-toolbar', onSubmit: event => { event.preventDefault(); navigate(mode); } }, h('input', { ref: fallback, type: 'search', 'aria-label': c.search, placeholder: c.search, maxLength: 160, value: filters.query, onChange: event => setFilters(previous => ({ ...previous, query: event.target.value })) }), h('select', { 'aria-label': c.all, value: filters.vendorId, onChange: event => navigate(mode, { ...filters, vendorId: event.target.value }), disabled: busy }, h('option', { value: '' }, c.all), ...(data?.vendors || []).map(vendor => h('option', { key: vendor.id, value: vendor.id }, vendor.nameZh || vendor.name))), h('select', { 'aria-label': c.capability, value: filters.capability, onChange: event => navigate(mode, { ...filters, capability: event.target.value }), disabled: busy }, h('option', { value: '' }, c.capability), ...['reasoning', 'toolCall', 'structuredOutput', 'promptCaching'].map(key => h('option', { value: key, key }, c[key]))), h('button', { type: 'submit', disabled: busy }, c.searchGo)),
-      !data ? busy ? h('div', null, h('div', { className: 'ww-mw-skeleton', role: 'progressbar', 'aria-label': c.title }), button(c.cancel, stopPage)) : null : !data.available ? h('div', { className: 'ww-mw-empty' }, c.noSnapshot) : h(React.Fragment, null,
-        mode === 'gallery' && !gallery && button(c.back, () => navigate('gallery', { query: '', vendorId: '', capability: '' }), { disabled: busy }),
-        gallery ? vendorItems.length ? h('div', { className: 'ww-mw-deck' }, ...vendorItems.map(vendor => h('div', { key: vendor.id, className: 'ww-mw-role-slot' }, h('button', { type: 'button', className: 'ww-mw-role', onClick: () => navigate('gallery', { ...filters, query: '', vendorId: vendor.id }), 'aria-label': `${c.browse} ${vendor.nameZh || vendor.name} ${c.family}`, disabled: busy },
-          h('div', { className: 'ww-mw-role-art' }, h(Portrait, { vendorId: vendor.id })),
-          h('span', { className: 'ww-mw-role-text' }, h('strong', null, vendor.nameZh || vendor.name),
-            vendor.top ? h('span', { className: 'ww-mw-role-top' }, tierBadge(vendor.top.tier), h('span', null, `${c.strongest} ${vendor.top.name}`)) : null,
-            Number.isInteger(vendor.modelCount) && h('small', null, `${vendor.modelCount} ${c.models}`))),
-          zoomable(vendor.id) && h('button', { type: 'button', className: 'ww-mw-zoom', 'aria-label': `${c.viewLarge}：${vendor.nameZh || vendor.name}`, title: c.viewLarge, disabled: busy, onClick: event => openViewer(galleryRoles, galleryRoles.findIndex(role => role.id === vendor.id), event.currentTarget) }, zoomGlyph())))) : h('div', { className: 'ww-mw-empty' }, c.empty)
-          : data.action === 'ranking' || data.action === 'value' ? h(React.Fragment, null,
-            h('div', { className: 'ww-mw-boards', role: 'group', 'aria-label': c.board }, ...Object.entries(worldBoards).map(([id, name]) => button(name, () => selectBoard(id), { key: id, 'aria-pressed': board === id, disabled: busy })),
-              data.action === 'ranking' && button(`${applied.direction === 'asc' ? '↑' : '↓'} ${applied.direction === 'asc' ? c.ascending : c.descending}`, () => load({ ...applied, direction: applied.direction === 'asc' ? 'desc' : 'asc', offset: 0 }), { className: 'ww-mw-sort', title: c.sortToggle, 'aria-label': `${c.sort}：${applied.direction === 'asc' ? c.ascending : c.descending}，${c.sortToggle}`, disabled: busy })),
-            data.action === 'value' ? data.plans.length ? valueBoard() : h('div', { className: 'ww-mw-empty' }, c.empty) : !data.models.length ? h('div', { className: 'ww-mw-empty' }, c.empty) : rankingTable())
-          : !data.models.length ? h('div', { className: 'ww-mw-empty' }, c.empty)
-            : data.action === 'timeline' ? h(React.Fragment, null, data.unknownDates > 0 && h('small', null, `${data.unknownDates} ${c.missingDates}`), h('div', { className: 'ww-mw-timeline' }, ...worldTimelineGroups(data.models).map(group => h('section', { key: group.year }, h('h3', { className: 'ww-mw-year' }, group.year), h('div', { className: 'ww-mw-row-list' }, ...group.models.map(modelRow))))))
-              : h('div', { className: 'ww-mw-row-list' }, ...data.models.map(modelRow)),
-        !gallery && data.action !== 'value' && pagination.total > data.limit && h('footer', { className: 'ww-mw-page' }, h('span', null, `${pagination.from}–${pagination.to} / ${pagination.total}`), button(c.previous, () => load({ ...applied, offset: Math.max(0, data.offset - data.limit) }), { disabled: busy || data.offset === 0 }), button(c.next, () => load({ ...applied, offset: data.offset + data.limit }), { disabled: busy || pagination.to >= pagination.total }))),
-      selected.length > 0 && h('div', { className: 'ww-mw-selected' }, h('span', null, `${c.duel} · ${selected.length}/2`), ...selected.map(model => button(`${model.name} ×`, () => toggle(model), { key: model.id, className: 'ww-mw-chip', 'aria-label': `${c.remove} ${model.name}` })), button(c.duel, event => openWindow({ action: 'compare', ids: selected.map(model => model.id) }, event.currentTarget), { disabled: selected.length !== 2 }), button(c.clear, () => setSelected([]))),
-      data && h('details', { className: 'ww-mw-about' }, h('summary', null, c.about), h('p', null, c.method.replace('{asOf}', data.index?.asOf ?? worldIndexAsOf)), h('p', null, c.valueMethod), data.available && h('p', null, `${c.generated} ${worldTime(data.generatedAt) ?? c.unknown} · ${c.accepted} ${worldTime(data.acceptedAt) ?? c.unknown}`), h('p', null, c.artCredit), ...data.attributions.map(item => h('p', { key: item.name }, link(item.url, item.name), ' · ', item.licenseUrl ? link(item.licenseUrl, item.license) : item.license))),
-      window && h(ModelWindow, { state: window, onClose: closeWindow, retry: () => openWindow(windowInput.current), returnFocus: trigger.current, fallbackFocus: fallback, onZoom: loadLarge ? (item, element) => openViewer([item], 0, element) : undefined, copy: c }),
-      viewer && h(PortraitViewer, { key: viewer.key, items: viewer.items, start: viewer.index, returnFocus: viewer.returnFocus, onClose: () => setViewer(null), notify, copy: c }),
-      keyWindow && data?.index && h(KeyWindow, { index: data.index, api, notify, onClose: () => setKeyWindow(false), onChange: index => setData(previous => previous && { ...previous, index }), returnFocus: trigger.current, fallbackFocus: fallback, copy: c }));
-  };
+  return createModelWorldPages(React, {
+    Portrait, portraitSource, zoomable, roleName, PortraitViewer, KeyWindow, Metrics, Rating, Efforts, Benchmarks, tierBadge, link, own, loadLarge, detailArt, zoomGlyph, ui, battle, loadImage,
+    css: worldViewCss + worldPagesCss,
+  });
 }

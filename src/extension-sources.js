@@ -14,6 +14,9 @@ export const sourceExpertItem = z.strictObject({
   avatar: z.string().max(700000).nullable().optional(), skills: z.array(z.string().min(1).max(100)).max(40).optional(), readOnly: z.boolean().optional(),
 });
 const expertItems = z.array(sourceExpertItem).max(200);
+// 技能来源：技能文件照旧在扩展登记的技能目录里、由 DSH 发现；来源只补来源名、保存方法，和每项能不能改、挂在哪一层。
+const skillOptions = z.strictObject({ label, save: callable('save 必须是函数').optional() });
+const skillItems = z.array(z.strictObject({ name: z.string().min(1).max(100), editable: z.boolean().optional(), note: z.string().trim().min(1).max(40).optional() })).max(500);
 // 助手名称会出现在按钮、标题和给模型的说明里：一行字，不带换行和控制字符。
 const assistantName = z.string().trim().min(1, '不能为空').max(16, '最长 16 个字').refine(value => !/[\p{Cc}\p{Zl}\p{Zp}]/u.test(value), '不能带换行或控制字符');
 
@@ -23,12 +26,28 @@ export function sourceNotePath(value) {
   return value.split('/').every(segment => segment && segment !== '.' && segment !== '..' && !/^[a-z]:$/i.test(segment));
 }
 const localNotePath = z.string().refine(sourceNotePath, '笔记路径须是正斜杠分隔的相对 .md 路径');
-const knowledgeOptions = z.strictObject({ label, search: callable('search 必须是函数'), read: callable('read 必须是函数') });
+// list、save、submit 是 0.2.2-rc.1.2 起的可选能力：列出知识空间让员工在知识积累里浏览，维护人改笔记，员工把自己的笔记交给团队。
+const knowledgeOptions = z.strictObject({
+  label, search: callable('search 必须是函数'), read: callable('read 必须是函数'),
+  list: callable('list 必须是函数').optional(), save: callable('save 必须是函数').optional(), submit: callable('submit 必须是函数').optional(),
+});
 const searchResult = z.strictObject({
   notes: z.array(z.strictObject({ path: localNotePath, title: z.string().max(200), excerpt: z.string().max(2000), hash: z.string().max(128) })).max(500),
   total: z.number().int().nonnegative(), truncated: z.boolean(),
 });
-const readResult = z.strictObject({ path: localNotePath, content: z.string(), hash: z.string().min(1).max(128), absolutePath: z.string().refine(path.isAbsolute, 'absolutePath 必须是绝对路径').optional() });
+const readResult = z.strictObject({ path: localNotePath, content: z.string(), hash: z.string().min(1).max(128), absolutePath: z.string().refine(path.isAbsolute, 'absolutePath 必须是绝对路径').optional(), editable: z.boolean().optional() });
+const shortText = max => z.string().trim().min(1).max(max).refine(value => !/[\p{Cc}]/u.test(value), '不能带换行或控制字符');
+const spaceId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/, '空间 id 只能用字母、数字、点、下划线和连字符，最长 64 个字符');
+// 一个空间一组笔记：笔记路径以“空间 id/”开头，鲸翼按路径里的文件夹排成目录；group 是切换菜单里的分组标题，按给出的顺序排。
+const listResult = z.strictObject({
+  spaces: z.array(z.strictObject({
+    id: spaceId, name: shortText(60), group: shortText(40).optional(), note: shortText(120).optional(), editable: z.boolean().optional(),
+    notes: z.array(z.strictObject({ path: localNotePath, title: z.string().max(200) })).max(5000),
+  })).max(200),
+});
+const saveResult = z.strictObject({ path: localNotePath, hash: z.string().min(1).max(128) });
+const submitResult = z.strictObject({ applied: z.boolean(), message: z.string().trim().max(240).optional() });
+const sourceCode = error => typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{1,40}$/.test(error.code) ? error.code : null;
 
 export const isSourceExpertId = id => typeof id === 'string' && id.includes('--');
 export const isSourceNotePath = value => typeof value === 'string' && value.startsWith('@');
@@ -54,12 +73,12 @@ async function bounded(work, signal) {
 export class ExtensionSources {
   constructor(registry, { changed = () => {}, maxNoteBytes = 1048576, maxResults = 50 } = {}) {
     this.registry = registry; this.changed = changed; this.maxNoteBytes = maxNoteBytes; this.maxResults = maxResults;
-    this.experts = new Map(); this.knowledge = new Map(); this.names = new Map(); this.closed = false;
+    this.experts = new Map(); this.knowledge = new Map(); this.skills = new Map(); this.names = new Map(); this.closed = false;
   }
 
   dispose() {
     this.closed = true;
-    for (const map of [this.experts, this.knowledge, this.names]) { for (const entry of map.values()) entry.closed = true; map.clear(); }
+    for (const map of [this.experts, this.knowledge, this.skills, this.names]) { for (const entry of map.values()) entry.closed = true; map.clear(); }
   }
 
   /** 登记还在、扩展没关：任何一项不成立都视为已撤销，顺手清掉。 */
@@ -72,7 +91,7 @@ export class ExtensionSources {
 
   register(map, kind, ctx, entry) {
     const previous = map.get(entry.feature.id);
-    if (previous && this.alive(map, previous)) fail('EXTENSION_SOURCE_CONFLICT', kind === 'experts' ? '这个扩展已经登记过专家来源' : '这个扩展已经登记过知识来源');
+    if (previous && this.alive(map, previous)) fail('EXTENSION_SOURCE_CONFLICT', `这个扩展已经登记过${{ experts: '专家', knowledge: '知识', skills: '技能' }[kind] ?? ''}来源`);
     map.set(entry.feature.id, entry);
     const revoke = ctx.effect(() => () => {
       if (map.get(entry.feature.id) === entry) map.delete(entry.feature.id);
@@ -153,10 +172,133 @@ export class ExtensionSources {
     return this.expert(entry, next);
   }
 
+  registerSkills(ctx, raw) {
+    const feature = this.registry.caller(ctx, '登记技能来源');
+    if (!feature.skills?.length) fail('EXTENSION_SOURCE_INPUT', '登记技能来源前，features.register 要带上 skills 技能目录');
+    const options = input(skillOptions, raw, '技能来源');
+    const entry = { feature, label: options.label, save: options.save, items: new Map(), closed: false };
+    const dispose = this.register(this.skills, 'skills', ctx, entry);
+    return { set: items => this.setSkills(entry, items), dispose };
+  }
+
+  setSkills(entry, raw) {
+    if (!this.alive(this.skills, entry)) fail('FEATURE_CLOSED', '技能来源已关闭，请重新打开扩展后再试');
+    const items = input(skillItems, raw, '技能列表');
+    const next = new Map();
+    for (const item of items) {
+      if (next.has(item.name)) fail('EXTENSION_SOURCE_INPUT', `技能列表里「${item.name}」重复`);
+      next.set(item.name, item);
+    }
+    entry.items = next;
+    this.changed('skills');
+  }
+
+  /** 技能库给这一项标的：能不能改（来源给了保存方法、这一项标了 editable）、挂在哪一层。 */
+  skillInfo(featureId, name) {
+    const entry = this.skills.get(featureId);
+    if (!this.alive(this.skills, entry)) return {};
+    const item = entry.items.get(name);
+    return { ...(entry.save && item?.editable ? { editable: true } : {}), ...(item?.note ? { note: item.note } : {}) };
+  }
+
+  /** 维护人在技能页改了团队技能：交给扩展保存；扩展这期间关掉就不认这次结果。 */
+  async saveSkill(featureId, name, value, signal) {
+    const entry = this.skills.get(featureId);
+    const label = entry?.label.zh;
+    if (!this.alive(this.skills, entry)) fail('SKILL_SOURCE_CLOSED', '提供这项技能的扩展已关闭或卸载，请刷新技能库');
+    if (!entry.save || !entry.items.get(name)?.editable) fail('SKILL_SOURCE_READONLY', `这项技能来自「${label}」，只能查看`);
+    try { await bounded(() => entry.save({ name, content: value.content, expectedHash: value.expectedHash }, { signal }), signal); }
+    catch (error) {
+      signal?.throwIfAborted();
+      const code = typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{1,40}$/.test(error.code) ? error.code : 'SKILL_SOURCE_SAVE';
+      fail(code, `「${label}」没有保存这项技能：${error?.message || '扩展没有说明原因'}`);
+    }
+    if (!this.alive(this.skills, entry)) fail('SKILL_SOURCE_CLOSED', `「${label}」已关闭，这次保存的结果没有确认；重新开启后请刷新核对`);
+  }
+
+  /** 返回撤销函数（和以前一样）；它带一个 changed()：扩展的目录变了（比如同步完）调一下，知识积累页重读 list。 */
   registerKnowledge(ctx, raw) {
     const feature = this.registry.caller(ctx, '登记知识来源');
     const options = input(knowledgeOptions, raw, '知识来源');
-    return this.register(this.knowledge, 'knowledge', ctx, { feature, label: options.label, search: options.search, read: options.read, closed: false });
+    const entry = { feature, label: options.label, search: options.search, read: options.read, list: options.list, save: options.save, submit: options.submit, closed: false };
+    const dispose = this.register(this.knowledge, 'knowledge', ctx, entry);
+    return Object.assign(() => dispose(), { changed: () => { if (this.alive(this.knowledge, entry)) this.changed('knowledge'); } });
+  }
+
+  knowledgeEntry(featureId) {
+    const entry = this.knowledge.get(featureId);
+    if (!this.alive(this.knowledge, entry)) fail('EXTENSION_SOURCE_CLOSED', '提供这些笔记的扩展已关闭或卸载；请重新开启扩展后再试');
+    return entry;
+  }
+
+  /**
+   * 知识积累左下角切换用：每个登记了 list 的来源列出自己的知识空间和笔记，路径换成 `@功能id/…`。
+   * 每个来源单独限时；一个来源出错只记一条说明，不影响别的。
+   */
+  async listKnowledge(signal) {
+    const entries = [...this.knowledge.values()].filter(entry => this.alive(this.knowledge, entry) && entry.list);
+    const results = await Promise.all(entries.map(async entry => {
+      const local = AbortSignal.any([signal, AbortSignal.timeout(8000)]);
+      try {
+        const value = input(listResult, await bounded(() => entry.list({ signal: local }), local), '知识空间列表');
+        if (!this.alive(this.knowledge, entry)) return { issue: `「${entry.label.zh}」已关闭，它的知识空间没有列出` };
+        const ids = new Set();
+        for (const space of value.spaces) {
+          if (ids.has(space.id)) fail('EXTENSION_SOURCE_INPUT', `知识空间 id「${space.id}」重复`);
+          ids.add(space.id);
+          const outside = space.notes.find(note => !note.path.startsWith(`${space.id}/`));
+          if (outside) fail('EXTENSION_SOURCE_INPUT', `笔记「${outside.path}」不在知识空间「${space.id}」的路径下`);
+        }
+        const editable = Boolean(entry.save);
+        return { library: {
+          id: entry.feature.id, label: { ...entry.label }, submit: Boolean(entry.submit),
+          spaces: value.spaces.map(space => ({
+            id: space.id, name: space.name, ...(space.group ? { group: space.group } : {}), ...(space.note ? { note: space.note } : {}), editable: editable && Boolean(space.editable),
+            notes: space.notes.map(note => ({ path: `@${entry.feature.id}/${note.path}`, title: note.title || path.posix.basename(note.path, '.md') })),
+          })),
+        } };
+      } catch (error) {
+        signal.throwIfAborted();
+        return { issue: `「${entry.label.zh}」${local.aborted ? '没有及时列出知识空间' : `列不出知识空间：${String(error?.message ?? '').replace(/^[A-Z][A-Z0-9_]+: /, '')}`}` };
+      }
+    }));
+    return { libraries: results.filter(item => item.library).map(item => item.library), issues: results.filter(item => item.issue).map(item => item.issue) };
+  }
+
+  /** 维护人在知识积累里改了来源笔记：交给扩展保存，扩展确认的路径和指纹作为结果；扩展这期间关掉就不认。 */
+  async saveKnowledge(full, content, expectedHash, signal) {
+    const match = /^@([a-z][a-z0-9]*(?:-[a-z0-9]+)*)\/(.+)$/.exec(full);
+    if (!match || !sourceNotePath(match[2])) fail('PATH', '扩展笔记的路径不对，请从知识积累的目录重新打开');
+    const entry = this.knowledgeEntry(match[1]);
+    const name = entry.label.zh;
+    if (!entry.save) fail('EXTENSION_NOTE_READ_ONLY', `这篇笔记由「${name}」提供，在这里只能阅读；要修改请到「${name}」里改`);
+    if (Buffer.byteLength(content) > this.maxNoteBytes) fail('SIZE', '这篇笔记超出单篇大小限制');
+    let value;
+    try { value = input(saveResult, await bounded(() => entry.save({ path: match[2], content, expectedHash }, { signal }), signal), '保存结果'); }
+    catch (error) {
+      signal?.throwIfAborted();
+      if (error.code === 'EXTENSION_SOURCE_INPUT') throw error;
+      fail(sourceCode(error) ?? 'EXTENSION_NOTE_SAVE', `「${name}」没有保存这篇笔记：${error?.message || '扩展没有说明原因'}`);
+    }
+    if (!this.alive(this.knowledge, entry)) fail('EXTENSION_SOURCE_CLOSED', `「${name}」已关闭，这次保存的结果没有确认；重新开启后请打开这篇核对`);
+    if (value.path !== match[2]) fail('EXTENSION_SOURCE_INPUT', `「${name}」返回的保存结果和这篇笔记对不上`);
+    return { path: full, hash: value.hash };
+  }
+
+  /** 员工把自己的一篇笔记交给扩展（比如团队的知识空间）：只发这一篇，个人知识库不动。 */
+  async submitKnowledge(featureId, request, signal) {
+    const entry = this.knowledgeEntry(featureId);
+    const name = entry.label.zh;
+    if (!entry.submit) fail('EXTENSION_SOURCE_INPUT', `「${name}」不收员工交来的笔记`);
+    if (!sourceNotePath(request.target)) fail('PATH', '放到哪里要写成正斜杠分隔、以 .md 结尾的相对路径');
+    let value;
+    try { value = input(submitResult, await bounded(() => entry.submit({ space: request.space, target: request.target, from: request.from, content: request.content }, { signal }), signal), '提交结果'); }
+    catch (error) {
+      signal?.throwIfAborted();
+      if (error.code === 'EXTENSION_SOURCE_INPUT') throw error;
+      fail(sourceCode(error) ?? 'EXTENSION_NOTE_SUBMIT', `「${name}」没有收下这篇笔记：${error?.message || '扩展没有说明原因'}`);
+    }
+    return value;
   }
 
   hasKnowledge() { return [...this.knowledge.values()].some(entry => this.alive(this.knowledge, entry)); }
@@ -206,7 +348,9 @@ export class ExtensionSources {
     if (!this.alive(this.knowledge, entry)) fail('EXTENSION_SOURCE_CLOSED', `「${entry.label.zh}」已关闭，这篇笔记没有读出`);
     if (value.path !== match[2]) fail('EXTENSION_SOURCE_INPUT', `「${entry.label.zh}」返回的笔记和请求的路径对不上`);
     if (Buffer.byteLength(value.content) > this.maxNoteBytes) fail('SIZE', `「${entry.label.zh}」的这篇笔记超出单篇大小限制`);
-    return { path: full, content: value.content, hash: value.hash, readOnly: true, source: { id: entry.feature.id, label: { ...entry.label } }, ...(value.absolutePath ? { absolutePath: value.absolutePath } : {}) };
+    // 来源给了保存方法、这一篇又标了 editable，员工才能在知识积累里改。
+    const readOnly = !(entry.save && value.editable);
+    return { path: full, content: value.content, hash: value.hash, readOnly, source: { id: entry.feature.id, label: { ...entry.label } }, ...(value.absolutePath ? { absolutePath: value.absolutePath } : {}) };
   }
 
   /** 给小鲸起名：同一时间只认一个扩展；扩展关闭、卸载或调 dispose 后恢复“小鲸助手”。 */
@@ -243,7 +387,7 @@ export class ExtensionSources {
 
   /** 技能库分组用的名字：同一扩展登记了来源就用来源的名字，否则由调用方退回包名。 */
   labelOf(featureId) {
-    for (const map of [this.experts, this.knowledge]) {
+    for (const map of [this.skills, this.experts, this.knowledge]) {
       const entry = map.get(featureId);
       if (entry && this.alive(map, entry)) return { ...entry.label };
     }

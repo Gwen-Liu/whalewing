@@ -364,6 +364,8 @@ export class ModelWorld {
       return this.status();
     }
     if (input.action === 'status') return this.status();
+    // 全部型号一次给界面：筛选、排序、分页、散点图都在界面里做，不用每点一下再问一次。
+    if (input.action === 'all') return structuredClone({ ...this.status(), models: this.current?.snapshot.models ?? [] });
     if (!this.current) {
       if (input.action === 'detail') return { ...this.status(), model: null, vendor: null };
       if (input.action === 'compare') return { ...this.status(), models: [] };

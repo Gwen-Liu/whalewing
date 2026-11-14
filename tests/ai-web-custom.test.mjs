@@ -30,7 +30,11 @@ async function harness(t) {
 }
 
 test('十个官方图标离线解码，官方来源齐全且宽高小于300', async () => {
-  for (const entry of aiWebEntries) {
+  // 聊天的十个入口带官方图标；专门的工具没有随包图标，头像为空，界面上用角色小像或名字首字。
+  const withIcon = aiWebEntries.filter(entry => aiWebIcons[entry.id]);
+  assert.equal(withIcon.length, 10);
+  for (const entry of aiWebEntries.filter(entry => !aiWebIcons[entry.id])) { assert.equal(entry.avatar, null); assert.equal(entry.builtin, true); }
+  for (const entry of withIcon) {
     const source = aiWebIcons[entry.id];
     assert.equal(source.data, entry.avatar); assert.equal(entry.builtin, true);
     assert.match(source.page, /^https:\/\//); assert.match(source.source, /^https:\/\//); assert.match(source.sourceSha256, /^[a-f0-9]{64}$/);
@@ -68,7 +72,7 @@ test('网址或名字不合规时，校验说明是中文的具体原因：只�
 
 test('添加编辑删除经过真实JSON存储，服务重启持久读回且默认入口不可删除', async t => {
   const h = await harness(t);
-  const created = await h.store.manage(save()); assert.equal(created.entries.length, 11);
+  const created = await h.store.manage(save()); assert.equal(created.entries.length, aiWebEntries.length + 1);
   const custom = created.entries.find(item => item.id === id); assert.equal(custom.revision, 1); assert.equal(custom.avatar, null);
   assert.deepEqual(findAiWebEntries('办公助手', created.entries).map(item => item.id), [id]);
   const urls = []; await openAiWebsite(id, url => urls.push(url), undefined, created.entries); assert.deepEqual(urls, [entry.url]);
@@ -79,9 +83,9 @@ test('添加编辑删除经过真实JSON存储，服务重启持久读回且默�
   assert.equal(restarted.store.list().entries.find(item => item.id === id).revision, 2);
   await assert.rejects(restarted.store.manage({ action: 'remove', id: 'deepseek', expectedRevision: 0 }), error => error.code === 'AI_WEB_BUILTIN');
   await assert.rejects(restarted.store.manage(save(1)), error => error.code === 'CONFLICT');
-  assert.equal((await restarted.store.manage({ action: 'remove', id, expectedRevision: 2 })).entries.length, 10);
+  assert.equal((await restarted.store.manage({ action: 'remove', id, expectedRevision: 2 })).entries.length, aiWebEntries.length);
   await restarted.ctx.fiber.dispose();
-  const again = await open(h.root); t.after(() => again.ctx.fiber.dispose()); assert.equal(again.store.list().entries.length, 10);
+  const again = await open(h.root); t.after(() => again.ctx.fiber.dispose()); assert.equal(again.store.list().entries.length, aiWebEntries.length);
 });
 
 test('并发同版写只接受一次，写失败和取消保留原入口', async t => {

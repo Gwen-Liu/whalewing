@@ -11,6 +11,7 @@ import { mountFeatures } from './feature-fixture.mjs';
 import { knowledgeContract } from '../features/knowledge/contract.js';
 import { skillLibraryContract } from '../features/skills/contract.js';
 import { sourceNotePath } from '../src/extension-sources.js';
+import { digest } from '../src/vault.js';
 import * as fixtureTeam from './fixtures/team-source/host.js';
 
 const knowledge = knowledgeContract(z), skills = skillLibraryContract(z);
@@ -157,6 +158,85 @@ test('一个来源出错只记说明；扩展关闭后撤销、迟到的搜索�
   assert.equal((await h.manage({ action: 'read', path: '@team/规范/发布.md' })).content, teamNotes['规范/发布.md']);
 });
 
+/** 带目录、保存和交给团队的来源：两个知识空间，一个能维护、一个只读；记下扩展收到的调用。 */
+function spaceSource(overrides = {}) {
+  const files = { 'impl/规范/发布.md': note('发布', '甲乙丙丁 本组的发布规范'), 'pub/员工手册.md': note('员工手册', '公司公有的手册') };
+  const hashes = { 'impl/规范/发布.md': 'h1', 'pub/员工手册.md': 'p1' };
+  const calls = { list: 0, saved: [], submitted: [] };
+  return { calls, files, options: {
+    label,
+    async search() { return { notes: [], total: 0, truncated: false }; },
+    async read(file) { if (!files[file]) throw Object.assign(new Error('没有这篇'), { code: 'NOT_FOUND' }); return { path: file, content: files[file], hash: hashes[file], editable: file.startsWith('impl/') }; },
+    async list() {
+      calls.list++;
+      return { spaces: [
+        { id: 'impl', name: '实施组', group: '我所在 · 实施组', note: '新客户上线项目 / 实施组', editable: true, notes: [{ path: 'impl/规范/发布.md', title: '发布' }] },
+        { id: 'pub', name: '公司公共知识', group: '企业公有', notes: [{ path: 'pub/员工手册.md', title: '员工手册' }] },
+      ] };
+    },
+    async save(request) { calls.saved.push(request); files[request.path] = request.content; hashes[request.path] = 'h2'; return { path: request.path, hash: 'h2' }; },
+    async submit(request) { calls.submitted.push(request); return { applied: false, message: '已提交，等实施组的负责人审核' }; },
+    ...overrides,
+  } };
+}
+
+test('知识来源列出知识空间，维护人在知识积累里改团队笔记，员工把自己的笔记交给团队', async t => {
+  const h = await harness(t);
+  const source = spaceSource();
+  let handle;
+  const { scope } = await extension(h.ctx, { setup: current => { handle = current.whalewing.knowledge.registerSource(current, source.options); } });
+  const listed = knowledge.result.parse(await h.manage({ action: 'spaces' }));
+  assert.deepEqual(listed.issues, []);
+  assert.deepEqual(listed.libraries, [{ id: 'team', label, submit: true, spaces: [
+    { id: 'impl', name: '实施组', group: '我所在 · 实施组', note: '新客户上线项目 / 实施组', editable: true, notes: [{ path: '@team/impl/规范/发布.md', title: '发布' }] },
+    { id: 'pub', name: '公司公共知识', group: '企业公有', editable: false, notes: [{ path: '@team/pub/员工手册.md', title: '员工手册' }] },
+  ] }], '顺序照扩展给的，路径换成 @功能id/…');
+  // 能维护的这篇可以改，只读空间的照旧只读。
+  const doc = knowledge.result.parse(await h.manage({ action: 'document', path: '@team/impl/规范/发布.md' }));
+  assert.equal(doc.readOnly, false);
+  assert.equal(knowledge.result.parse(await h.manage({ action: 'read', path: '@team/pub/员工手册.md' })).readOnly, true);
+  const saved = knowledge.result.parse(await h.manage({ action: 'write', path: '@team/impl/规范/发布.md', content: note('发布', '改过的规范'), expectedHash: 'h1' }));
+  assert.deepEqual(saved, { path: '@team/impl/规范/发布.md', hash: 'h2' });
+  assert.deepEqual(source.calls.saved, [{ path: 'impl/规范/发布.md', content: note('发布', '改过的规范'), expectedHash: 'h1' }]);
+  assert.equal((await h.manage({ action: 'document', path: '@team/impl/规范/发布.md' })).hash, 'h2', '保存后回读到扩展确认的版本');
+  // 模型不能替员工改团队笔记；删除和恢复一律交给扩展。
+  await assert.rejects(h.service.execute({ action: 'write', path: '@team/impl/规范/发布.md', content: note('发布'), expectedHash: 'h2' }, { kind: 'model', signal: new AbortController().signal }), { code: 'EXTENSION_NOTE_READ_ONLY' });
+  await assert.rejects(h.manage({ action: 'remove', path: '@team/impl/规范/发布.md', expectedHash: 'h2' }), { code: 'EXTENSION_NOTE_READ_ONLY' });
+  // 交给团队：鲸翼读出这篇现在的正文发过去，自己的知识库不动。
+  const before = await h.manage({ action: 'read', path: '40-知识/个人.md' });
+  const submitted = knowledge.result.parse(await h.manage({ action: 'submit', path: '40-知识/个人.md', source: 'team', space: 'impl', target: '规范/个人做法.md' }));
+  assert.deepEqual(submitted, { applied: false, message: '已提交，等实施组的负责人审核' });
+  assert.deepEqual(source.calls.submitted, [{ space: 'impl', target: '规范/个人做法.md', from: '40-知识/个人.md', content: before.content }]);
+  assert.deepEqual(await h.manage({ action: 'read', path: '40-知识/个人.md' }), before);
+  await assert.rejects(h.manage({ action: 'submit', path: '40-知识/个人.md', source: 'team', space: 'impl', target: '../外面.md' }), { code: 'PATH' });
+  await assert.rejects(h.manage({ action: 'submit', path: '@team/pub/员工手册.md', source: 'team', space: 'impl', target: 'a.md' }), { code: 'PATH' });
+  // 列空间和提交只给员工在界面上用。
+  for (const input of [{ action: 'spaces' }, { action: 'submit', path: '40-知识/个人.md', source: 'team', space: 'impl', target: 'a.md' }]) await assert.rejects(h.service.execute(input, { kind: 'model', signal: new AbortController().signal }), { code: 'USER_ONLY' });
+  // 扩展说目录变了：功能快照的次数加一，知识积累页据此重读。
+  const revision = scope.whalewing.features().knowledgeSources;
+  handle.changed();
+  assert.equal(scope.whalewing.features().knowledgeSources, revision + 1);
+  assert.equal(typeof handle, 'function', '返回的仍是撤销函数，老扩展照旧能用');
+});
+
+test('知识空间列表出错只记说明；没给保存方法时标了 editable 也只读', async t => {
+  const h = await harness(t);
+  const broken = spaceSource({ async list() { throw new Error('服务器连不上'); } });
+  await extension(h.ctx, { id: 'broken', setup: current => current.whalewing.knowledge.registerSource(current, { ...broken.options, label: { zh: '坏来源', en: 'Broken' } }) });
+  const twice = spaceSource({ async list() { return { spaces: [{ id: 'a', name: '甲', notes: [] }, { id: 'a', name: '乙', notes: [] }] }; } });
+  await extension(h.ctx, { id: 'twice', setup: current => current.whalewing.knowledge.registerSource(current, { ...twice.options, label: { zh: '重复', en: 'Twice' } }) });
+  const outside = spaceSource({ async list() { return { spaces: [{ id: 'a', name: '甲', notes: [{ path: 'b/x.md', title: 'x' }] }] }; } });
+  await extension(h.ctx, { id: 'outside', setup: current => current.whalewing.knowledge.registerSource(current, { ...outside.options, label: { zh: '越界', en: 'Outside' } }) });
+  const { save: _save, submit: _submit, ...readOnly } = spaceSource().options;
+  await extension(h.ctx, { setup: current => current.whalewing.knowledge.registerSource(current, readOnly) });
+  const listed = knowledge.result.parse(await h.manage({ action: 'spaces' }));
+  assert.deepEqual(listed.libraries.map(item => [item.id, item.submit, item.spaces.map(space => space.editable)]), [['team', false, [false, false]]]);
+  assert.deepEqual(listed.issues, ['「坏来源」列不出知识空间：服务器连不上', '「重复」列不出知识空间：知识空间 id「a」重复', '「越界」列不出知识空间：笔记「b/x.md」不在知识空间「a」的路径下']);
+  assert.equal((await h.manage({ action: 'read', path: '@team/impl/规范/发布.md' })).readOnly, true);
+  await assert.rejects(h.manage({ action: 'write', path: '@team/impl/规范/发布.md', content: note('发布'), expectedHash: 'h1' }), { code: 'EXTENSION_NOTE_READ_ONLY' });
+  await assert.rejects(h.manage({ action: 'submit', path: '40-知识/个人.md', source: 'team', space: 'impl', target: 'a.md' }), { code: 'EXTENSION_SOURCE_INPUT' });
+});
+
 test('来源登记要先登记功能、一个功能只登记一次，字段按严格规则校验', async t => {
   const h = await harness(t);
   let bare;
@@ -195,7 +275,7 @@ test('技能库“扩展”一组只列扩展技能目录里实际发现的技�
   const listed = skills.result.parse(await h.skillRequest({ action: 'extensions' }));
   assert.deepEqual(listed, { extensions: [{ id: 'team', package: 'dsh-fixture-team', label, skills: [{ name: 'team-release', description: '团队发布流程' }] }] });
   const read = skills.result.parse(await h.skillRequest({ action: 'extension_read', feature: 'team', name: 'team-release' }));
-  assert.deepEqual(read.extension, { id: 'team', package: 'dsh-fixture-team', label, name: 'team-release', description: '团队发布流程', content: '正文：team-release' });
+  assert.deepEqual(read.extension, { id: 'team', package: 'dsh-fixture-team', label, name: 'team-release', description: '团队发布流程', content: '正文：team-release', hash: digest('正文：team-release') });
   await assert.rejects(h.skillRequest({ action: 'extension_read', feature: 'team', name: 'personal' }), { code: 'SKILL_MISSING' });
   await team.fiber.dispose();
   await assert.rejects(h.skillRequest({ action: 'extension_read', feature: 'team', name: 'team-release' }), { code: 'SKILL_SOURCE_CLOSED' });
@@ -203,6 +283,42 @@ test('技能库“扩展”一组只列扩展技能目录里实际发现的技�
   // 没登记来源的扩展按包名显示（label 省略）。
   await extension(h.ctx, { id: 'kit', skills: [root] });
   assert.deepEqual((await h.skillRequest({ action: 'extensions' })).extensions.map(item => [item.id, item.label]), [['kit', undefined]]);
+});
+
+// 2026-11-09 团队技能接进技能中心页：扩展登记技能来源（来源名、保存方法），标哪几项能改、挂在哪一层。
+test('技能来源：标了能改的团队技能由维护人在技能页改，保存交给扩展；只读、正文刚改过、扩展关掉都拒绝', async t => {
+  const h = await harness(t);
+  const root = path.join(h.directory, 'team-skills');
+  h.registry.listed = ['contract-review', 'weekly-report'].map(name => ({ name, description: `团队技能 ${name}`, path: path.join(root, name, 'SKILL.md') }));
+  const saved = [];
+  let source;
+  const team = await extension(h.ctx, { skills: [root], setup: current => {
+    source = current.whalewing.skills.registerSource(current, { label, async save(value, { signal }) { signal.throwIfAborted(); saved.push(value); if (value.content.includes('失败')) throw Object.assign(new Error('服务器说没有权限'), { code: 'FORBIDDEN' }); } });
+  } });
+  // 还没 set：都只读，组名用技能来源的名字。
+  let listed = skills.result.parse(await h.skillRequest({ action: 'extensions' }));
+  assert.deepEqual(listed.extensions[0].skills, [{ name: 'contract-review', description: '团队技能 contract-review' }, { name: 'weekly-report', description: '团队技能 weekly-report' }]);
+  assert.deepEqual(listed.extensions[0].label, label);
+  source.set([{ name: 'contract-review', editable: true, note: '销售部' }, { name: 'weekly-report', note: '全公司' }]);
+  listed = skills.result.parse(await h.skillRequest({ action: 'extensions' }));
+  assert.deepEqual(listed.extensions[0].skills, [{ name: 'contract-review', description: '团队技能 contract-review', editable: true, note: '销售部' }, { name: 'weekly-report', description: '团队技能 weekly-report', note: '全公司' }]);
+  const read = skills.result.parse(await h.skillRequest({ action: 'extension_read', feature: 'team', name: 'contract-review' })).extension;
+  assert.equal(read.editable, true); assert.equal(read.note, '销售部');
+  const result = skills.result.parse(await h.skillRequest({ action: 'extension_save', feature: 'team', name: 'contract-review', content: '新的正文', expectedHash: read.hash }));
+  assert.deepEqual(saved, [{ name: 'contract-review', content: '新的正文', expectedHash: read.hash }]);
+  assert.equal(result.extension.content, '新的正文');
+  await assert.rejects(h.skillRequest({ action: 'extension_save', feature: 'team', name: 'contract-review', content: '又一版', expectedHash: digest('别处的正文') }), { code: 'CONFLICT' });
+  await assert.rejects(h.skillRequest({ action: 'extension_save', feature: 'team', name: 'contract-review', content: '保存失败', expectedHash: read.hash }), { code: 'FORBIDDEN', message: /「团队」没有保存这项技能：服务器说没有权限/ });
+  const other = (await h.skillRequest({ action: 'extension_read', feature: 'team', name: 'weekly-report' })).extension;
+  await assert.rejects(h.skillRequest({ action: 'extension_save', feature: 'team', name: 'weekly-report', content: '改一下', expectedHash: other.hash }), { code: 'SKILL_SOURCE_READONLY' });
+  assert.equal(saved.length, 2, '只读和正文对不上的都没交给扩展');
+  assert.throws(() => source.set([{ name: 'a' }, { name: 'a' }]), { code: 'EXTENSION_SOURCE_INPUT' });
+  assert.throws(() => team.scope.whalewing.skills.registerSource(team.scope, { label }), { code: 'EXTENSION_SOURCE_CONFLICT' });
+  await team.fiber.dispose();
+  await assert.rejects(h.skillRequest({ action: 'extension_save', feature: 'team', name: 'contract-review', content: '关了', expectedHash: read.hash }), { code: 'SKILL_SOURCE_CLOSED' });
+  assert.throws(() => source.set([]), { code: 'FEATURE_CLOSED' });
+  // 没带技能目录的扩展不能登记技能来源。
+  await assert.rejects(extension(h.ctx, { id: 'plain', setup: current => current.whalewing.skills.registerSource(current, { label }) }), { code: 'EXTENSION_SOURCE_INPUT' });
 });
 
 // 企业版功能测试发现：扩展登记的目录写成短文件名或经过联接时，和 DSH 注册表报的真实路径对不上，技能库“扩展”一组是空的。
@@ -230,9 +346,12 @@ test('走查用的测试扩展按公开接口登记团队专家、团队知识�
   const h = await harness(t);
   await h.ctx.plugin(fixtureTeam);
   const found = await h.manage({ action: 'search', query: '回滚办法' });
-  assert.deepEqual(found.notes.map(item => item.path), ['@team/规范/发布规范.md']);
+  assert.deepEqual(found.notes.map(item => item.path), ['@team/impl/规范/发布规范.md']);
   const doc = knowledge.result.parse(await h.manage({ action: 'document', path: found.notes[0].path }));
   assert.match(doc.content, /完整回归/);
+  assert.equal(doc.readOnly, false, '自己所在那一层的空间能维护');
+  const listed = knowledge.result.parse(await h.manage({ action: 'spaces' }));
+  assert.deepEqual(listed.libraries[0].spaces.map(space => [space.group, space.editable, space.notes.length]), [['我所在 · 实施组', true, 2], ['上层公有 · 新客户上线项目', false, 1], ['企业公有', false, 1]]);
   assert.deepEqual(h.service.sources.expertList().map(expert => [expert.id, expert.readOnly]), [['team--lead', false], ['team--guide', true]]);
   assert.deepEqual(h.service.registry.entries.get('team').skills, [path.join(fileURLToPath(new URL('./fixtures/team-source/', import.meta.url)), 'skills')]);
 });

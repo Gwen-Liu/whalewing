@@ -2,34 +2,57 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
+import { zipSync, strToU8 } from 'fflate';
 import { startDsh, removeTree } from '../support/dsh.mjs';
 import { launchBrowser, withPage, openWhaleWing, openTab, textOf, toast, drawer, modal, dialogButton, isCentered, isRed, discardDrawer } from '../support/browser.mjs';
 import { bundledRoot, bundledSkills, skillsRoot, builtinFile, userSkillFile, skillText, seeded, seedSkills, userSkills, sessionIds, normalized } from '../support/skills-fixture.mjs';
 
-// 需求§技能成长：随包技能共 93 项。
-const shippedCount = 93;
+// 需求§技能：随包技能共 94 项（2026-11-12 办公工坊改版加了 whalewing-toolbox，2026-11-13 需求对齐）。
+const shippedCount = 94;
 
 let dsh, browser;
 before(async () => { dsh = await startDsh({ seed: ({ home }) => seedSkills(home) }); browser = await launchBrowser(); });
 after(async () => { await browser?.close(); await dsh?.stop(); });
 
 const escape = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const library = page => page.locator('section.ww-skill-library');
-const rows = page => library(page).locator('.ww-skill-row');
-/** 列表里名字正好是 name 的那一行；kind 是行里第二行开头的来源（系统内置、我的技能、系统技能的个人修改）。 */
-const row = (page, name, kind) => rows(page).filter({ hasText: new RegExp(`^${escape(name)}(?![a-z0-9-])\\s*${kind ? escape(kind) : ''}`) });
-const detail = page => library(page).locator('.ww-skill-detail');
-const searchBox = page => library(page).getByRole('searchbox', { name: '查找技能' });
-const chip = (page, label) => library(page).locator('.ww-skill-filters .ww-chip').filter({ hasText: label });
-const chipCount = async (page, label) => Number((await chip(page, label).innerText()).split('\n').pop());
+const library = page => page.locator('section.ww-kit-page');
+// “已安装”一栏列全部技能（下面按分类再列一遍，不重复数）。
+const installed = page => library(page).locator('section[aria-label="已安装"]');
+const rows = page => installed(page).locator('.ww-kit-row');
+/** 列表里名字正好是 name 的那一行；kind 是“类型”一列（个人、内置、内置 · 改过……）。 */
+const row = (page, name, kind) => rows(page).filter({ has: page.locator('.ww-kit-name', { hasText: new RegExp(`^${escape(name)}$`) }) }).filter(kind ? { has: page.locator('.ww-kit-type', { hasText: new RegExp(`^${escape(kind)}$`) }) } : {});
+/** 点开一项技能后右侧的详情抽屉（里面有技能全文）。 */
+const detail = page => page.locator('dialog.ww-editor[open]').filter({ has: page.locator('pre.ww-kit-content') });
+const searchBox = page => library(page).getByRole('searchbox', { name: '搜索' });
+const filterButton = page => library(page).getByRole('button', { name: '筛选', exact: true });
+/** 筛选菜单里每一项的名字和数量。菜单收着时也在页面里，直接读，不用点开（详情抽屉开着时也能读）。 */
+const filterOptions = page => library(page).locator('.ww-action-menu', { has: page.locator('button[aria-label="筛选"]') }).locator('.ww-menu-surface button').evaluateAll(buttons => buttons.map(button => ({
+  label: [...button.childNodes].filter(node => node.nodeType === 3).map(node => node.textContent).join('').trim(), count: Number(button.querySelector('small')?.textContent),
+})));
+const chipCount = async (page, label) => (await filterOptions(page)).find(item => item.label === label)?.count;
+/** 保存、上传后详情抽屉会自己打开；要回到列表先把它关上。 */
+async function closeDetail(page) {
+  if (!await detail(page).count()) return;
+  await page.keyboard.press('Escape');
+  await detail(page).waitFor({ state: 'detached' });
+}
+async function pickFilter(page, label) {
+  await filterButton(page).click();
+  await page.locator('.ww-menu-surface:popover-open').locator('button').filter({ hasText: label }).click();
+}
+/** “添加”菜单里的“创建技能”。 */
+async function openCreate(page) {
+  await library(page).getByRole('button', { name: '添加技能', exact: true }).click();
+  await page.locator('.ww-menu-surface:popover-open').getByRole('button', { name: '创建技能' }).click();
+}
 const identifier = editor => editor.locator('label', { hasText: '技能标识' }).locator('input');
 const primary = editor => editor.locator('footer button.ww-primary');
-/** 每一行：名字、来源、用途、所在分组。 */
-const rowInfo = page => rows(page).evaluateAll(items => items.map(item => {
-  let group = item.previousElementSibling;
-  while (group && !group.classList.contains('ww-skill-group')) group = group.previousElementSibling;
-  return { name: item.firstChild.textContent, kind: item.children[0]?.textContent.split(' · ')[0], description: item.querySelector('.ww-clamp')?.getAttribute('title') ?? '', group: group?.textContent };
-}));
+/** 每一行：名字、类型、用途、所在分组。 */
+const rowInfo = page => rows(page).evaluateAll(items => items.map(item => ({
+  name: item.querySelector('.ww-kit-name').textContent, kind: item.querySelector('.ww-kit-type').textContent,
+  description: item.querySelector('.ww-kit-main small')?.getAttribute('title') ?? '', group: item.querySelector('.ww-kit-type').textContent.split(' · ')[0],
+})));
 
 /** 反复读到期望值为止（界面重绘是异步的），超时就按最后一次读到的值报错。 */
 async function settled(read, expected, message, timeout = 5_000) {
@@ -59,58 +82,62 @@ const animationsDone = locator => locator.evaluate(element => Promise.all(elemen
 /** 磁盘上应该认出的技能数：随包系统技能，加上技能目录下一层的员工技能（含企业技能包和系统技能的个人修改）。 */
 const expectedTotal = () => bundledSkills.length + userSkills(dsh.home).length;
 
-/** 进鲸翼的技能成长页签，等技能清单读回来，核对数量和磁盘一致。返回总数。 */
+/** 进鲸翼的技能中心页签，等技能清单读回来、把“内置”展开，核对数量和磁盘一致。返回总数。 */
 async function openSkills(page) {
   await openWhaleWing(page, dsh.url);
-  await openTab(page, '技能成长');
+  await openTab(page, '技能中心');
   await rows(page).first().waitFor();
+  const more = installed(page).locator('button.ww-kit-more[aria-expanded=false]');
+  if (await more.count()) await more.click();
   const expected = expectedTotal(), summary = await textOf(library(page).locator('.ww-pagehead p'));
-  assert.match(summary, new RegExp(`^${expected} 项`), `技能数应为 ${expected}（随包 ${bundledSkills.length} + 下一层员工技能 ${userSkills(dsh.home).join('、')}），页头写着“${summary}”`);
+  assert.match(summary, new RegExp(`^技能 ${expected} 项`), `技能数应为 ${expected}（随包 ${bundledSkills.length} + 下一层员工技能 ${userSkills(dsh.home).join('、')}），页头写着“${summary}”`);
   return expected;
 }
 
-/** 查找并选中一项技能，等右侧显示它的正文。 */
+/** 查找并点开一项技能，等右侧抽屉显示它的正文。 */
 async function selectSkill(page, name, kind) {
   await searchBox(page).fill(name);
   await row(page, name, kind).click();
-  await detail(page).locator('h3').first().filter({ hasText: new RegExp(`^${escape(name)}$`) }).waitFor();
+  await detail(page).locator('header h2', { hasText: new RegExp(`^${escape(name)}$`) }).waitFor();
 }
 
-// SKL-01 需求§技能成长（技能页一行查找和筛选，各带数量；列表按“我的、从知识提炼、系统内置”分组；选中后右侧看正文，正文铺满详情卡；页签和页标题都叫“技能成长”；随包 93 项）
-test('页面叫“技能成长”，一行查找和筛选带数量，随包系统技能 93 项，按我的、系统内置分组，选中后右侧铺满正文', async t => {
+// SKL-01 需求§技能中心（页签和页标题叫“技能中心”；顶上一行分段、搜索、筛选、排序、添加；“我的”按个人、内置分组；点一行右侧抽屉看全文；随包 94 项）
+test('页面叫“技能中心”，顶上一行分段、搜索、筛选、添加，随包系统技能 94 项，按个人、内置分组，点开右侧抽屉看全文', async t => {
   await withPage(browser, t, async ({ page, errors, external }) => {
     const total = await openSkills(page);
-    assert.equal(bundledSkills.length, shippedCount, '插件随包 93 项系统技能');
-    assert.match(await textOf(page.locator('.ww-workbench-header button[data-tab][aria-pressed=true]')), /技能成长/);
-    assert.equal(await textOf(library(page).locator('.ww-pagehead h2')), '技能成长');
+    assert.equal(bundledSkills.length, shippedCount, '插件随包 94 项系统技能');
+    assert.match(await textOf(page.locator('.ww-workbench-header button[data-tab][aria-pressed=true]')), /技能中心/);
+    assert.equal(await textOf(library(page).locator('.ww-pagehead h2')), '技能中心');
     const mine = userSkills(dsh.home).length;
-    assert.deepEqual(await library(page).locator('.ww-skill-filters .ww-chip').evaluateAll(chips => chips.map(item => item.firstChild.textContent)), ['全部', '我的', '提炼', '系统', '有更新', '待复核']);
-    assert.equal(await chipCount(page, '全部'), total);
-    assert.equal(await chipCount(page, '我的'), mine);
-    assert.equal(await chipCount(page, '提炼'), 0);
-    assert.equal(await chipCount(page, '系统'), shippedCount);
-    assert.equal(await chipCount(page, '有更新'), 0);
-    assert.equal(await chipCount(page, '待复核'), 0);
-    const search = await searchBox(page).boundingBox(), lastChip = await chip(page, '待复核').boundingBox();
-    assert.ok(lastChip.y < search.y + search.height && lastChip.y + lastChip.height > search.y, '查找框和筛选在同一行');
-    assert.deepEqual(await library(page).locator('.ww-skill-group').allInnerTexts(), ['我的', '系统内置']);
+    assert.deepEqual((await filterOptions(page)).map(item => [item.label, item.count]), [['全部', total], ['个人', mine], ['内置', shippedCount]]);
+    const toolbar = library(page).locator('.ww-kit-toolbar');
+    const middle = box => box.y + box.height / 2;
+    const sameRow = boxes => boxes.every(box => Math.abs(middle(box) - middle(boxes[0])) < 12);
+    const tabs = await Promise.all(['技能', 'MCP', '插件', '我的', '发现'].map(name => toolbar.getByRole('tab', { name, exact: true }).boundingBox()));
+    const actions = await Promise.all([searchBox(page), filterButton(page), library(page).getByRole('button', { name: '添加技能', exact: true })].map(item => item.boundingBox()));
+    assert.ok(sameRow(tabs), '“技能 / MCP / 插件”和“我的 / 发现”在同一行');
+    assert.ok(sameRow(actions), '搜索、筛选、添加在同一行（放不下时整组换到下一行）');
+    const right = Math.max(...actions.map(box => box.x + box.width)), edge = await toolbar.evaluate(element => element.getBoundingClientRect().right);
+    assert.ok(edge - right < 4, '右边一组靠右');
+    assert.deepEqual(await library(page).locator('[aria-label="按来源和项目看"] button').evaluateAll(items => items.map(item => item.firstChild.textContent)), ['个人', '内置'], '下面一排分类：个人、内置');
     const info = await rowInfo(page);
     assert.equal(info.length, total);
-    assert.deepEqual(info.filter(item => item.group === '系统内置').map(item => item.name).sort(), bundledSkills);
-    assert.deepEqual(info.filter(item => item.group === '我的').map(item => item.name).sort(), userSkills(dsh.home));
-    await library(page).getByText('选择技能查看正文与来源').waitFor();
-    await selectSkill(page, 'whalewing-writing', '系统内置');
+    assert.deepEqual(info.filter(item => item.group === '内置').map(item => item.name).sort(), bundledSkills);
+    assert.deepEqual(info.filter(item => item.group === '个人').map(item => item.name).sort(), userSkills(dsh.home));
+    await selectSkill(page, 'whalewing-writing', '内置');
     const card = detail(page), body = card.locator('pre');
-    assert.equal(normalized(await body.innerText()), normalized(fs.readFileSync(builtinFile(dsh.home, 'whalewing-writing'), 'utf8')), '右侧是这项技能的正文');
+    assert.equal(normalized(await body.innerText()), normalized(fs.readFileSync(builtinFile(dsh.home, 'whalewing-writing'), 'utf8')), '抽屉里是这项技能的正文');
     await card.getByRole('button', { name: '编辑技能' }).waitFor();
-    const inner = await card.evaluate(element => { const style = getComputedStyle(element); return element.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight); });
-    assert.ok((await body.boundingBox()).width >= inner - 2, '正文铺满详情卡');
+    const box = await card.boundingBox();
+    assert.ok(page.viewportSize().width - (box.x + box.width) <= 16, '详情从右侧滑出');
+    const inner = await card.locator('.ww-editor-body').evaluate(element => { const style = getComputedStyle(element); return element.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight); });
+    assert.ok((await body.boundingBox()).width >= inner - 2, '正文铺满抽屉');
     assert.deepEqual(errors, []);
     assert.deepEqual(external, []);
   });
 });
 
-// SKL-03 需求§技能成长（一行查找：名字或用途）
+// SKL-03 需求§技能中心（一行查找：名字或用途）
 test('按名字或用途查找技能', async t => {
   await withPage(browser, t, async ({ page, errors }) => {
     await openSkills(page);
@@ -123,38 +150,43 @@ test('按名字或用途查找技能', async t => {
     }
     assert.ok((await rowInfo(page)).some(item => item.name === 'whalewing-web-testing'), '按名字查得到');
     await searchBox(page).fill('');
-    await settled(() => rows(page).count(), all.length, '清空后恢复全部');
+    // 清空后“已安装”回到先露 6 项，点“查看…另有 N 项”再展开。
+    await settled(() => rows(page).count(), 6, '清空后回到先露 6 项');
+    await installed(page).locator('button.ww-kit-more[aria-expanded=false]').click();
+    await settled(() => rows(page).count(), all.length, '展开后恢复全部');
     assert.deepEqual(errors, []);
   });
 });
 
-// SKL-04 需求§技能成长（查找和筛选）；空状态文案以界面为准
+// SKL-04 需求§技能中心（查找和筛选）；空状态文案以界面为准
 test('查找或筛选没有结果时说明没找到', async t => {
   await withPage(browser, t, async ({ page, errors }) => {
     const total = await openSkills(page);
-    const empty = library(page).locator('.ww-skill-list').getByRole('status').filter({ hasText: '没有匹配的技能' });
+    const empty = library(page).locator('.ww-kit-body').getByRole('status').filter({ hasText: '没有匹配的技能' });
     await searchBox(page).fill('鲸翼测试不存在的技能zzz');
     await empty.waitFor();
     assert.equal(await rows(page).count(), 0);
-    await searchBox(page).fill('');
-    await settled(() => rows(page).count(), total);
-    assert.equal(await chipCount(page, '提炼'), 0);
-    await chip(page, '提炼').click();
+    await searchBox(page).fill(seeded.mine.name);
+    await settled(() => rows(page).count(), 1);
+    await pickFilter(page, '内置');
     await empty.waitFor();
     assert.equal(await rows(page).count(), 0);
-    await chip(page, '全部').click();
+    await pickFilter(page, '全部');
+    await searchBox(page).fill('');
+    await settled(() => rows(page).count(), 6, '清空后回到先露 6 项');
+    await installed(page).locator('button.ww-kit-more[aria-expanded=false]').click();
     await settled(() => rows(page).count(), total);
     assert.deepEqual(errors, []);
   });
 });
 
-// SKL-05 需求§技能成长（技能文件放在 ~/.dsh/skills；员工可以新建自己的技能，不需要先开会话）；需求§界面通用约定（编辑用右侧抽屉，成功右上角提示）；需求§数据与隐私（写入后回读）
-test('新增个人技能：不用开会话，保存后列在“我的”，磁盘上写进技能目录', async t => {
+// SKL-05 需求§技能中心（技能文件放在 ~/.dsh/skills；员工可以新建自己的技能，不需要先开会话）；需求§界面通用约定（编辑用右侧抽屉，成功右上角提示）；需求§数据与隐私（写入后回读）
+test('新增个人技能：不用开会话，保存后列在“个人”，磁盘上写进技能目录', async t => {
   await withPage(browser, t, async ({ page, errors, external }) => {
     const name = 'ww-e2e-skl05', content = skillText(name, '鲸翼测试 SKL05：核对发布清单时使用', '# 步骤\n\n1. 逐项核对发布清单。\n2. 缺的项写进备注。\n');
     await openSkills(page);
-    const mine = await chipCount(page, '我的'), sessions = sessionIds(dsh.home);
-    await library(page).getByRole('button', { name: '新增技能' }).click();
+    const mine = await chipCount(page, '个人'), sessions = sessionIds(dsh.home);
+    await openCreate(page);
     const editor = drawer(page, '新增技能');
     await editor.waitFor();
     const box = await editor.boundingBox();
@@ -164,10 +196,11 @@ test('新增个人技能：不用开会话，保存后列在“我的”，磁�
     await primary(editor).click();
     await editor.waitFor({ state: 'detached' });
     await toast(page, '已保存', 'success').waitFor();
-    await settled(() => chipCount(page, '我的'), mine + 1, '“我的”多一项');
+    assert.equal(await textOf(detail(page).locator('header h2')), name, '保存后打开它的详情');
+    await closeDetail(page);
+    await settled(() => chipCount(page, '个人'), mine + 1, '“个人”多一项');
     await searchBox(page).fill(name);
-    assert.deepEqual((await rowInfo(page)).map(({ name: item, kind, group }) => [item, kind, group]), [[name, '我的技能', '我的']]);
-    assert.equal(await textOf(detail(page).locator('h3').first()), name);
+    await settled(async () => (await rowInfo(page)).map(({ name: item, kind, group }) => [item, kind, group]), [[name, '个人', '个人']]);
     assert.equal(fs.readFileSync(userSkillFile(dsh.home, name), 'utf8'), content, '磁盘上的技能文件和填写的一致');
     assert.deepEqual(sessionIds(dsh.home), sessions, '没有为此开会话');
     assert.deepEqual(errors, []);
@@ -190,9 +223,9 @@ test('新增和编辑技能的抽屉，底部按钮写具体动作', async t => 
       await discardDrawer(page, editor, '取消');
       assert.match(label, pattern, `“${title}”的主按钮写具体动作，实际是“${label}”`);
     };
-    await library(page).getByRole('button', { name: '新增技能' }).click();
+    await openCreate(page);
     await check('新增技能', /^(创建技能|添加技能|添加)$/);
-    await selectSkill(page, 'whalewing-writing', '系统内置');
+    await selectSkill(page, 'whalewing-writing', '内置');
     await detail(page).getByRole('button', { name: '编辑技能' }).click();
     await check('编辑技能', /^保存修改$/);
   });
@@ -203,8 +236,8 @@ test('反例：技能标识为空时不保存，提示标识规则，已填内�
   await withPage(browser, t, async ({ page, errors }) => {
     const content = skillText('ww-e2e-skl06-empty', '鲸翼测试 SKL06：空标识');
     await openSkills(page);
-    const mine = await chipCount(page, '我的'), onDisk = userSkills(dsh.home);
-    await library(page).getByRole('button', { name: '新增技能' }).click();
+    const mine = await chipCount(page, '个人'), onDisk = userSkills(dsh.home);
+    await openCreate(page);
     const editor = drawer(page, '新增技能');
     await editor.locator('textarea').fill(content);
     const message = await nextToast(page, () => primary(editor).click(), 'error');
@@ -217,7 +250,7 @@ test('反例：技能标识为空时不保存，提示标识规则，已填内�
     await message.waitFor({ state: 'detached' });
     assert.ok(await editor.isVisible(), '只收起提示，抽屉还开着');
     await discardDrawer(page, editor, '取消');
-    assert.equal(await chipCount(page, '我的'), mine);
+    assert.equal(await chipCount(page, '个人'), mine);
     assert.deepEqual(userSkills(dsh.home), onDisk, '磁盘上没有多出技能');
     assert.deepEqual(errors, []);
   });
@@ -236,7 +269,7 @@ test('反例：技能标识含中文或空格时不保存，说明标识规则�
       await openSkills(page);
       const results = [];
       for (const attempt of attempts) {
-        await library(page).getByRole('button', { name: '新增技能' }).click();
+        await openCreate(page);
         const editor = drawer(page, '新增技能');
         await identifier(editor).fill(attempt.id);
         await editor.locator('textarea').fill(skillText(attempt.name, '鲸翼测试 SKL06：标识不合规'));
@@ -255,6 +288,7 @@ test('反例：技能标识含中文或空格时不保存，说明标识规则�
             await editor.waitFor({ state: 'detached' });
             await toast(page, '已保存', 'success').waitFor();
             result.fixed = fs.existsSync(userSkillFile(dsh.home, attempt.valid));
+            await closeDetail(page);
           } else {
             await discardDrawer(page, editor, '取消');
           }
@@ -275,14 +309,14 @@ test('反例：技能标识含中文或空格时不保存，说明标识规则�
   } finally { cleanup(); }
 });
 
-// SKL-06 需求§技能成长（技能需要名称、说明和正文）；决策 2026-10-13（报错说清原因、不写工程用语）；需求§界面通用约定（失败右上角提示）
+// SKL-06 需求§技能中心（技能需要名称、说明和正文）；决策 2026-10-13（报错说清原因、不写工程用语）；需求§界面通用约定（失败右上角提示）
 test('反例：技能内容里的名称不合规时不保存，提示说清原因、不显示内部错误码，改好后能保存', async t => {
   const name = 'ww-e2e-skl06-c';
   try {
     await withPage(browser, t, async ({ page, shot }) => {
       await openSkills(page);
-      const mine = await chipCount(page, '我的');
-      await library(page).getByRole('button', { name: '新增技能' }).click();
+      const mine = await chipCount(page, '个人');
+      await openCreate(page);
       const editor = drawer(page, '新增技能');
       await identifier(editor).fill(name);
       const bad = skillText('Bad Name', '鲸翼测试 SKL06：名称有大写和空格');
@@ -291,7 +325,7 @@ test('反例：技能内容里的名称不合规时不保存，提示说清原�
       assert.ok(await editor.isVisible(), '抽屉保持打开');
       assert.equal(await editor.locator('textarea').inputValue(), bad, '已填内容还在');
       assert.equal(fs.existsSync(path.join(skillsRoot(dsh.home), name)), false, '磁盘上没有写入');
-      assert.equal(await chipCount(page, '我的'), mine);
+      assert.equal(await chipCount(page, '个人'), mine);
       const text = await textOf(message.locator('.ww-toast-text'));
       await animationsDone(message);
       t.diagnostic(`截图：${await shot('名称不合规')}`);
@@ -307,14 +341,14 @@ test('反例：技能内容里的名称不合规时不保存，提示说清原�
   } finally { removeTree(path.join(skillsRoot(dsh.home), name)); }
 });
 
-// SKL-07 需求§技能成长（员工编辑系统技能会生成一份覆盖，重置就恢复原件）；决策 2026-10-23；需求§界面通用约定（重置用居中确认，成功右上角提示）
+// SKL-07 需求§技能中心（员工编辑系统技能会生成一份覆盖，重置就恢复原件）；决策 2026-10-23；需求§界面通用约定（重置用居中确认，成功右上角提示）
 test('编辑系统技能生成个人修改，恢复系统原件后正文回到原件、个人修改移走', async t => {
   await withPage(browser, t, async ({ page, errors }) => {
     const name = 'whalewing-writing', mark = '<!-- 鲸翼测试-SKL07 -->';
     const shipped = fs.readFileSync(path.join(bundledRoot, name, 'SKILL.md'), 'utf8');
     await openSkills(page);
-    const mine = await chipCount(page, '我的');
-    await selectSkill(page, name, '系统内置');
+    const mine = await chipCount(page, '个人');
+    await selectSkill(page, name, '内置');
     await detail(page).getByRole('button', { name: '编辑技能' }).click();
     const editor = drawer(page, '编辑技能');
     await editor.waitFor();
@@ -325,8 +359,10 @@ test('编辑系统技能生成个人修改，恢复系统原件后正文回到�
     await editor.waitFor({ state: 'detached' });
     await toast(page, '已保存', 'success').waitFor();
     assert.ok((await detail(page).locator('pre').innerText()).includes(mark), '右侧显示改过的正文');
-    await row(page, name, '系统技能的个人修改').waitFor();
-    assert.equal(await chipCount(page, '我的'), mine + 1);
+    await row(page, name, '内置 · 改过').waitFor();
+    assert.equal(await row(page, name, '内置').count(), 0, '改过的内置技能只显示改过的那一行');
+    assert.equal(await chipCount(page, '个人'), mine, '改过的内置技能仍算内置');
+    assert.equal(await chipCount(page, '内置'), shippedCount);
     const override = fs.readFileSync(userSkillFile(dsh.home, name), 'utf8');
     assert.ok(override.includes(mark) && /whalewingBuiltin/.test(override), '个人修改另存在技能目录下一层');
     assert.equal(fs.readFileSync(builtinFile(dsh.home, name), 'utf8'), shipped, '系统原件没被改');
@@ -341,8 +377,9 @@ test('编辑系统技能生成个人修改，恢复系统原件后正文回到�
     assert.equal(normalized(await detail(page).locator('pre').innerText()), normalized(shipped), '右侧回到系统原件');
     assert.equal(fs.existsSync(path.join(skillsRoot(dsh.home), name)), false, '个人修改从技能目录移走');
     assert.equal(fs.readFileSync(builtinFile(dsh.home, name), 'utf8'), shipped);
-    await settled(() => row(page, name, '系统技能的个人修改').count(), 0);
-    assert.equal(await chipCount(page, '我的'), mine);
+    await settled(() => row(page, name, '内置 · 改过').count(), 0);
+    await row(page, name, '内置').waitFor();
+    assert.equal(await chipCount(page, '个人'), mine);
     assert.deepEqual(errors, []);
   });
 });
@@ -352,7 +389,7 @@ test('反例：恢复系统原件时点“取消”，个人修改还在', async
   await withPage(browser, t, async ({ page, errors }) => {
     const name = 'whalewing-clarify', mark = '<!-- 鲸翼测试-SKL08 -->';
     await openSkills(page);
-    await selectSkill(page, name, '系统内置');
+    await selectSkill(page, name, '内置');
     await detail(page).getByRole('button', { name: '编辑技能' }).click();
     const editor = drawer(page, '编辑技能');
     const original = await editor.locator('textarea').inputValue();
@@ -368,7 +405,7 @@ test('反例：恢复系统原件时点“取消”，个人修改还在', async
     await confirm.waitFor({ state: 'detached' });
     assert.equal(fs.readFileSync(userSkillFile(dsh.home, name), 'utf8'), saved, '个人修改原样还在');
     assert.ok((await detail(page).locator('pre').innerText()).includes(mark), '右侧仍是改过的正文');
-    assert.equal(await row(page, name, '系统技能的个人修改').count(), 1);
+    assert.equal(await row(page, name, '内置 · 改过').count(), 1);
     assert.equal(await toast(page, '已恢复系统原件').count(), 0);
     // 收尾：真的恢复原件，不影响后面的用例。
     await detail(page).getByRole('button', { name: '恢复系统原件' }).click();
@@ -380,13 +417,13 @@ test('反例：恢复系统原件时点“取消”，个人修改还在', async
   });
 });
 
-// SKL-09 需求§技能成长（员工可以删除自己的技能）；需求§界面通用约定（删除居中确认、确认按钮红色、成功右上角提示）
-test('删除个人技能：居中红色确认，删除后“我的”少一项，技能目录里也没有了', async t => {
+// SKL-09 需求§技能中心（员工可以删除自己的技能）；需求§界面通用约定（删除居中确认、确认按钮红色、成功右上角提示）
+test('删除个人技能：居中红色确认，删除后“个人”少一项，技能目录里也没有了', async t => {
   await withPage(browser, t, async ({ page, errors }) => {
     const { name } = seeded.mine;
     await openSkills(page);
-    const mine = await chipCount(page, '我的');
-    await selectSkill(page, name, '我的技能');
+    const mine = await chipCount(page, '个人');
+    await selectSkill(page, name, '个人');
     await detail(page).getByRole('button', { name: '删除用户技能' }).click();
     const confirm = modal(page, '删除技能');
     await confirm.waitFor();
@@ -397,32 +434,32 @@ test('删除个人技能：居中红色确认，删除后“我的”少一项�
     await dialogButton(confirm, '删除用户技能').click();
     await confirm.waitFor({ state: 'detached' });
     await toast(page, '已删除', 'success').waitFor();
-    await settled(() => chipCount(page, '我的'), mine - 1, '“我的”少一项');
+    await settled(() => chipCount(page, '个人'), mine - 1, '“个人”少一项');
     assert.equal(await row(page, name).count(), 0, '列表里没有了');
-    await library(page).getByText('选择技能查看正文与来源').waitFor();
+    await detail(page).waitFor({ state: 'detached' });
     assert.equal(fs.existsSync(path.join(skillsRoot(dsh.home), name)), false, '技能目录里没有了');
     assert.deepEqual(errors, []);
   });
 });
 
-// SKL-11 需求§技能成长（企业技能包直接放在 ~/.dsh/skills 下一层，不管叫什么名字，技能库都能扫描、编辑、删除）；决策 2026-10-16、2026-10-19
+// SKL-11 需求§技能中心（企业技能包直接放在 ~/.dsh/skills 下一层，不管叫什么名字，技能库都能扫描、编辑、删除）；决策 2026-10-16、2026-10-19
 test('企业技能包放在技能目录下一层：刷新就能扫到，能查看、编辑、删除', async t => {
   const later = 'ww-e2e-company-y';
   try {
     await withPage(browser, t, async ({ page, errors }) => {
       const { name, description } = seeded.company;
       await openSkills(page);
-      assert.deepEqual((await rowInfo(page)).filter(item => item.name === name).map(({ kind, group }) => [kind, group]), [['我的技能', '我的']]);
+      assert.deepEqual((await rowInfo(page)).filter(item => item.name === name).map(({ kind, group }) => [kind, group]), [['个人', '个人']]);
       // DSH 运行中又放进来一个企业技能，点“…”里的“刷新”就扫到。
       fs.mkdirSync(path.join(skillsRoot(dsh.home), later));
       fs.writeFileSync(userSkillFile(dsh.home, later), skillText(later, '鲸翼测试企业技能包：运行中放进来的'));
       const total = expectedTotal();
       await page.locator('.ww-workbench-header').getByRole('button', { name: '更多操作' }).click();
       await page.locator('.ww-menu-surface:popover-open').getByRole('button', { name: '刷新' }).click();
-      await library(page).locator('.ww-pagehead p', { hasText: new RegExp(`^${total} 项`) }).waitFor();
-      await row(page, later, '我的技能').waitFor();
+      await library(page).locator('.ww-pagehead p', { hasText: new RegExp(`^技能 ${total} 项`) }).waitFor();
+      await row(page, later, '个人').waitFor();
       // 查看
-      await selectSkill(page, name, '我的技能');
+      await selectSkill(page, name, '个人');
       assert.equal(normalized(await detail(page).locator('pre').innerText()), normalized(skillText(name, description)));
       // 编辑
       await detail(page).getByRole('button', { name: '编辑技能' }).click();
@@ -445,7 +482,7 @@ test('企业技能包放在技能目录下一层：刷新就能扫到，能查�
   } finally { removeTree(path.join(skillsRoot(dsh.home), later)); }
 });
 
-// SKL-12 需求§技能成长（DSH 只扫 ~/.dsh/skills 下一层，再深一层的目录认不出来）；决策 2026-10-19
+// SKL-12 需求§技能中心（DSH 只扫 ~/.dsh/skills 下一层，再深一层的目录认不出来）；决策 2026-10-19
 test('反例：再深一层的技能目录不被认出来，数量不变', async t => {
   await withPage(browser, t, async ({ page, errors }) => {
     const { dir, name, description } = seeded.nested;
@@ -456,9 +493,36 @@ test('反例：再深一层的技能目录不被认出来，数量不变', async
     assert.equal(info.some(item => [name, dir].includes(item.name) || item.description === description), false, '列表里没有再深一层的技能');
     for (const query of [name, dir, '再深一层']) {
       await searchBox(page).fill(query);
-      await library(page).locator('.ww-skill-list').getByRole('status').filter({ hasText: '没有匹配的技能' }).waitFor();
+      await library(page).locator('.ww-kit-body').getByRole('status').filter({ hasText: '没有匹配的技能' }).waitFor();
     }
     assert.equal(fs.readFileSync(file, 'utf8'), before, '这份文件原样留着，没被改动或删除');
     assert.deepEqual(errors, []);
   });
+});
+
+// SKL-18 需求§技能中心（上传技能：.zip 或 SKILL.md，外面套一层文件夹也认，同名不覆盖，装好后打开详情）
+test('上传技能：压缩包外面套一层文件夹也认，装好后列在“个人”并打开详情；同名再传不覆盖', async t => {
+  const name = 'ww-e2e-skl18', dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ww-e2e-upload-'));
+  try {
+    await withPage(browser, t, async ({ page, errors, external }) => {
+      await openSkills(page);
+      const mine = await chipCount(page, '个人');
+      const zip = path.join(dir, `${name}.zip`);
+      fs.writeFileSync(zip, zipSync({ [`${name}/SKILL.md`]: strToU8(skillText(name, '鲸翼测试 SKL18：上传的技能')), [`${name}/scripts/run.py`]: strToU8('print(1)\n'), [`__MACOSX/${name}/._SKILL.md`]: strToU8('x') }));
+      await library(page).locator('input[type=file]').setInputFiles(zip);
+      await toast(page, `已上传技能「${name}」`, 'success').waitFor();
+      await detail(page).locator('header h2', { hasText: name }).waitFor();
+      assert.equal(fs.readFileSync(path.join(skillsRoot(dsh.home), name, 'scripts', 'run.py'), 'utf8'), 'print(1)\n', '带的脚本一起装进技能文件夹');
+      assert.equal(fs.existsSync(path.join(skillsRoot(dsh.home), name, '__MACOSX')), false, '系统垃圾文件不要');
+      await page.keyboard.press('Escape');
+      await detail(page).waitFor({ state: 'detached' });
+      assert.equal(await chipCount(page, '个人'), mine + 1);
+      await library(page).locator('input[type=file]').setInputFiles(zip);
+      const message = toast(page, '同名', 'error');
+      await message.waitFor();
+      assert.equal(await chipCount(page, '个人'), mine + 1, '同名不覆盖、不多出一项');
+      assert.deepEqual(errors, []);
+      assert.deepEqual(external, []);
+    });
+  } finally { removeTree(path.join(skillsRoot(dsh.home), name)); removeTree(dir); }
 });

@@ -1,6 +1,58 @@
 
 /** 领域文案与样式；组合入口只保留原有级联位置。 */
 export const zh = {
+  "graphSettings": "图谱设置",
+  "graphSettingsReset": "恢复默认",
+  "graphSettingsRestored": "图谱设置已恢复默认",
+  "graphShow": "显示哪些",
+  "graphFilter": "筛选",
+  "graphFilterHelp": "空格隔开的几项都要满足，OR 隔开的满足一段就行；path: 看目录，tag: 看标签，file: 看笔记名，前面加 - 是去掉",
+  "graphFilterPlaceholder": "筛选，比如 tag:读书 或 -path:90-归档",
+  "graphTags": "标签",
+  "graphAttachments": "附件",
+  "graphMissing": "还没建的笔记",
+  "graphOrphans": "没有连线的",
+  "graphColors": "按层上色",
+  "graphGroupColor": "第 {index} 组的颜色",
+  "graphGroupQuery": "第 {index} 组包括哪些",
+  "graphGroupRemove": "删掉第 {index} 组",
+  "graphGroupAdd": "加一组",
+  "graphGroupUnnamed": "新的一组",
+  "graphLook": "样子",
+  "graphNodeSize": "点的大小",
+  "graphLineSize": "线的粗细",
+  "graphTextFade": "名字多少",
+  "graphArrows": "箭头（谁引用了谁）",
+  "graphLayout": "排布",
+  "graphCenter": "往中间聚",
+  "graphRepel": "互相推开",
+  "graphLink": "连线拉紧",
+  "graphDistance": "连线长短",
+  "graphGrow": "看它长出来",
+  "graphGrowStop": "停下",
+  "graphGrowToday": "到今天",
+  "graphGrowUndated": "没写日期的",
+  "graphGrowDone": "你的知识长到了 {total} 个点",
+  "graphGrowCount": "长到第 {count} 个，共 {total} 个",
+  "graphExcluded": "筛选去掉了 {count} 篇",
+  "graphTagFiltered": "图上只留带 #{tag} 的笔记；在图谱设置里清空筛选就回来了",
+  "graphAttachmentInfo": "附件“{name}”在知识库里，用系统自带的程序打开",
+  "pageTitle": "知识积累",
+  "myLibrary": "我的第二大脑",
+  "myLibraryNote": "在你自己电脑上，只有你看得到",
+  "switchLibrary": "切换知识库",
+  "librarySummary": "{name}知识 {count} 个空间",
+  "maintainable": "可维护",
+  "spaceEmpty": "这个知识空间还没有笔记",
+  "submitTitle": "提交到团队",
+  "submitConfirm": "提交",
+  "submitSpace": "交给哪个知识空间",
+  "submitTarget": "放到空间里的位置",
+  "submitHelp": "只发这一篇现在的内容，你的知识库不会有任何改动。你是这个空间的维护人就直接放进去，不是的话要负责人审核通过才进去。以后改了这篇，要再提交一次。",
+  "submitToLibrary": "提交到「{name}」…",
+  "submitApplied": "已放进团队的知识空间",
+  "submitPending": "已提交，等负责人审核",
+  "noteSourceEditable": "这篇由「{name}」提供，你可以维护：改完点“保存”，交给「{name}」同步给大家",
   "noteRemoveTitle": "移出笔记",
   "draftDiscardTitle": "放弃草稿",
   "reloadConfirmTitle": "用最新内容替换草稿",
@@ -64,11 +116,6 @@ export const zh = {
   "graphLayerSources": "来源和作品",
   "graphLayerTimeline": "时间线和收件箱",
   "graphLayerSystem": "系统和外部索引",
-  "graphHidden": "图上没画：{list}",
-  "graphHiddenArchive": "归档 {count} 篇",
-  "graphHiddenTemplates": "模板 {count} 篇",
-  "graphHiddenOrphans": "没有连线的 {count} 篇",
-  "listSeparator": "、",
   "selectForQuestion": "选入问答：{name}",
   "allNotes": "全部笔记",
   "folder": "文件夹",
@@ -78,9 +125,115 @@ export const zh = {
   "libraryTools": "知识库工具",
   "directoryLoading": "正在读取目录",
   "directoryRetry": "重试目录",
+  "ribbon": "功能条",
+  "leftPanel": "左侧栏",
+  "leftFiles": "文件",
+  "leftSearch": "搜索",
+  "collapseAll": "全部折叠",
+  "searchLabel": "搜索笔记",
+  "searchHint": "敲关键词，搜笔记的名字、路径和正文。装了企业版的话，团队知识的结果跟在后面，标着来源。",
+  "rightPanel": "右侧栏",
+  "sideOutline": "目录",
+  "sideBacklinks": "反链",
+  "sideOutgoing": "出链",
+  "sideTags": "标签",
+  "sideProperties": "属性",
+  "sideLocal": "局部图谱",
+  "sideNeedNote": "打开一篇笔记后，这里显示它的{name}",
+  "sideLoading": "正在读取",
+  "sideLocalHint": "点一个点打开那篇。全库的图在左边功能条的“关系图谱”。",
+  "searching": "正在搜索",
+  "sideTagGraph": "在关系图谱里只看这个标签",
+  "sideNoTags": "知识库里还没有标签。在笔记属性的 tags 里写，或者在正文里写 #标签",
+  "sideNoProperties": "笔记里还没有属性",
+  "sideNoHeadings": "这篇笔记没有小标题",
+  "sideNoOutgoing": "没有链到别的笔记",
+  "sideLocalTeam": "团队知识的笔记不在你自己的关系图谱里",
+  "switcher": "快速切换",
+  "switcherShortcut": "快速切换（Ctrl O）",
+  "switcherPlaceholder": "敲笔记名，回车打开",
+  "switcherCreate": "新建《{title}》",
+  "switcherCreateWhere": "放进收件箱",
+  "switcherEmpty": "知识库里还没有笔记",
+  "switcherHelp": "上下键挑一篇 · 回车打开 · Ctrl 回车在新页签打开 · Esc 关掉",
+  "vaultRoot": "知识库根目录",
+  "emptyTab": "新页签",
+  "emptyTabHelp": "从左边挑一篇笔记，或者：",
+  "emptyNewNote": "新建一篇笔记",
+  "emptySwitcher": "打开快速切换",
+  "emptyGraph": "打开关系图谱",
+  "emptyClose": "关掉这个页签",
+  "newTab": "开新页签",
+  "openTabs": "打开的页签",
+  "closeTab": "关掉“{name}”",
+  "closeTabConfirm": "这个页签里有没保存的修改，关掉以后这些修改会丢失。要留着的话，先点“导出当前正文”。",
+  "goBack": "后退",
+  "goForward": "前进",
+  "hideLeft": "收起左侧栏",
+  "showLeft": "显示左侧栏",
+  "hideRight": "收起右侧栏",
+  "showRight": "显示右侧栏",
+  "graphLoading": "正在读取关系图谱",
+  "graphReload": "读取关系图谱",
+  "statusDots": "{count} 个点",
+  "statusLines": "{count} 条连线",
+  "statusBacklinks": "{count} 个反向链接",
+  "statusChars": "{count} 字",
   "searchPlaceholder": "搜索笔记…"
 };
 export const en = {
+  "graphSettings": "Graph settings",
+  "graphSettingsReset": "Restore defaults",
+  "graphSettingsRestored": "Graph settings restored to defaults",
+  "graphShow": "What to show",
+  "graphFilter": "Filter",
+  "graphFilterHelp": "Space-separated terms must all match; OR separates alternatives; path:, tag:, file: narrow the match; prefix - to leave out",
+  "graphFilterPlaceholder": "Filter, e.g. tag:books or -path:90-归档",
+  "graphTags": "Tags",
+  "graphAttachments": "Attachments",
+  "graphMissing": "Notes not created yet",
+  "graphOrphans": "Unlinked notes",
+  "graphColors": "Colors by layer",
+  "graphGroupColor": "Color of group {index}",
+  "graphGroupQuery": "What group {index} includes",
+  "graphGroupRemove": "Remove group {index}",
+  "graphGroupAdd": "Add group",
+  "graphGroupUnnamed": "New group",
+  "graphLook": "Look",
+  "graphNodeSize": "Dot size",
+  "graphLineSize": "Line width",
+  "graphTextFade": "Labels",
+  "graphArrows": "Arrows (who links to whom)",
+  "graphLayout": "Layout",
+  "graphCenter": "Pull to center",
+  "graphRepel": "Push apart",
+  "graphLink": "Link pull",
+  "graphDistance": "Link length",
+  "graphGrow": "Watch it grow",
+  "graphGrowStop": "Stop",
+  "graphGrowToday": "Today",
+  "graphGrowUndated": "Undated",
+  "graphGrowDone": "Your knowledge has grown to {total} dots",
+  "graphGrowCount": "{count} of {total}",
+  "graphExcluded": "{count} notes filtered out",
+  "graphTagFiltered": "Showing only notes tagged #{tag}; clear the filter in graph settings to see all",
+  "graphAttachmentInfo": "Attachment “{name}” is in the vault; open it with your system app",
+  "pageTitle": "Knowledge",
+  "myLibrary": "My second brain",
+  "myLibraryNote": "On this computer, only you can see it",
+  "switchLibrary": "Switch library",
+  "librarySummary": "{name}: {count} spaces",
+  "maintainable": "Editable",
+  "spaceEmpty": "This space has no notes yet",
+  "submitTitle": "Submit to team",
+  "submitConfirm": "Submit",
+  "submitSpace": "Space",
+  "submitTarget": "Path in the space",
+  "submitHelp": "Only the current text of this note is sent; your own library stays unchanged. Maintainers add it directly; otherwise a lead reviews it first. Submit again after later edits.",
+  "submitToLibrary": "Submit to {name}…",
+  "submitApplied": "Added to the team space",
+  "submitPending": "Submitted for review",
+  "noteSourceEditable": "This note comes from {name} and you maintain it: save to sync it through {name}",
   "graphVersionMismatch": "Graph data does not match this interface. Fully quit and reopen DSH",
   "graphPreparing": "Preparing graph {done}/{total}",
   "graphCanvasError": "Canvas graph is not available in this environment",
@@ -98,46 +251,96 @@ export const en = {
   "graphLayerSources": "Sources and works",
   "graphLayerTimeline": "Timeline and inbox",
   "graphLayerSystem": "System and external index",
-  "graphHidden": "Not drawn: {list}",
-  "graphHiddenArchive": "{count} archived",
-  "graphHiddenTemplates": "{count} templates",
-  "graphHiddenOrphans": "{count} without links",
-  "listSeparator": ", ",
   "directoryResize": "Resize note directory",
+  "ribbon": "Ribbon",
+  "leftPanel": "Left sidebar",
+  "leftFiles": "Files",
+  "leftSearch": "Search",
+  "collapseAll": "Collapse all",
+  "searchLabel": "Search notes",
+  "searchHint": "Type words to search note names, paths and text. With the enterprise edition, team results follow, marked with their source.",
+  "rightPanel": "Right sidebar",
+  "sideOutline": "Outline",
+  "sideBacklinks": "Backlinks",
+  "sideOutgoing": "Outgoing links",
+  "sideTags": "Tags",
+  "sideProperties": "Properties",
+  "sideLocal": "Local graph",
+  "sideNeedNote": "Open a note to see its {name} here",
+  "sideLoading": "Loading",
+  "sideLocalHint": "Click a dot to open that note. The whole graph is under “Knowledge graph” on the ribbon.",
+  "searching": "Searching",
+  "sideTagGraph": "Show only this tag in the graph",
+  "sideNoTags": "No tags yet. Add them in the tags property or write #tag in the text",
+  "sideNoProperties": "No properties yet",
+  "sideNoHeadings": "This note has no headings",
+  "sideNoOutgoing": "No links to other notes",
+  "sideLocalTeam": "Team notes are not in your own graph",
+  "switcher": "Quick switcher",
+  "switcherShortcut": "Quick switcher (Ctrl O)",
+  "switcherPlaceholder": "Type a note name, Enter to open",
+  "switcherCreate": "Create “{title}”",
+  "switcherCreateWhere": "In the inbox",
+  "switcherEmpty": "No notes yet",
+  "switcherHelp": "Arrow keys to pick · Enter to open · Ctrl Enter for a new tab · Esc to close",
+  "vaultRoot": "Vault root",
+  "emptyTab": "New tab",
+  "emptyTabHelp": "Pick a note on the left, or:",
+  "emptyNewNote": "Create a note",
+  "emptySwitcher": "Open quick switcher",
+  "emptyGraph": "Open the graph",
+  "emptyClose": "Close this tab",
+  "newTab": "Open a new tab",
+  "openTabs": "Open tabs",
+  "closeTab": "Close “{name}”",
+  "closeTabConfirm": "This tab has unsaved changes. They will be lost when it closes. Export the text first to keep it.",
+  "goBack": "Back",
+  "goForward": "Forward",
+  "hideLeft": "Hide left sidebar",
+  "showLeft": "Show left sidebar",
+  "hideRight": "Hide right sidebar",
+  "showRight": "Show right sidebar",
+  "graphLoading": "Loading the graph",
+  "graphReload": "Load the graph",
+  "statusDots": "{count} dots",
+  "statusLines": "{count} links",
+  "statusBacklinks": "{count} backlinks",
+  "statusChars": "{count} characters",
   "styleClean": "Writing: none of the discouraged words from the rules",
   "styleFlagged": "Writing: {count} notes use words the rules discourage; see the word table in the rules"
 };
+// 空串是删掉的死样式（旧 SVG 图谱、被后面规则覆盖的窗口宽度档位），位置留着，组合入口按下标拼接。
 export const styles = [
 `.ww-note{text-align:left;overflow-wrap:anywhere}.ww-note small{display:block;color:var(--dsw-alias-label-secondary);font-weight:400}`,
 `
     .ww-note-row{display:flex;gap:8px;align-items:center}.ww-note-row .ww-note{flex:1;min-width:0}`,
-`.ww-graph{width:100%;height:440px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-2)}.ww-graph line{stroke:var(--dsw-alias-border-l2);stroke-width:1.5}.ww-graph circle{fill:var(--dsw-alias-brand-primary);cursor:pointer}.ww-graph text{fill:var(--dsw-alias-label-primary);font-size:13px;pointer-events:none}.ww-graph [role=button]:focus circle{stroke:var(--dsw-alias-label-primary);stroke-width:3}`,
-`.ww-graph-frame{overflow:auto;max-height:440px}.ww-graph{display:block}.ww-graph [role=button]{pointer-events:bounding-box;cursor:pointer}`,
+``,
+``,
 `
-    .ww-knowledge{height:100%;min-height:0;display:flex;flex-direction:column;gap:8px}.ww-knowledge>.ww-row{flex:none}.ww-knowledge .ww-field{min-width:120px}.ww-knowledge-split{display:grid;grid-template-columns:210px minmax(0,1fr);min-height:0;flex:1;border:1px solid var(--dsw-alias-border-l1);border-radius:16px;overflow:hidden}.ww-note-tree{padding:12px 8px;min-height:0;overflow:auto;border-right:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2)}.ww-directory .ww-directory{padding-left:12px}`,
-`.ww-note-row{gap:4px}.ww-page .ww-note-tree .ww-note{border:0;background:transparent;padding:6px 8px;border-radius:7px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;font-size:12px}.ww-page .ww-note-tree .ww-note:hover,.ww-page .ww-note-tree .ww-selected{background:var(--dsw-alias-interactive-bg-hover)}.ww-note-tree input[type=checkbox]{width:12px;height:12px;flex:none}.ww-note-canvas{overflow:auto;min-width:0;min-height:0;padding:20px 24px;background:var(--dsw-alias-bg-layer-1)}.ww-note-canvas .ww-reader{max-width:800px;margin:auto;padding-top:16px}.ww-note-canvas>.ww-section{margin:0;border:0;padding:0}.ww-note-canvas label:first-child input{font-size:12px;color:var(--dsw-alias-label-secondary);border:0;background:var(--dsw-alias-bg-layer-2);padding:5px 8px}.ww-note-actions,.ww-backlinks{margin-top:16px;border-top:1px solid var(--dsw-alias-border-l1);padding-top:10px}`,
-`.ww-graph-frame{max-height:none}.ww-graph{height:100%;min-height:380px;border:0;background:var(--dsw-alias-bg-layer-1)}`,
+    .ww-knowledge{height:100%;min-height:0;display:flex;flex-direction:column;gap:8px}.ww-knowledge>.ww-row{flex:none}.ww-knowledge .ww-field{min-width:120px}.ww-knowledge-split{display:grid;min-height:0;flex:1;border:1px solid var(--dsw-alias-border-l1);border-radius:16px;overflow:hidden}.ww-note-tree{padding:12px 8px;min-height:0;overflow:auto;border-right:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2)}.ww-directory .ww-directory{padding-left:12px}`,
+`.ww-note-row{gap:4px}.ww-page .ww-note-tree .ww-note{border:0;background:transparent;padding:6px 8px;border-radius:7px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;font-size:12px}.ww-page .ww-note-tree .ww-note:hover,.ww-page .ww-note-tree .ww-selected{background:var(--dsw-alias-interactive-bg-hover)}.ww-note-tree input[type=checkbox]{width:12px;height:12px;flex:none}.ww-note-canvas{min-width:0;min-height:0;background:var(--dsw-alias-bg-layer-1)}.ww-note-canvas .ww-reader{margin:auto;padding-top:16px}.ww-note-canvas>.ww-section{margin:0;border:0;padding:0}.ww-note-canvas label:first-child input{font-size:12px;color:var(--dsw-alias-label-secondary);border:0;background:var(--dsw-alias-bg-layer-2);padding:5px 8px}.ww-note-actions,.ww-backlinks{margin-top:16px;border-top:1px solid var(--dsw-alias-border-l1);padding-top:10px}`,
+``,
+``,
 `
-    @media(max-width:1100px){.ww-workspace{grid-template-columns:minmax(0,1fr) 300px;gap:12px}.ww-workspace-float,.ww-workspace-bubble{grid-template-columns:minmax(0,1fr)}.ww-knowledge-split{grid-template-columns:165px minmax(0,1fr)}.ww-note-canvas{padding:16px}.ww-page{padding:18px}.ww-grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,195px),1fr))}}`,
-`
-    .ww-knowledge{gap:10px}.ww-knowledge-toolbar{display:flex;align-items:center;gap:6px;flex:none;min-height:36px}`,
-`.ww-knowledge-split{border-radius:14px;grid-template-columns:195px minmax(0,1fr);background:var(--dsw-alias-bg-layer-1)}.ww-note-tree{padding:10px 7px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 97%,var(--dsw-alias-label-primary) 3%)}`,
-`.ww-note-row{min-height:29px}.ww-page .ww-note-tree .ww-note{display:flex;align-items:center;gap:7px;padding:4px 6px;font-size:12px;line-height:20px;color:var(--dsw-alias-label-secondary)}.ww-page .ww-note-tree .ww-selected{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}.ww-note-tree input[type=checkbox]{appearance:auto;opacity:0;transition:opacity .12s}.ww-note-row:hover input,.ww-note-row:focus-within input,.ww-note-tree input:checked{opacity:1}.ww-note-tree .ww-row button{font-size:11px;border:0;background:transparent;padding:3px 5px}.ww-note-canvas{padding:16px 22px}.ww-note-toolbar{display:flex;align-items:start;gap:10px;margin-bottom:16px}.ww-note-path{flex:1;min-width:0;font-size:11px;color:var(--dsw-alias-label-secondary)}.ww-note-path>summary{list-style:none;display:flex;gap:6px;align-items:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:28px}.ww-note-path[open]>label{padding-top:8px}.ww-note-toolbar .ww-row{gap:2px;flex-wrap:nowrap}.ww-note-toolbar .ww-row button{border:0;background:transparent;padding:4px 8px;font-size:11px}`,
+    .ww-knowledge{gap:10px}.ww-knowledge-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:6px;flex:none;min-height:36px}.ww-page .ww-knowledge-toolbar .ww-search{flex:1 1 11.25rem}`,
+`.ww-knowledge-split{border-radius:14px;background:var(--dsw-alias-bg-layer-1)}.ww-note-tree{padding:10px 7px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 97%,var(--dsw-alias-label-primary) 3%)}`,
+`.ww-note-row{min-height:29px}.ww-page .ww-note-tree .ww-note{display:flex;align-items:center;gap:7px;padding:4px 6px;font-size:12px;line-height:20px;color:var(--dsw-alias-label-secondary)}.ww-page .ww-note-tree .ww-selected{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}.ww-note-tree input[type=checkbox]{appearance:auto;opacity:0;transition:opacity .12s}.ww-note-row:hover input,.ww-note-row:focus-within input,.ww-note-tree input:checked{opacity:1}.ww-note-tree .ww-row button{font-size:11px;border:0;background:transparent;padding:3px 5px}.ww-note-toolbar{display:flex;align-items:start;gap:10px;margin-bottom:16px}.ww-note-path{flex:1;min-width:0;font-size:11px;color:var(--dsw-alias-label-secondary)}.ww-note-path>summary{list-style:none;display:flex;gap:6px;align-items:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:28px}.ww-note-path[open]>label{padding-top:8px}.ww-note-toolbar .ww-row{gap:2px;flex-wrap:nowrap}.ww-note-toolbar .ww-row button{border:0;background:transparent;padding:4px 8px;font-size:11px}`,
 `.ww-backlinks,.ww-note-actions{border:0;margin-top:10px;padding-top:0;font-size:12px;color:var(--dsw-alias-label-secondary)}`,
 `
-    @media(max-width:1100px){.ww-workspace{grid-template-columns:minmax(0,1fr) 290px;gap:12px}.ww-workspace-float,.ww-workspace-bubble{grid-template-columns:minmax(0,1fr)}.ww-grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,195px),1fr))}.ww-knowledge-split{grid-template-columns:155px minmax(0,1fr)}.ww-knowledge-toolbar{flex-wrap:wrap}.ww-search{flex-basis:180px}.ww-note-canvas{padding:14px}}`,
+    @media(max-width:1100px){.ww-grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,195px),1fr))}}`,
 `
-    @media(max-width:520px){.ww-page{padding:12px}.ww-knowledge-split{grid-template-columns:125px minmax(0,1fr)}.ww-note-tree{padding:8px 3px}.ww-page .ww-folder{font-size:11px;gap:3px}.ww-note-canvas{padding:10px}.ww-grid{grid-template-columns:1fr}.ww-note-toolbar .ww-row button{padding:4px 6px}}`,
+    @media(max-width:520px){.ww-page{padding:12px}.ww-grid{grid-template-columns:1fr}}@container ww-main (max-width:30rem){.ww-note-tree{padding:8px 3px}.ww-page .ww-folder{font-size:11px;gap:3px}}`,
 `
-    .ww-note-canvas.ww-graph-mode{padding:0;overflow:hidden;display:flex}.ww-graph-workspace{position:relative;display:flex;flex:1;min-width:0;min-height:0}.ww-graph-empty{display:flex;flex:1;align-items:center;justify-content:center}.ww-graph-controls{position:absolute;left:10px;bottom:10px;display:flex;align-items:center;gap:8px;max-width:calc(100% - 20px);flex-wrap:wrap;padding:4px 6px;border-radius:8px;background:var(--dsw-alias-bg-layer-1);box-shadow:0 1px 6px var(--dsw-alias-border-l1);font-size:11px;color:var(--dsw-alias-label-secondary)}.ww-page .ww-graph-controls button{padding:4px 6px;border:0;background:transparent;font-size:11px}.ww-graph-missing{position:absolute;left:12px;top:12px;max-width:min(420px,calc(100% - 24px));max-height:50%;overflow:auto;padding:12px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-1)}
+    .ww-note-canvas.ww-graph-mode{padding:0;overflow:hidden;display:flex}.ww-graph-workspace{position:relative;display:flex;flex:1;min-width:0;min-height:0}.ww-graph-empty{display:flex;flex:1;align-items:center;justify-content:center}.ww-graph-controls{position:absolute;left:10px;bottom:10px;display:flex;align-items:center;gap:8px;max-width:calc(100% - 20px);flex-wrap:wrap;padding:4px 6px;border-radius:8px;background:var(--dsw-alias-bg-layer-1);box-shadow:0 1px 6px var(--dsw-alias-border-l1);font-size:11px;color:var(--dsw-alias-label-secondary)}.ww-page .ww-graph-controls button{padding:4px 6px;border:0;background:transparent;font-size:11px}.ww-graph-missing{position:absolute;left:12px;top:12px;max-width:min(26.25rem,calc(100% - 24px));max-height:50%;overflow:auto;padding:12px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-1)}
     .ww-knowledge-split{grid-template-columns:var(--ww-directory-width,195px) 8px minmax(0,1fr)}.ww-note-tree{min-width:0;border-right:0}.ww-directory-separator{cursor:col-resize;touch-action:none;background:var(--dsw-alias-bg-layer-2);position:relative}.ww-directory-separator:before{content:'';position:absolute;left:3px;top:0;bottom:0;width:2px;background:var(--dsw-alias-border-l1)}.ww-directory-separator:hover:before,.ww-directory-separator:focus-visible:before{background:var(--dsw-alias-state-business-primary)}.ww-directory-separator:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:-2px}`,
 `.ww-folder>svg,.ww-folder-chevron,.ww-note>svg{flex-shrink:0}.ww-note-tree .ww-note{flex:1}.ww-note-row{min-width:0}`,
 // 2026-10-25 随皮点缀：页头一句现状，面和分隔线跟随 DSH 与皮肤，阅读区标题用宋体、正文放宽行距。
-`.ww-page .ww-knowledge-head{flex:none;margin:20px 0 6px}.ww-knowledge-head p{max-width:100%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.ww-knowledge-split{border-color:var(--ww-line);background:var(--ww-surface)}.ww-note-tree{background:var(--ww-surface-2)}.ww-note-canvas{background:transparent}.ww-note-canvas .ww-reader{max-width:78ch;font-size:14px;line-height:1.8}.ww-note-canvas .ww-reader :is(h1,h2,h3){font-family:var(--ww-serif);font-weight:600;letter-spacing:.01em}.ww-note-canvas .ww-reader h1{font-size:26px;line-height:1.35}.ww-note-canvas .ww-reader h2{font-size:20px}.ww-directory-separator{background:var(--ww-surface-2)}.ww-graph-controls,.ww-graph-missing{background:var(--ww-raised)}`,
+`.ww-page .ww-knowledge-head{flex:none;margin:22px 0 6px}.ww-knowledge-head>div{min-width:0;flex:1 1 auto}.ww-knowledge-head p{max-width:100%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.ww-knowledge-split{border-color:var(--ww-line);background:var(--ww-surface)}.ww-note-tree{background:var(--ww-surface-2)}.ww-note-canvas{background:transparent}.ww-note-canvas .ww-reader{max-width:78ch;font-size:14px;line-height:1.8}.ww-note-canvas .ww-reader :is(h1,h2,h3){font-family:var(--ww-serif);font-weight:600;letter-spacing:.01em}.ww-note-canvas .ww-reader h1{font-size:26px;line-height:1.35}.ww-note-canvas .ww-reader h2{font-size:20px}.ww-directory-separator{background:var(--ww-surface-2)}.ww-graph-controls,.ww-graph-missing{background:var(--ww-raised)}`,
 // 2026-10-27 阅读区两栏：工具条固定在上，正文单独滚动；右侧栏放目录、反链、出链（Obsidian 的用法），正文大标题下面是笔记属性。
-`.ww-note-canvas:not(.ww-graph-mode){display:flex;flex-direction:column;overflow:hidden;padding:0}.ww-note-canvas>.ww-note-toolbar{flex:none;align-items:center;margin:0;padding:8px 12px 8px 20px;border-bottom:1px solid var(--ww-line)}
-.ww-note-body{position:relative;flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr)}.ww-note-body.ww-with-side{grid-template-columns:minmax(0,1fr) clamp(220px,25%,300px)}.ww-note-scroll{min-width:0;min-height:0;overflow:auto;padding:4px 32px 48px}
-.ww-note-side{min-width:0;min-height:0;display:flex;flex-direction:column;border-left:1px solid var(--ww-line);background:var(--ww-surface-2)}.ww-side-overlay>.ww-note-side{position:absolute;top:0;right:0;bottom:0;z-index:3;width:min(300px,88%);background:var(--ww-raised);box-shadow:-18px 0 36px -26px #00000059}
+`.ww-note-canvas{container:ww-note/inline-size}.ww-note-canvas:not(.ww-graph-mode){display:flex;flex-direction:column;overflow:hidden;padding:0}.ww-note-canvas>.ww-note-toolbar{flex:none;align-items:center;margin:0;padding:8px 12px 8px 20px;border-bottom:1px solid var(--ww-line)}
+.ww-note-body{position:relative;flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr)}.ww-note-body.ww-with-side{grid-template-columns:minmax(0,1fr) clamp(13.75rem,25%,18.75rem)}.ww-note-scroll{min-width:0;min-height:0;overflow:auto;padding:4px 32px 48px}
+.ww-note-scroll.ww-note-editing{display:flex;flex-direction:column}.ww-note-scroll.ww-note-editing>*{flex:none}.ww-note-scroll.ww-note-editing>.ww-note-editor{flex:1 0 auto;display:flex;flex-direction:column}.ww-page .ww-note-editor>textarea{flex:1 1 12rem;min-height:12rem;resize:none}
+.ww-note-side{min-width:0;min-height:0;display:flex;flex-direction:column;border-left:1px solid var(--ww-line);background:var(--ww-surface-2)}.ww-side-overlay>.ww-note-side{position:absolute;top:0;right:0;bottom:0;z-index:3;width:min(18.75rem,88%);background:var(--ww-raised);box-shadow:-18px 0 36px -26px #00000059}
 .ww-page .ww-side-toggle{flex:none;display:inline-grid;place-items:center;width:30px;height:30px;min-height:30px;padding:0;border:0;border-radius:8px;background:transparent;color:var(--ww-ink-2)}.ww-page .ww-side-toggle[aria-pressed=true]{background:color-mix(in srgb,var(--ww-brand) 11%,transparent);color:var(--ww-brand)}.ww-page .ww-side-toggle:hover:not(:disabled){background:var(--ww-tint);color:var(--ww-ink)}
 .ww-side-tabs{flex:none;display:flex;gap:2px;margin:10px 10px 6px;padding:3px;border-radius:10px;background:var(--ww-tint)}.ww-page .ww-side-tabs>button{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:4px;min-width:0;height:28px;min-height:28px;padding:0 6px;border:0;border-radius:8px;background:transparent;color:var(--ww-ink-2);font-size:12.5px;white-space:nowrap}.ww-page .ww-side-tabs>button:hover:not(:disabled){background:transparent;color:var(--ww-ink)}.ww-page .ww-side-tabs>button[aria-selected=true]{background:var(--ww-surface);color:var(--ww-ink);font-weight:600;box-shadow:0 1px 2px #0000001f,0 0 0 1px var(--ww-line)}.ww-side-tabs em{font-style:normal;font-size:11px;font-weight:500;color:var(--ww-ink-3);font-variant-numeric:tabular-nums}.ww-side-tabs [aria-selected=true] em{color:var(--ww-brand)}.ww-side-tabs svg{flex:none}
 .ww-side-panel{flex:1;min-height:0;overflow:auto;padding:4px 8px 24px}.ww-side-empty{margin:14px 8px;font-size:12.5px;line-height:1.6;color:var(--ww-ink-3)}
@@ -145,11 +348,31 @@ export const styles = [
 .ww-side-links{display:flex;flex-direction:column;gap:2px}.ww-side-group{display:flex;flex-direction:column;gap:2px;padding-bottom:6px}.ww-page .ww-side-note{display:flex;align-items:flex-start;gap:7px;width:100%;height:auto;min-height:30px;padding:6px 8px;border:0;border-radius:8px;background:transparent;color:var(--ww-ink);font-size:13px;line-height:1.45;text-align:left}.ww-page .ww-side-note:hover:not(:disabled){background:var(--ww-tint)}.ww-side-note>svg{margin-top:2px;color:var(--ww-ink-3)}.ww-side-text{flex:1;min-width:0;display:flex;flex-direction:column}.ww-side-text strong{font-weight:500;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;overflow-wrap:anywhere}.ww-side-text small{margin-top:1px;font-size:11.5px;color:var(--ww-ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ww-side-note em{flex:none;margin-top:1px;font-style:normal;font-size:11px;color:var(--ww-ink-3);font-variant-numeric:tabular-nums}.ww-side-note.ww-unresolved{color:var(--ww-ink-3)}.ww-side-note.ww-unresolved em{padding:0 6px;border-radius:6px;background:var(--ww-tint)}
 .ww-page .ww-side-snippet{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;width:calc(100% - 22px);height:auto;min-height:0;margin-left:22px;padding:4px 8px;border:0;border-left:2px solid var(--ww-line-2);border-radius:0 8px 8px 0;background:transparent;color:var(--ww-ink-2);font-size:12px;line-height:1.55;text-align:left;overflow-wrap:anywhere}.ww-page .ww-side-snippet:hover:not(:disabled){background:var(--ww-tint);border-left-color:var(--ww-brand);color:var(--ww-ink)}.ww-side-snippet .ww-tag{height:18px;font-size:11px}
 .ww-note-props{margin:4px 0 24px;padding:9px 14px 11px;border:1px solid var(--ww-line);border-radius:12px;background:var(--ww-tint);font-size:13px;line-height:1.6}.ww-note-props>summary{display:flex;align-items:center;gap:7px;cursor:pointer;list-style:none;color:var(--ww-ink-2);font-size:12.5px;font-weight:500}.ww-note-props>summary::-webkit-details-marker{display:none}.ww-note-props>summary::before{content:"";width:5px;height:5px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);transition:transform .15s}.ww-note-props[open]>summary::before{transform:rotate(45deg)}
-.ww-note-props dl{display:grid;grid-template-columns:minmax(64px,max-content) minmax(0,1fr);gap:4px 18px;margin:10px 0 0}.ww-note-props dt{color:var(--ww-ink-3);font-size:12.5px;line-height:22px}.ww-note-props dd{display:flex;flex-wrap:wrap;gap:2px 12px;min-width:0;margin:0;color:var(--ww-ink);line-height:22px;overflow-wrap:anywhere}.ww-prop-empty{color:var(--ww-ink-3)}
+.ww-note-props dl{display:grid;grid-template-columns:minmax(4rem,max-content) minmax(0,1fr);gap:4px 18px;margin:10px 0 0}.ww-note-props dt{color:var(--ww-ink-3);font-size:12.5px;line-height:22px}.ww-note-props dd{display:flex;flex-wrap:wrap;gap:2px 12px;min-width:0;margin:0;color:var(--ww-ink);line-height:22px;overflow-wrap:anywhere}.ww-prop-empty{color:var(--ww-ink-3)}
 .ww-page .ww-reader button.ww-unresolved{color:var(--ww-ink-3)!important;text-decoration:underline dashed;text-underline-offset:3px}.ww-page .ww-reader button:hover:not(:disabled){text-decoration:underline;text-underline-offset:3px}
 @keyframes ww-flash{0%,35%{background:color-mix(in srgb,var(--ww-brand) 18%,transparent)}100%{background:transparent}}.ww-reader .ww-flash{border-radius:6px;animation:ww-flash 2s ease-out}
-@media(max-width:1100px){.ww-note-scroll{padding:4px 20px 40px}}@media(max-width:520px){.ww-note-scroll{padding:4px 12px 32px}.ww-note-canvas>.ww-note-toolbar{padding:6px 8px 6px 12px}}
-@media(prefers-reduced-motion:reduce){.ww-reader .ww-flash{animation-duration:.01s}.ww-note-props>summary::before{transition:none}}`
+@container ww-note (max-width:37.5rem){.ww-note-scroll{padding:4px 20px 40px}}@container ww-note (max-width:20rem){.ww-note-scroll{padding:4px 12px 32px}.ww-note-canvas>.ww-note-toolbar{padding:6px 8px 6px 12px}.ww-note-toolbar .ww-row button{padding:4px 6px}}
+@media(prefers-reduced-motion:reduce){.ww-reader .ww-flash{animation-duration:.01s}.ww-note-props>summary::before{transition:none}}`,
+`.ww-note-tree.ww-with-libraries{display:flex;flex-direction:column;overflow:hidden;padding-bottom:0}.ww-note-tree.ww-with-libraries>.ww-tree-scroll{flex:1;min-height:0;overflow:auto}.ww-library-switch{flex:none;border-top:1px solid var(--dsw-alias-border-l1);margin:6px -7px 0;padding:6px 7px}.ww-library-switch .ww-action-menu{display:block}.ww-library-switch .ww-library-trigger{width:100%;justify-content:flex-start;gap:7px;padding:6px 8px;font-size:12px;color:var(--dsw-alias-label-primary);overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.ww-library-switch .ww-library-trigger:hover{background:var(--dsw-alias-interactive-bg-hover)}.ww-menu-surface .ww-menu-heading{margin:8px 10px 2px;font-size:12px;color:var(--dsw-alias-label-tertiary)}.ww-menu-surface .ww-library-option{display:grid;gap:1px}.ww-library-option>span{display:flex;align-items:center;gap:6px}.ww-library-option>span>svg{margin-left:auto;color:var(--dsw-alias-brand-primary,currentColor)}.ww-library-option em{font-style:normal;font-size:11px;padding:0 6px;border-radius:5px;background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}.ww-library-option small{color:var(--dsw-alias-label-tertiary);font-size:12px}.ww-space-empty{padding:6px 8px;font-size:12px}.ww-submit-note{display:grid;gap:2px;padding:10px 12px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px}.ww-submit-note strong{font-family:var(--dsw-alias-font-serif,serif)}.ww-submit-note span{font-size:12px;overflow-wrap:anywhere}`,
+`.ww-graph-workspace{position:relative}.ww-graph-tools{position:absolute;right:10px;top:10px;display:flex;flex-direction:column;gap:6px;z-index:3}.ww-page button.ww-graph-tool{width:32px;height:32px;min-height:32px;display:grid;place-items:center;padding:0;border-radius:10px;border:1px solid var(--ww-line-2);background:color-mix(in srgb,var(--ww-surface) 88%,transparent);color:var(--ww-ink-2)}.ww-page button.ww-graph-tool:hover:not(:disabled){background:var(--ww-hover);color:var(--ww-ink)}.ww-page button.ww-graph-tool[aria-pressed=true]{background:var(--ww-tint);border-color:transparent;color:var(--ww-ink)}.ww-graph-settings{position:absolute;right:52px;top:10px;z-index:4;width:min(19rem,calc(100% - 64px));max-height:calc(100% - 20px);overflow:auto;background:var(--ww-surface);border:1px solid var(--ww-line-2);border-radius:14px;box-shadow:var(--dsw-elevation-prominent);color:var(--ww-ink);font-size:13px}.ww-graph-settings>header{display:flex;align-items:center;gap:4px;padding:10px 10px 6px 14px;position:sticky;top:0;background:var(--ww-surface);z-index:1}.ww-graph-settings>header h3{flex:1;margin:0;font-family:var(--ww-serif);font-size:15px;font-weight:600}.ww-page button.ww-graph-close{width:26px;height:26px;min-height:26px;display:grid;place-items:center;padding:0;border:0;border-radius:7px;background:transparent;color:var(--ww-ink-3)}.ww-page button.ww-graph-close:hover{background:var(--ww-hover);color:var(--ww-ink)}.ww-graph-section{border-top:1px solid var(--ww-line)}.ww-page .ww-graph-settings button.ww-graph-section-head{display:flex;align-items:center;justify-content:flex-start;gap:6px;width:100%;height:auto;min-height:0;padding:9px 14px;border:0;border-radius:0;box-shadow:none;background:transparent;color:var(--ww-ink);font-weight:500;text-align:left}.ww-page .ww-graph-settings button.ww-graph-section-head:hover{background:var(--ww-hover)}.ww-graph-section-body{display:grid;gap:10px;padding:2px 14px 14px}.ww-graph-filter{min-width:0}.ww-graph-filter input{font-size:12px}.ww-graph-chips{display:flex;flex-wrap:wrap;gap:6px}.ww-graph-chips .ww-chip{height:26px;min-height:26px;padding:0 10px;font-size:12px}.ww-graph-group{display:grid;grid-template-columns:22px minmax(0,1fr) 26px;gap:6px;align-items:center}.ww-graph-group input[type=color]{width:22px;height:22px;padding:0;border:1px solid var(--ww-line-2);border-radius:50%;background:none;cursor:pointer;overflow:hidden}.ww-graph-group input[type=color]::-webkit-color-swatch-wrapper{padding:0}.ww-graph-group input[type=color]::-webkit-color-swatch{border:0;border-radius:50%}.ww-graph-group input:not([type=color]){min-width:0;height:28px;padding:0 8px;border:1px solid var(--ww-line-2);border-radius:8px;background:transparent;color:var(--ww-ink);font-size:12px}.ww-graph-add{display:inline-flex;align-items:center;gap:4px;justify-self:start}.ww-page .ww-graph-settings label.ww-graph-slider{display:grid;grid-template-columns:minmax(0,1fr) 3.2em;gap:2px 8px;align-items:center;justify-items:stretch;text-align:left;margin:0;color:var(--ww-ink-2);font-size:12px}.ww-graph-settings .ww-graph-slider>span{grid-column:1/-1}.ww-graph-settings .ww-graph-slider input{width:auto;min-width:0;margin:0;accent-color:light-dark(#3e9bd6,#63bdf0)}.ww-graph-settings .ww-graph-slider output{text-align:right;font-variant-numeric:tabular-nums;color:var(--ww-ink)}.ww-graph-growth{position:absolute;left:14px;bottom:12px;z-index:3;display:grid;gap:3px;min-width:min(15rem,calc(100% - 28px));padding:8px 12px 10px;border-radius:12px;background:color-mix(in srgb,var(--ww-surface) 86%,transparent);pointer-events:none}.ww-graph-growth strong{font-family:var(--ww-serif);font-size:24px;line-height:1.15;font-variant-numeric:tabular-nums}.ww-graph-growth span{color:var(--ww-ink-2);font-size:12px;font-variant-numeric:tabular-nums}.ww-graph-growth i{display:block;height:2px;border-radius:2px;background:var(--ww-line);overflow:hidden;margin-top:4px}.ww-graph-growth b{display:block;height:100%;background:light-dark(#3e9bd6,#63bdf0);transition:width .1s linear}@media(prefers-reduced-motion:reduce){.ww-graph-growth b{transition:none}}`,
+// 2026-11-11 知识积累对标 Obsidian 的布局，样子是鲸翼自己的：左侧功能条、左栏“文件 / 搜索”、中间胶囊页签和状态栏、右栏六页、快速切换、空白页签；窄时左右两栏浮出来。
+`.ww-knowledge-split{position:relative}.ww-note-canvas,.ww-note-canvas.ww-graph-mode{display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;padding:0}
+.ww-kn-ribbon{display:flex;flex-direction:column;align-items:center;gap:4px;min-height:0;padding:10px 0;border-right:1px solid var(--ww-line);background:var(--ww-surface-2)}.ww-kn-ribbon-end{margin-top:auto;display:flex;flex-direction:column;align-items:center;gap:4px}
+.ww-page button.ww-kn-icon{flex:none;display:inline-grid;place-items:center;width:30px;height:30px;min-height:30px;padding:0;border:0;border-radius:9px;background:transparent;color:var(--ww-ink-2);box-shadow:none}.ww-page button.ww-kn-icon:hover:not(:disabled){background:var(--ww-hover);color:var(--ww-ink)}.ww-page button.ww-kn-icon:active:not(:disabled){transform:scale(.94)}.ww-page button.ww-kn-icon[aria-pressed=true]{background:var(--ww-tint);color:light-dark(#2f86c0,#63bdf0)}.ww-page button.ww-kn-icon:disabled{opacity:.38}.ww-kn-ribbon .ww-icon-button{width:30px;height:30px;min-height:30px}
+.ww-note-tree{display:flex;flex-direction:column;min-height:0;overflow:hidden;padding:0}.ww-note-tree>.ww-side-tabs{margin:10px 10px 4px}.ww-kn-tools{flex:none;display:flex;align-items:center;gap:2px;padding:2px 8px 4px 14px}.ww-kn-tools>span{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:11.5px;letter-spacing:.04em;color:var(--ww-ink-3)}.ww-note-tree .ww-tree-scroll{flex:1;min-height:0;overflow:auto;padding:2px 7px 12px}
+.ww-kn-search{flex:1;min-height:0;display:flex;flex-direction:column;gap:6px;padding:4px 8px 0}.ww-kn-search>.ww-search{flex:none}.ww-note-tree .ww-kn-search>.ww-tree-scroll{padding:2px 0 12px}
+.ww-note-tree.ww-overlay{position:absolute;z-index:5;top:0;bottom:0;left:44px;width:min(18rem,calc(100% - 60px));background:var(--ww-raised);border-right:1px solid var(--ww-line);box-shadow:18px 0 36px -26px #00000059}.ww-note-side.ww-overlay{position:absolute;z-index:5;top:0;right:0;bottom:0;width:min(18.75rem,88%);background:var(--ww-raised);box-shadow:-18px 0 36px -26px #00000059}.ww-kn-scrim{position:absolute;inset:0;z-index:4}
+.ww-kn-tabstrip{flex:none;display:flex;align-items:center;gap:4px;min-height:42px;padding:6px 8px;border-bottom:1px solid var(--ww-line);background:var(--ww-surface-2)}.ww-kn-tabs{flex:1;min-width:0;display:flex;align-items:center;gap:4px;overflow-x:auto;scrollbar-width:none}.ww-kn-tabs::-webkit-scrollbar{display:none}
+.ww-kn-tab{flex:0 1 11.5rem;min-width:6rem;height:30px;display:flex;align-items:center;border:1px solid transparent;border-radius:999px;color:var(--ww-ink-2);transition:background .15s,border-color .15s}.ww-kn-tab:hover{background:var(--ww-hover)}.ww-kn-tab.ww-active{background:var(--ww-raised);border-color:var(--ww-line);color:var(--ww-ink);box-shadow:0 1px 2px #00000012}
+.ww-page button.ww-kn-tab-main{flex:1;min-width:0;display:flex;align-items:center;gap:6px;height:100%;min-height:0;padding:0 2px 0 12px;border:0;border-radius:999px;background:transparent;color:inherit;font-size:12.5px;box-shadow:none;text-align:left}.ww-page button.ww-kn-tab-main:hover:not(:disabled){background:transparent}.ww-kn-tab-main>span{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.ww-kn-tab.ww-active .ww-kn-tab-main>span{font-weight:600}.ww-kn-tab-main>svg{flex:none;color:light-dark(#2f86c0,#63bdf0)}.ww-kn-dot{flex:none;width:6px;height:6px;border-radius:50%;background:light-dark(#3e9bd6,#63bdf0)}
+.ww-page button.ww-kn-tab-close{flex:none;display:inline-grid;place-items:center;width:20px;height:20px;min-height:20px;margin-right:5px;padding:0;border:0;border-radius:999px;background:transparent;color:var(--ww-ink-3);box-shadow:none;opacity:0}.ww-kn-tab:hover .ww-kn-tab-close,.ww-kn-tab.ww-active .ww-kn-tab-close,.ww-page button.ww-kn-tab-close:focus-visible{opacity:1}.ww-page button.ww-kn-tab-close:hover:not(:disabled){background:var(--ww-hover);color:var(--ww-ink)}@media (hover:none){.ww-page button.ww-kn-tab-close{opacity:1}}
+.ww-kn-status{flex:none;display:flex;justify-content:flex-end;align-items:center;gap:14px;min-height:26px;padding:0 14px;border-top:1px solid var(--ww-line);background:var(--ww-surface-2);font-size:11.5px;color:var(--ww-ink-3);white-space:nowrap;overflow:hidden}
+.ww-page .ww-note-side .ww-side-tabs>button{position:relative;padding:0}.ww-page .ww-note-side .ww-side-tabs>button>em{position:absolute;top:0;right:1px;min-width:14px;height:14px;padding:0 3px;border-radius:7px;background:var(--ww-tint);color:var(--ww-ink-2);font-size:9.5px;font-style:normal;font-weight:600;line-height:14px}
+.ww-side-head{flex:none;display:flex;align-items:center;gap:8px;min-height:30px;padding:2px 10px 4px 16px}.ww-side-head h3{margin:0;font-family:var(--ww-serif);font-size:15px;font-weight:600;color:var(--ww-ink)}.ww-side-head>span{font-size:12px;color:var(--ww-ink-3)}.ww-side-head>button{margin-left:auto}
+.ww-side-panel.ww-side-local{display:flex;flex-direction:column;padding:4px 8px 8px}.ww-side-local>.ww-graph-canvas{flex:none;height:clamp(15rem,62%,26rem);border-radius:12px;overflow:hidden;background:var(--ww-surface);box-shadow:0 0 0 1px var(--ww-line)}
+.ww-side-local>.ww-side-empty{margin:10px 6px}.ww-kn-searching{display:flex;align-items:center;gap:8px;margin:6px 4px 8px;font-size:12px;color:var(--ww-ink-3)}.ww-side-tagged{display:flex;flex-direction:column;gap:2px}.ww-page .ww-side-snippet.ww-side-action{display:flex;align-items:center;gap:6px;color:light-dark(#2f86c0,#63bdf0)}div.ww-side-note.ww-side-facet{display:flex;align-items:center;gap:7px;padding:5px 8px;color:var(--ww-ink-2)}
+.ww-kn-empty{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:24px;text-align:center;overflow:auto}.ww-kn-empty h3{margin:0;font-family:var(--ww-serif);font-size:22px;font-weight:600;color:var(--ww-ink)}.ww-kn-empty>p{margin:0 0 6px}.ww-kn-empty-actions{display:flex;flex-direction:column;gap:4px;width:min(15rem,100%)}.ww-page .ww-kn-empty-actions>button{justify-content:flex-start;gap:8px}
+@media(prefers-reduced-motion:reduce){.ww-kn-tab{transition:none}.ww-page button.ww-kn-icon:active:not(:disabled){transform:none}}`,
 ];
 
 // 专属错误只解释本领域；输入原文与公共运输错误由共用呈现机制处理。
@@ -169,6 +392,14 @@ export const errors = {
   "EXTENSION_NOTE_READ": [
     "扩展没能读出这篇笔记（扩展问题）",
     "稍后重试；仍不行请检查提供它的扩展是否正常"
+  ],
+  "EXTENSION_NOTE_SAVE": [
+    "扩展没有保存这篇笔记（扩展问题）",
+    "草稿还在；稍后再点保存，仍不行请检查提供它的扩展是否连得上"
+  ],
+  "EXTENSION_NOTE_SUBMIT": [
+    "扩展没有收下这篇笔记（扩展问题）",
+    "稍后重试；仍不行请检查提供它的扩展是否连得上"
   ],
   "SOURCE_CONFIG": [
     "插件没找到可用的配置目录或知识库位置（DSH 设置问题）",

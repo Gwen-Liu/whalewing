@@ -41,22 +41,58 @@ export function apply(ctx) {
     },
   });
   source.set(experts);
+  // 三个知识空间照组织树从近到远：自己所在的那一层（能维护）、上一层公有的、企业公有的。
+  // 维护人改的内容只记在内存里，不写回仓库里的夹具文件。
+  const spaces = [
+    { id: 'impl', name: '实施组', group: '我所在 · 实施组', note: '新客户上线项目 / 实施组', editable: true },
+    { id: 'project', name: '项目公共知识', group: '上层公有 · 新客户上线项目', note: '新客户上线项目' },
+    { id: 'company', name: '公司公共知识', group: '企业公有', note: '企业' },
+  ];
+  const edited = new Map();
+  const contentOf = async file => edited.get(file) ?? readFile(path.join(notesRoot, ...file.split('/')), 'utf8');
+  const hashOf = content => String(content.length);
+  const titleOf = (file, content) => content.match(/^#\s+(.+?)\s*$/m)?.[1] ?? path.posix.basename(file, '.md');
+  const allFiles = async () => [...new Set([...await notes(), ...edited.keys()])];
   ctx.whalewing.knowledge.registerSource(ctx, {
     label,
     async search(query, { signal }) {
       const tokens = query.toLocaleLowerCase().split(/\s+/).filter(Boolean);
       const matches = [];
-      for (const file of await notes()) {
+      for (const file of await allFiles()) {
         signal.throwIfAborted();
-        const content = await readFile(path.join(notesRoot, ...file.split('/')), 'utf8');
-        if (tokens.every(token => `${file}\n${content}`.toLocaleLowerCase().includes(token))) matches.push({ path: file, title: path.posix.basename(file, '.md'), excerpt: content.replace(/^---[\s\S]*?---\s*/, '').slice(0, 200), hash: String(content.length) });
+        const content = await contentOf(file);
+        if (tokens.every(token => `${file}\n${content}`.toLocaleLowerCase().includes(token))) matches.push({ path: file, title: titleOf(file, content), excerpt: content.replace(/^---[\s\S]*?---\s*/, '').slice(0, 200), hash: hashOf(content) });
       }
       return { notes: matches, total: matches.length, truncated: false };
     },
     async read(file) {
       const absolutePath = path.join(notesRoot, ...file.split('/'));
-      const content = await readFile(absolutePath, 'utf8');
-      return { path: file, content, hash: String(content.length), absolutePath };
+      const content = await contentOf(file);
+      return { path: file, content, hash: hashOf(content), ...(edited.has(file) ? {} : { absolutePath }), editable: Boolean(spaces.find(space => file.startsWith(`${space.id}/`))?.editable) };
     },
+    async list() {
+      const files = await allFiles();
+      return { spaces: await Promise.all(spaces.map(async space => ({ ...space, notes: await Promise.all(files.filter(file => file.startsWith(`${space.id}/`)).map(async file => ({ path: file, title: titleOf(file, await contentOf(file)) }))) }))) };
+    },
+    async save({ path: file, content, expectedHash }) {
+      if (!spaces.find(space => file.startsWith(`${space.id}/`))?.editable) throw Object.assign(new Error('你不是这个知识空间的维护人'), { code: 'FORBIDDEN' });
+      const current = (await allFiles()).includes(file) ? hashOf(await contentOf(file)) : '';
+      if (current !== expectedHash) throw Object.assign(new Error('这篇刚被别人改过'), { code: 'CONFLICT' });
+      edited.set(file, content);
+      return { path: file, hash: hashOf(content) };
+    },
+    async submit({ space }) {
+      const target = spaces.find(item => item.id === space);
+      if (!target) throw Object.assign(new Error('没有这个知识空间'), { code: 'NOT_FOUND' });
+      return target.editable ? { applied: true, message: `已放进「${target.name}」（测试夹具，没有真的发出去）` } : { applied: false, message: `已提交，等「${target.name}」的负责人审核（测试夹具，没有真的发出去）` };
+    },
+  });
+  // 团队沉淀：每天北京时间 02:00 读前一天的对话。测试夹具不交给任何服务端，模型只在会话里写结果。
+  // 旧版鲸翼没有这个接口时跳过，夹具的其它部分照常能用。
+  ctx.whalewing.schedule?.registerTask(ctx, {
+    id: 'daily-digest', title: '团队沉淀',
+    description: '每天把前一天和工作有关的内容整理成一篇沉淀（测试夹具，不交给服务端）',
+    daily: { time: '02:00' }, readSessions: true,
+    prompt: '把还没处理的那天（北京时间）和工作有关的对话整理成一篇 Markdown 沉淀，直接写在回复里；只写工作内容，不写私事和账号。这是测试夹具，不交给任何服务端。',
   });
 }

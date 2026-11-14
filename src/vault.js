@@ -199,6 +199,28 @@ function propertyLinks(fm, start) {
   return { links, properties };
 }
 
+// 关系图谱用的标签：属性里的 tags 加正文里的 #标签（跳过代码块和行内代码；纯数字、网址里的 # 不算），最多 50 个。
+const inlineTag = /(^|[\s(（，。、；：！？])#([\p{L}\p{N}_\-/]*[\p{L}_\-/][\p{L}\p{N}_\-/]*)/gu;
+function noteTags(value, body) {
+  const tags = new Set();
+  const add = tag => { const clean = String(tag).trim().replace(/^#/, ''); if (clean && clean.length <= 60 && !/^\d+$/.test(clean)) tags.add(clean); };
+  if (typeof value === 'string') value.split(/[,\s]+/).forEach(add);
+  else if (Array.isArray(value)) value.filter(item => typeof item === 'string' || typeof item === 'number').forEach(add);
+  let fenced = false;
+  for (const line of body.split('\n')) {
+    if (/^\s*(```|~~~)/.test(line)) { fenced = !fenced; continue; }
+    if (fenced) continue;
+    for (const match of line.replace(/`[^`]*`/g, ' ').matchAll(inlineTag)) add(match[2]);
+  }
+  return [...tags].slice(0, 50);
+}
+
+// 建立日期：属性 created，没有就取文件名里的日期；生长动画按它一篇篇长出来。
+function noteCreated(value, file) {
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10);
+  return /(\d{4}-\d{2}-\d{2})/.exec(path.posix.basename(file))?.[1] ?? '';
+}
+
 function parseRecord(record) {
   let body = record.content.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n'), metadata = {}, lineOffset = 0, fm = null;
   try {
@@ -209,7 +231,7 @@ function parseRecord(record) {
   const parsed = parseLinks(body, lineOffset);
   parsed.properties = [];
   if (fm) { const extra = propertyLinks(fm, parsed.links.length); parsed.links.push(...extra.links); parsed.properties = extra.properties; }
-  return { ...record, title: path.posix.basename(record.path, '.md'), aliases: Array.isArray(metadata.aliases) ? metadata.aliases.filter(item => typeof item === 'string') : [], parsed };
+  return { ...record, title: path.posix.basename(record.path, '.md'), aliases: Array.isArray(metadata.aliases) ? metadata.aliases.filter(item => typeof item === 'string') : [], created: noteCreated(metadata.created, record.path), tags: noteTags(metadata.tags, body), parsed };
 }
 
 // \u53CD\u94FE\u65C1\u8FB9\u663E\u793A\u94FE\u63A5\u6240\u5728\u90A3\u4E00\u884C\u7684\u5927\u610F\uFF1A\u53BB\u6389\u5217\u8868\u3001\u6807\u9898\u7B49\u8BB0\u53F7\uFF0C\u94FE\u63A5\u53EA\u7559\u663E\u793A\u6587\u5B57\uFF08\u6CA1\u5199\u522B\u540D\u7684\u53EA\u7559\u7B14\u8BB0\u540D\uFF0C\u6807\u9898\u5B9A\u4F4D\u5199\u6210\u201C\u7B14\u8BB0 \u203A \u6807\u9898\u201D\uFF09\u3002
@@ -232,7 +254,7 @@ function unlinkedView(node) {
 export function sourceDocument(note) {
   const current = parseRecord(note);
   const properties = current.parsed.properties.map(({ key, values }) => ({ key, values: values.map(({ text }) => ({ text })) }));
-  return { path: note.path, content: note.content, hash: note.hash, readOnly: true, source: note.source, view: unlinkedView(current.parsed.view), links: [], anchors: current.parsed.anchors, properties, backlinks: [], totalBacklinks: 0 };
+  return { path: note.path, content: note.content, hash: note.hash, readOnly: note.readOnly !== false, source: note.source, view: unlinkedView(current.parsed.view), links: [], anchors: current.parsed.anchors, properties, backlinks: [], totalBacklinks: 0 };
 }
 
 async function exists(file) {
@@ -648,30 +670,36 @@ export class Vault {
     const tokens = query.toLocaleLowerCase().trim().split(/\s+/).filter(Boolean);
     const notes = [];
     let total = 0;
-    for (const name of await this.files(signal)) {
+    const names = (await this.files(signal)).filter(name => !name.startsWith('90-归档/'));
+    // 有界并行读（和建索引一样一批 8 个，整批读完才往下走，不留后台读取），仍按原顺序处理：
+    // 大库边敲边搜时一次搜索不用等好几秒（2026-11-11）。
+    const batches = [];
+    for (let offset = 0; offset < names.length; offset += 8) batches.push(names.slice(offset, offset + 8));
+    for (const batch of batches) {
       abort(signal);
-      if (name.startsWith('90-归档/')) continue;
-      let record;
-      try { record = await this.read(name); }
-      catch (error) {
-        if (!['ENCODING', 'SIZE', 'NOT_FOUND'].includes(error.code)) throw error;
-        if (!tokens.every(token => name.toLocaleLowerCase().includes(token))) continue;
+      const results = await Promise.all(batch.map(name => this.read(name).then(record => ({ name, record }), error => ({ name, error }))));
+      abort(signal);
+      for (const { name, record, error } of results) {
+        if (error) {
+          if (!['ENCODING', 'SIZE', 'NOT_FOUND'].includes(error.code)) throw error;
+          if (!tokens.every(token => name.toLocaleLowerCase().includes(token))) continue;
+          total++;
+          if (notes.length < this.limits.maxResults) notes.push({ path: name, title: path.posix.basename(name, '.md'), type: 'invalid', status: readOnlyNote(name) ? '只读' : '待修复', excerpt: error.message, issue: error.message, hash: '', readOnly: readOnlyNote(name) });
+          continue;
+        }
+        const haystack = `${name}\n${record.content}`.toLocaleLowerCase();
+        if (!tokens.every(x => haystack.includes(x))) continue;
         total++;
-        if (notes.length < this.limits.maxResults) notes.push({ path: name, title: path.posix.basename(name, '.md'), type: 'invalid', status: readOnlyNote(name) ? '只读' : '待修复', excerpt: error.message, issue: error.message, hash: '', readOnly: readOnlyNote(name) });
-        continue;
+        if (notes.length >= this.limits.maxResults) continue;
+        let metadata;
+        try { metadata = !name.includes('/') ? { title: name.replace(/\.md$/i, ''), type: 'root', status: '只读' } : validateNote(record.content, name); }
+        catch (error) {
+          // 保留损坏笔记的可发现性，便于员工原位修复。
+          metadata = { title: path.posix.basename(name, '.md'), type: 'invalid', status: '待修复', issue: error.message };
+        }
+        const position = tokens.length ? Math.max(0, record.content.toLocaleLowerCase().indexOf(tokens[0]) - 50) : 0;
+        notes.push({ path: name, ...metadata, excerpt: record.content.slice(position, position + 240), hash: record.hash, readOnly: record.readOnly });
       }
-      const haystack = `${name}\n${record.content}`.toLocaleLowerCase();
-      if (!tokens.every(x => haystack.includes(x))) continue;
-      total++;
-      if (notes.length >= this.limits.maxResults) continue;
-      let metadata;
-      try { metadata = !name.includes('/') ? { title: name.replace(/\.md$/i, ''), type: 'root', status: '只读' } : validateNote(record.content, name); }
-      catch (error) {
-        // 保留损坏笔记的可发现性，便于员工原位修复。
-        metadata = { title: path.posix.basename(name, '.md'), type: 'invalid', status: '待修复', issue: error.message };
-      }
-      const position = tokens.length ? Math.max(0, record.content.toLocaleLowerCase().indexOf(tokens[0]) - 50) : 0;
-      notes.push({ path: name, ...metadata, excerpt: record.content.slice(position, position + 240), hash: record.hash, readOnly: record.readOnly });
     }
     return { notes, truncated: total > notes.length, total };
   }
@@ -755,7 +783,11 @@ export class Vault {
       }
       pairs.set(JSON.stringify([record.path, target]), { source: record.path, target });
     }
-    const allNodes = [...records.map(record => ({ kind: 'note', path: record.path, title: record.title, readOnly: record.readOnly, aliases: record.aliases })), ...missing.values()];
+    // 员工在界面上看的全库图（2026-11-10 起）：什么都不替员工藏，归档、模板、没有连线的都给，
+    // 另带建立日期、标签和附件，界面按图谱设置自己筛选、上色、播放生长动画。模型调用照旧分页、照旧藏。
+    const full = whole && !args.path;
+    const extra = record => full ? { created: record.created, tags: record.tags, attachments: [...new Set(record.links.filter(link => link.status === 'attachment').map(link => link.target))].slice(0, 50) } : {};
+    const allNodes = [...records.map(record => ({ kind: 'note', path: record.path, title: record.title, readOnly: record.readOnly, aliases: record.aliases, ...extra(record) })), ...missing.values()];
     // 连接度来自完整索引，不随筛选或分页改变；重复、双向和同篇引用不增加邻居数。
     const neighbors = new Map(allNodes.map(record => [record.path, new Set()]));
     for (const edge of pairs.values()) {
@@ -770,8 +802,8 @@ export class Vault {
       if (!selected.has(center)) fail('NOT_FOUND', '当前笔记已不存在，请回读后继续');
       selected = new Set([center]);
       for (const edge of pairs.values()) if (edge.source === center || edge.target === center) { selected.add(edge.source); selected.add(edge.target); }
-    } else {
-      // 全库图照第二大脑的 Obsidian 图谱（2026-10-30）：不画归档和模板，也不画在图上没有连线的笔记；
+    } else if (!full) {
+      // 模型调用的全库图照第二大脑的 Obsidian 图谱（2026-10-30）：不画归档和模板，也不画在图上没有连线的笔记；
       // 当前笔记关系图不藏。藏了多少篇写进结果，界面和模型都不会把这张图当成全部。
       hidden = { archive: 0, templates: 0, orphans: 0 };
       for (const node of allNodes) {
@@ -792,6 +824,28 @@ export class Vault {
     const allEdges = [...pairs.values()].filter(edge => selected.has(edge.source) && selected.has(edge.target));
     const edges = allEdges.filter(edge => visible.has(edge.source) && visible.has(edge.target));
     return { version: 2, nodes, edges, total: filtered.length, offset, truncated: nodes.length < filtered.length, omittedEdges: allEdges.length - edges.length, unresolved: records.reduce((sum, record) => sum + record.links.filter(link => !['resolved', 'attachment'].includes(link.status)).length, 0), ...(hidden ? { hidden } : {}) };
+  }
+
+  /**
+   * 知识积累的总览（2026-11-11）：全部笔记的名字、别名和建立日期（快速切换用），每个标签用在几篇、
+   * 每个属性出现在几篇（右栏“标签”“属性”用）。只给员工的界面用；归档、模板也算，和关系图谱一样什么都不藏。
+   */
+  async overview(signal) {
+    const records = await this.index(signal);
+    const tags = new Map(), properties = new Map();
+    const notes = records.map(record => {
+      abort(signal);
+      for (const tag of record.tags) {
+        const entry = tags.get(tag) || { name: tag, count: 0, notes: [] };
+        entry.count += 1;
+        if (entry.notes.length < 50) entry.notes.push(record.path);
+        tags.set(tag, entry);
+      }
+      for (const { key } of record.parsed.properties || []) properties.set(key, (properties.get(key) || 0) + 1);
+      return { path: record.path, title: record.title, aliases: record.aliases.slice(0, 20), created: record.created };
+    });
+    const byCount = (a, b) => b.count - a.count || a.name.localeCompare(b.name, 'zh');
+    return { notes, tags: [...tags.values()].sort(byCount), properties: [...properties].map(([name, count]) => ({ name, count })).sort(byCount) };
   }
 
   async validate(signal) {

@@ -1,4 +1,4 @@
-// 知识卡片的测试数据：历史日报（每日资讯、AI 使用技巧）在启动前用 DSH 自己的存储组件写进临时 DSH_HOME，
+// 每日阅读的测试数据：历史日报（每日资讯、AI 使用技巧）在启动前用 DSH 自己的存储组件写进临时 DSH_HOME，
 // 和插件运行时读的是同一个存储域；电子书在测试里现做 TXT（UTF-8、GBK 两种编码），走界面导入。不联网。
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -47,24 +47,25 @@ const categories = ['model', 'agent', 'opensource', 'media', 'research'];
 export const newsTitle = (fieldName, date, i) => `${fieldName} ${date} 第 ${i + 1} 条测试资讯`;
 export const tipTitle = (date, i) => `${date} 第 ${i + 1} 条测试技巧：先列清单再动手`;
 
-function item({ fieldId, fieldName, date, i, tips }) {
+function item({ fieldId, fieldName, date, i, tips, related }) {
   const url = `https://example.com/${fieldId}/${date}/${i + 1}`;
   const source = feedSource(i % 2 ? '测试来源乙' : '测试来源甲');
   const title = tips ? tipTitle(date, i) : newsTitle(fieldName, date, i);
   return {
     category: categories[i % categories.length], label: 'official', title, link: url,
     brief: tips ? `${date} 第 ${i + 1} 条的做法：把任务拆成三步，每步写清楚输入和输出。` : `${date} 第 ${i + 1} 条的一句话说明。`,
-    relevance: tips ? '' : '测试用的关联说明', eventKey: `${fieldId}-${date}-${i}`,
+    // related 给了就只有这几条写关联（照员工情况挑的日报）；没给时每条都带一句，和改版前的旧日报一样。
+    relevance: tips ? '' : related ? (related.includes(i) ? `第 ${i + 1} 条和你手上的事有关。` : '') : '测试用的关联说明', eventKey: `${fieldId}-${date}-${i}`,
     sources: [{ id: createHash('sha256').update(url).digest('hex'), title: `原文标题 ${date} ${i + 1}`, url, publishedAt: `${shiftDate(date, -1)}T12:00:00.000Z`, eventTime: null, collectedAt: cutoffOf(date), excerpt: '测试正文摘要。', source }],
   };
 }
 
-function report({ fieldId, fieldName, date, count, status = 'complete', tips = false }) {
+export function report({ fieldId, fieldName, date, count, status = 'complete', tips = false, personal = false, related, week }) {
   const sourceStatus = [{ ...feedSource('测试来源甲'), status: 'ok', candidates: count }];
   if (status === 'partial') sourceStatus.push({ ...feedSource('测试来源丙'), status: 'failed', message: '测试：来源超时' });
   return {
     fieldId, fieldName, fieldRevision: 1, start: cutoffOf(shiftDate(date, -1)), cutoff: cutoffOf(date), sessionId: 'e2e-news-session', completedAt: cutoffOf(date),
-    items: Array.from({ length: count }, (_, i) => item({ fieldId, fieldName, date, i, tips })), sourceStatus, status, coverage: '功能测试数据',
+    items: Array.from({ length: count }, (_, i) => item({ fieldId, fieldName, date, i, tips, related })), sourceStatus, status, coverage: '功能测试数据', ...(personal ? { personal: true } : {}), ...(week ? { week } : {}),
   };
 }
 
@@ -87,6 +88,19 @@ export async function seedCardsNews(home, plan, profile = 'e2e') {
     await put(report(plan.stale));
     for (const day of plan.tips) await put(report({ fieldId: 'ai-tips', fieldName: 'AI 使用技巧', ...day, tips: true }));
     await fields.put(plan.stale.fieldId, { id: plan.stale.fieldId, revision: 1, deleted: false, name: plan.stale.fieldName, focus: '功能测试用的领域，只有上一期日报。', enabled: true, sources: [feedSource('测试来源甲', { url: 'https://example.com/stale/feed.xml' })] });
+    await domain.close();
+  } finally { await ctx.fiber.dispose(); }
+}
+
+/** 把任意几期日报写进资讯存储域；fields 是要另外登记的自建领域（id、name）。和 seedCardsNews 同一个存储域。 */
+export async function seedReports(home, reports, { fields = [], profile = 'e2e' } = {}) {
+  const directory = await fs.realpath(path.join(home, 'profiles', profile));
+  const ctx = new Context();
+  try {
+    await ctx.plugin(Storage); await ctx.plugin(StorageJson, { root: path.join(home, 'storages') }); await ctx.plugin(StorageDomain, { backend: 'json' });
+    const domain = await ctx.storageDomain.open({ ...newsDomain, name: `${newsDomain.name}_${createHash('sha256').update(directory).digest('hex')}` });
+    for (const value of reports) await domain.table('reports').put(`${value.fieldId}/${value.cutoff}`, value);
+    for (const field of fields) await domain.table('fields').put(field.id, { id: field.id, revision: 1, deleted: false, name: field.name, focus: '功能测试用的自建领域。', enabled: true, sources: [feedSource('测试来源甲', { url: `https://example.com/${field.id}/feed.xml` })] });
     await domain.close();
   } finally { await ctx.fiber.dispose(); }
 }

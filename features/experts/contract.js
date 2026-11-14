@@ -15,6 +15,8 @@ export function expertContract(z) {
   // 员工相对原版改了什么，单独存一个域：fields 是员工改过的字段（值仍在专家记录里），技能只记增删；
   // base 是改时原版的指纹（'' 表示旧记录推断不出当时的原版）；revision 与 record（记录内容指纹）对应专家记录，对不上就重新推断。
   const changed = z.strictObject({ revision: revision.min(1), record: print, fields: z.array(field.exclude(['skills'])).max(6), base: z.strictObject({ name: print, description: print, prompt: print }), baseSkills: z.array(skill).max(200), added: z.array(skill).max(40), removed: z.array(skill).max(200) });
+  // 专家团队页的“在用”（2026-11-08）：员工手动“选用 / 放回”的记号和多久不用就放回专家库的天数（0 表示不自动放回）。
+  const roster = z.strictObject({ marks: z.record(z.string(), z.strictObject({ state: z.enum(['picked', 'returned']), at: z.number() })), idleDays: z.number().int().min(0).max(365) });
   const input = z.discriminatedUnion('action', [
     z.strictObject({ action: z.literal('list') }),
     z.strictObject({ action: z.literal('templates') }),
@@ -23,10 +25,19 @@ export function expertContract(z) {
     z.strictObject({ action: z.literal('save'), id: id.optional(), expectedRevision: revision, expert: fields }),
     z.strictObject({ action: z.literal('remove'), id, expectedRevision: revision }),
     z.strictObject({ action: z.literal('restore'), id, expectedRevision: revision, fields: z.array(field).min(1).max(7).optional() }),
+    // 2026-11-08 专家团改版：选用 / 放回和天数（员工自己的偏好，另存，不进专家记录）、专家记忆（存在知识库里）。
+    z.strictObject({ action: z.literal('roster_mark'), id, state: z.enum(['picked', 'returned']) }),
+    z.strictObject({ action: z.literal('roster_settings'), idleDays: z.number().int().min(0).max(365) }),
+    z.strictObject({ action: z.literal('memory'), id }),
+    z.strictObject({ action: z.literal('memory_save'), id, rules: z.array(text.min(1).max(600)).max(60), progress: z.array(text.min(1).max(600)).max(60) }),
+    z.strictObject({ action: z.literal('memory_summary') }),
   ]);
   const modelItem = z.object({ id: text, name: text, description: text.optional(), reasoning: z.object({ efforts: z.array(z.object({ id: text, name: text, description: text.optional() })), defaultEffort: text.optional() }).optional() });
   const result = z.union([
-    z.strictObject({ experts: z.array(listed), deleted: z.array(deleted) }),
+    z.strictObject({ experts: z.array(listed), deleted: z.array(deleted), roster: roster.optional() }),
+    z.strictObject({ roster }),
+    z.strictObject({ memory: z.strictObject({ path: text, empty: z.boolean(), rules: z.array(text), progress: z.array(text), over: z.boolean() }) }),
+    z.strictObject({ memories: z.record(z.string(), z.number().int().nonnegative()) }),
     // 随包模板库：创建出来的是员工的自定义专家；avatar 是插件自带头像的标识，浏览器换成图片。
     z.strictObject({ templates: z.array(z.strictObject({ id, name: text, description: text, prompt: text, skills: z.array(text), avatar: text.nullable() })) }),
     z.strictObject({ models: z.array(z.object({ id: text, name: text, models: z.array(modelItem) })), defaultModel: model.nullable(), skills: z.array(z.strictObject({ name: text, description: text })), mcpServers: z.array(z.strictObject({ name: text, connected: z.boolean(), tools: z.array(text) })), issues: z.array(text), mcpSupported: z.boolean().optional(), modelSupported: z.boolean().optional() }),
@@ -35,5 +46,5 @@ export function expertContract(z) {
   ]);
   const packageName = 'dsh-whalewing/experts';
   const descriptor = { id: `${packageName}#whalewingExperts/manage`, service: 'whalewingExperts', namespace: 'whalewingExperts', method: 'manage', invocation: { kind: 'direct' }, parameters: [{ name: 'input', wire: 'input', source: 'json', codec: { mode: 'strict', typeSymbol: `${packageName}#ExpertInput`, create: () => input } }], cancellation: { parameter: 'signal' }, result: { mode: 'strict', typeSymbol: `${packageName}#ExpertResult`, create: () => result } };
-  return { input, result, fields, expert, changed, stored: expert.extend({ deleted: z.boolean() }), host: { package: packageName, face: 'host', schemas: [], invocations: [descriptor], model: { package: packageName, face: 'host' } }, client: { package: packageName, descriptors: [descriptor] } };
+  return { input, result, fields, expert, changed, roster, stored: expert.extend({ deleted: z.boolean() }), host: { package: packageName, face: 'host', schemas: [], invocations: [descriptor], model: { package: packageName, face: 'host' } }, client: { package: packageName, descriptors: [descriptor] } };
 }

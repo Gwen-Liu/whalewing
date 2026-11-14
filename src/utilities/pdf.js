@@ -99,95 +99,12 @@ async function loadPdf(bytes) {
   if (doc.getForm().getFields().length) throw new Error('交互表单或签名 PDF 请先另存为静态副本；办公工坊不保留数字签名效力');
   return doc;
 }
-async function renderDefinition(definition) {
+/** 用随包思源黑体子集排一份 A4 PDF：加水印用；测试也用它造中文 PDF。 */
+export async function renderDefinition(definition) {
   return new Promise((resolve, reject) => {
     try { pdfMake.createPdf({ ...definition, defaultStyle: { font: 'Noto', fontSize: 10 }, pageSize: 'A4', pageMargins: [40, 40, 40, 40] }, undefined, fonts, vfs).getBuffer(buffer => resolve(new Uint8Array(buffer))); }
     catch (error) { reject(error); }
   });
-}
-function validateWordContent(body) {
-  const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
-  const A = 'http://schemas.openxmlformats.org/drawingml/2006/main';
-  const WP = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing';
-  const PIC = 'http://schemas.openxmlformats.org/drawingml/2006/picture';
-  const elements = node => Array.from(node.childNodes).filter(n => n.nodeType === 1);
-  const unsupported = node => { throw new Error(`Word 含尚未支持的公式、图表、绘图或正文结构：${node.nodeName}；请先转换为普通文字或内嵌 PNG/JPEG`); };
-  const containers = {
-    body: ['p', 'tbl', 'sectPr'], p: ['pPr', 'r', 'hyperlink', 'bookmarkStart', 'bookmarkEnd', 'proofErr'],
-    hyperlink: ['r', 'bookmarkStart', 'bookmarkEnd', 'proofErr'], r: ['rPr', 't', 'tab', 'br', 'cr', 'drawing'],
-    tbl: ['tblPr', 'tblGrid', 'tr'], tr: ['trPr', 'tc'], tc: ['tcPr', 'p'],
-  };
-  const properties = new Set(['pPr', 'rPr', 'tblPr', 'tblGrid', 'trPr', 'tcPr', 'sectPr']);
-  const drawingNodes = new Map([
-    [WP, new Set(['inline', 'extent', 'effectExtent', 'docPr', 'cNvGraphicFramePr'])],
-    [A, new Set(['graphic', 'graphicData', 'graphicFrameLocks', 'picLocks', 'blip', 'srcRect', 'stretch', 'fillRect', 'xfrm', 'off', 'ext', 'prstGeom', 'avLst'])],
-    [PIC, new Set(['pic', 'nvPicPr', 'cNvPr', 'cNvPicPr', 'blipFill', 'spPr'])],
-  ]);
-  const drawing = node => {
-    const children = elements(node);
-    if (children.length !== 1 || children[0].namespaceURI !== WP || children[0].localName !== 'inline') unsupported(node);
-    const all = [children[0], ...Array.from(children[0].getElementsByTagName('*'))];
-    for (const child of all) {
-      if (!drawingNodes.get(child.namespaceURI)?.has(child.localName)) unsupported(child);
-      if (child.namespaceURI === A && child.localName === 'graphicData' && child.getAttribute('uri') !== PIC) unsupported(child);
-      if (child.namespaceURI === A && child.localName === 'prstGeom' && child.getAttribute('prst') !== 'rect') unsupported(child);
-      if (child.namespaceURI === A && child.localName === 'xfrm' && ['rot', 'flipH', 'flipV'].some(key => child.hasAttribute(key) && !['0', 'false'].includes(child.getAttribute(key)))) unsupported(child);
-      if (child.namespaceURI === A && ['srcRect', 'fillRect'].includes(child.localName) && ['t', 'r', 'b', 'l'].some(key => child.hasAttribute(key) && child.getAttribute(key) !== '0')) unsupported(child);
-    }
-    if (node.getElementsByTagNameNS(PIC, 'pic').length !== 1 || node.getElementsByTagNameNS(A, 'blip').length !== 1) unsupported(node);
-  };
-  // 只允许当前转换器实际消费的内容容器；未知命名空间不再被Word标签遍历静默跳过。
-  const visit = node => {
-    if (node.namespaceURI !== W) unsupported(node);
-    if (node.localName === 'drawing') { drawing(node); return; }
-    if (properties.has(node.localName)) {
-      for (const child of Array.from(node.getElementsByTagName('*'))) if (child.namespaceURI !== W) unsupported(child);
-      return;
-    }
-    const allowed = containers[node.localName];
-    for (const child of elements(node)) {
-      if (!allowed?.includes(child.localName) || child.namespaceURI !== W) unsupported(child);
-      visit(child);
-    }
-  };
-  visit(body);
-}
-export async function wordPdf(bytes, name) {
-  const { body, documents, entries } = wordDocument(bytes);
-  validateWordContent(body);
-  if (['gridSpan', 'vMerge', 'numPr', 'footnoteReference', 'endnoteReference', 'pict', 'object', 'fldSimple', 'instrText', 'txbxContent'].some(n => descendants(body, n).length) || body.getElementsByTagNameNS('http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing', 'anchor').length) throw new Error('该 Word 含合并表格、编号、脚注、域或浮动图形，请先转为普通段落与规则表格');
-  const rels = documents.get('word/_rels/document.xml.rels'), missing = new Set();
-  const imageFor = node => {
-    const blips = Array.from(node.getElementsByTagNameNS('http://schemas.openxmlformats.org/drawingml/2006/main', 'blip'));
-    return blips.map(blip => {
-      const id = blip.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'embed');
-      const relation = rels && Array.from(rels.documentElement.childNodes).find(r => r.nodeType === 1 && r.getAttribute('Id') === id);
-      const target = relation?.getAttribute('Target');
-      if (!target || relation.getAttribute('TargetMode') === 'External' || !/^media\/[^/]+\.(png|jpe?g)$/i.test(target)) throw new Error('Word 图片必须是本地 PNG/JPEG');
-      const data = entries.get(`word/${target}`); if (!data) throw new Error('Word 图片缺失');
-      const info = inspectImage(data, target);
-      return { image: `data:${info.mime};base64,${b64(data)}`, fit: [480, 360], margin: [0, 4, 0, 8] };
-    });
-  };
-  const paragraph = p => {
-    const runs = descendants(p, 'r').map(r => ({ text: fitFont(paragraphText(r), missing), bold: descendants(r, 'b').length > 0, italics: descendants(r, 'i').length > 0 }));
-    const text = runs.some(r => r.text) ? runs : ' ';
-    const style = descendants(p, 'pStyle')[0]?.getAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'val') || '';
-    return [{ text, fontSize: /^(Title|标题)$/i.test(style) ? 20 : /^Heading[1-3]$/i.test(style) ? 15 : 10, margin: [0, 0, 0, 7] }, ...imageFor(p)];
-  };
-  const content = [];
-  for (const node of wordChildren(body)) {
-    if (node.localName === 'p') content.push(...paragraph(node));
-    else if (node.localName === 'tbl') {
-      if (descendants(node, 'tbl').length) throw new Error('嵌套表格尚不支持');
-      const rows = wordChildren(node, 'tr').map(tr => wordChildren(tr, 'tc').map(tc => ({ stack: wordChildren(tc, 'p').flatMap(paragraph) })));
-      if (!rows.length || !rows[0].length || rows.some(r => r.length !== rows[0].length) || rows.length * rows[0].length > LIMITS.wordCells) throw new Error('Word 表格结构或大小超出处理范围');
-      content.push({ table: { widths: rows[0].map(() => '*'), body: rows }, margin: [0, 0, 0, 10] });
-    } else if (node.localName !== 'sectPr') throw new Error(`尚未支持 Word 正文结构：${node.localName}`);
-  }
-  if (!content.length) throw new Error('Word 正文为空');
-  const note = missing.size ? `；有 ${missing.size} 个字不在内置字库（常用简繁体字）里，PDF 中显示为带叉方框：${missingList(missing)}；需要原样显示请用 Word 自带的“另存为 PDF”` : '';
-  return pdfResult(await renderDefinition({ content }), `${safeBase(name)}.pdf`, '已将正文、基础样式、规则表格与内嵌图片重新排为 A4 PDF；字体统一为 Noto Sans SC，原页码、页眉页脚、粗斜体字体外观不保真' + note);
 }
 async function withParsedPdf(bytes, operation) {
   const assetBytes = encoded => Uint8Array.from(atob(encoded), c => c.charCodeAt(0));
@@ -356,7 +273,6 @@ export async function compressPdf(bytes, name, presetName, codec = canvasCodec) 
 }
 
 export async function pdfTask(tool, files, options = {}) {
-  if (tool === 'word-pdf') { const [f] = await selectedBytes(files, ['docx']); return wordPdf(f.bytes, f.name); }
   if (tool === 'images-pdf') {
     // 每一张都是 PDF 的一页：有不合格的就整体停止，写明是哪些文件、为什么，不生成缺页的 PDF。
     const problems = screenFiles(files, 'image');

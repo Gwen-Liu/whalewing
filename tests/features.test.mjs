@@ -72,7 +72,7 @@ test('真实Cordis登记首帧、变化、撤销、取消；关闭的内置id仍
   assert.throws(() => registry.register(ctx, manifest('external')), { code: 'FEATURE_CONFLICT' });
   for (const part of parts) assert.throws(() => registry.register(ctx, { ...manifest(part.id), package: 'dsh-whalewing' }), { code: 'FEATURE_CONFLICT' });
   assert.throws(() => registry.register(ctx, { ...manifest('v2'), api: 2 }), { code: 'FEATURE_API' });
-  for (const invalid of [{ package: '../bad' }, { skills: ['relative/path'] }, { tab: { placement: 'left' } }, { tab: { extra: true } }, { extra: true }]) assert.throws(() => registry.register(ctx, { ...manifest('invalid'), ...invalid }));
+  for (const invalid of [{ package: '../bad' }, { skills: ['relative/path'] }, { tab: { placement: 'left' } }, { tab: { extra: true } }, { tab: { group: 'tools' } }, { tab: { summary: '只写一种语言' } }, { tab: { summary: { zh: '', en: 'Empty' } } }, { extra: true }]) assert.throws(() => registry.register(ctx, { ...manifest('invalid'), ...invalid }));
   unregister(); await feature.dispose();
   assert.equal((await stream.next()).value.features.length, 0);
   const waiting = stream.next(); controller.abort(); assert.equal((await waiting).done, true);

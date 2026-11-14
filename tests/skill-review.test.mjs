@@ -104,18 +104,21 @@ test('来源变了的停用技能也能恢复，恢复后标待复核；发布�
 
 test('技能工具审批说的是技能操作和技能目录，不再套用知识工具的说法', async t => {
   const s = await setup(t);
-  const tools = new Map(), requests = [];
+  const tools = new Map(), requests = [], executed = [];
   const ctx = {
-    whalewing: { vault: s.vault, skills: s.library, execute: async () => assert.fail('拒绝后不得执行') },
+    whalewing: { vault: s.vault, skills: s.library, execute: async args => { if (args.action !== 'list') assert.fail('拒绝后不得执行'); executed.push(args.action); return {}; } },
     tools: { register: definition => tools.set(definition.name, definition) },
     sandboxPolicy: { resolve: () => ({ mode: 'workspace-write' }) },
     get: key => key === 'approval' ? { request: async input => { requests.push(input); return 'rejected'; } } : undefined,
   };
   skillTool(ctx);
   const tool = tools.get('whalewing_skill');
-  await assert.rejects(tool.execute({ action: 'list' }, { signal: signal(), agent: { session: { id: 'fixture' } }, callId: 'call' }), /鲸翼个人技能操作/);
+  // 查看不审批（2026-11-08 用户定）。
+  await tool.execute({ action: 'list' }, { signal: signal(), agent: { session: { id: 'fixture' } }, callId: 'call' });
+  assert.deepEqual([requests.length, executed], [0, ['list']]);
+  await assert.rejects(tool.execute({ action: 'stage' }, { signal: signal(), agent: { session: { id: 'fixture' } }, callId: 'call' }), /鲸翼个人技能操作/);
   assert.equal(requests.length, 1);
-  assert.match(requests[0].displayReason.zh, /whalewing_skill\/list/);
+  assert.match(requests[0].displayReason.zh, /whalewing_skill\/stage/);
   assert.ok(requests[0].displayReason.zh.includes(s.library.root));
   assert.doesNotMatch(requests[0].displayReason.zh, /登记的本机来源/);
   assert.equal(tool.presentCall({ action: 'list' }).kind, 'read');

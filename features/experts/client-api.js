@@ -3,7 +3,10 @@
 export function createExpertsClient(bridge, t) {
     const { featureRemote, unwrap, failure } = bridge;
     const { request, createBoundSession, readProjection, assertActiveSession, notifySessionIssue } = bridge;
-    let experts = { experts: [], deleted: [] };
+    let experts = { experts: [], deleted: [], roster: { marks: {}, idleDays: 14 } };
+    // 别的地方（小鲸面板右上角的“···”）要专家团队页打开某位专家的详情：记下请求，页面挂上后照办。
+    let viewRequest = null;
+    const viewListeners = new Set();
     const expertListeners = new Set();
     const expertRequest = async (input, signal) => { signal?.throwIfAborted(); const reply = await featureRemote('whalewingExperts').manage(input, signal); signal?.throwIfAborted(); return unwrap(reply, input.sessionId); };
     const loadExperts = async (signal) => {
@@ -145,5 +148,19 @@ export function createExpertsClient(bridge, t) {
       scope.effect(() => () => { for (const job of preparations.values()) job.controller.abort(); preparations.clear(); choiceListeners.clear(); }, '专家准备释放');
     },
     modes: bridge.modes, open: bridge.open, request: bridge.request, workspaces: bridge.workspaces, subscribeWorkspaces: bridge.subscribeWorkspaces, notifySessionIssue: bridge.notifySessionIssue,
+    // 2026-11-08 专家团改版：选用 / 放回、天数、专家记忆，以及专家团队页要读的会话列表。
+    markExpert: async (id, state, signal) => { await expertRequest({ action: 'roster_mark', id, state }, signal); return loadExperts(signal); },
+    setIdleDays: async (idleDays, signal) => { await expertRequest({ action: 'roster_settings', idleDays }, signal); return loadExperts(signal); },
+    requestDetail: (id, tab = 'overview') => { viewRequest = { id, tab, at: Date.now() }; viewListeners.forEach(listener => listener()); },
+    requestTask: sessionId => { viewRequest = { task: sessionId, at: Date.now() }; viewListeners.forEach(listener => listener()); },
+    viewRequest: () => viewRequest, takeViewRequest: () => { const value = viewRequest; viewRequest = null; return value; },
+    subscribeViewRequest: listener => { viewListeners.add(listener); return () => viewListeners.delete(listener); },
+    archivedSessions: () => { try { return bridge.workspaces?.()?.archivedSessionIds ?? []; } catch { return []; } },
+    expertMemory: async (id, signal) => (await expertRequest({ action: 'memory', id }, signal)).memory,
+    saveExpertMemory: async (id, { rules, progress }, signal) => (await expertRequest({ action: 'memory_save', id, rules, progress }, signal)).memory,
+    memorySummary: async signal => (await expertRequest({ action: 'memory_summary' }, signal)).memories,
+    subscribeSessions: listener => bridge.subscribeSessions(listener), sessionsSnapshot: () => bridge.sessionSnapshot(),
+    // 专家团队页中间一栏要嵌专家的任务会话：和小鲸面板一样保留引用，离开时释放。
+    retain: id => bridge.retain(id),
   };
 }

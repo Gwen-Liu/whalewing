@@ -35,8 +35,21 @@ export function graphLayer(node) {
   return graphLayers.find(layer => layer.prefixes.some(prefix => node.path.startsWith(prefix))) || null;
 }
 
+// 图谱设置里“排布”四个数的默认值（照发起者 Obsidian 的设置），和下面布局用的力一一对应。
+export const defaultGraphForces = Object.freeze({ center: 0.52, repel: 10, link: 1, distance: 250 });
+// 标签和附件节点的颜色：鲸翼自己的两种，和按层上色的六种分得开（天青取自鲸翼标志）。
+export const graphKindColors = Object.freeze({ tag: '#3e9bd6', attachment: '#b8956a' });
+
+/** 设置里的四个数换成力的参数：默认值换出来和原来写死的完全一样（连线 60、斥力 -60、向心力按规模）。 */
+export function graphForceParams(forces = defaultGraphForces, count = 0) {
+  const { center, repel, link, distance } = { ...defaultGraphForces, ...forces };
+  // 小型局部图的中心力随规模减弱，避免孤点比真实邻居更贴近中心。
+  const gravity = Math.min(0.06, count * 0.002);
+  return { distance: 60 * (distance / 250), charge: -60 * (repel / 10), link, gravity: center === defaultGraphForces.center ? gravity : gravity * (center / defaultGraphForces.center) };
+}
+
 /** 有向引用仍属于知识服务；几何投影不重复计算双向弹簧，也不修改响应。 */
-export function createGraphLayout(graph) {
+export function createGraphLayout(graph, forces = defaultGraphForces) {
   // 物理节点保持固定字段与数值槽位；笔记/缺失节点元数据仍由原响应供画布消费。
   // 不把可选业务字段带入 D3 热循环，避免多种对象形状使每次力计算退化。
   const nodes = graph.nodes.map(node => ({ path: node.path, degree: node.degree, index: 0, x: node.x ?? NaN, y: node.y ?? NaN, vx: node.vx ?? NaN, vy: node.vy ?? NaN, fx: node.fx, fy: node.fy }));
@@ -51,17 +64,25 @@ export function createGraphLayout(graph) {
     edges.push([Math.min(a, b), Math.max(a, b)]);
     neighbors[a].add(b); neighbors[b].add(a);
   }
-  // 小型局部图的中心力随规模减弱，避免孤点比真实邻居更贴近中心。
-  const gravity = Math.min(0.06, nodes.length * 0.002);
+  const params = graphForceParams(forces, nodes.length);
   // 唯一帧调度器手动推进；D3 不持有另一条持续更新坐标的定时循环。
   const simulation = forceSimulation(nodes).stop()
-    .force('link', forceLink(edges).distance(60))
-    .force('charge', forceManyBody().strength(-60).theta(1.1))
+    .force('link', forceLink(edges).distance(params.distance).scale(params.link))
+    .force('charge', forceManyBody().strength(params.charge).theta(1.1))
     .force('center', forceCenter())
-    .force('x', forceX().strength(gravity))
-    .force('y', forceY().strength(gravity))
+    .force('x', forceX().strength(params.gravity))
+    .force('y', forceY().strength(params.gravity))
     .force('collision', forceCollide(node => radius(node.degree) + 2));
   return { nodes, edges, neighbors, simulation };
+}
+
+/** 换排布的四个数：力换成新的参数，调用方再加热模拟，整图慢慢挪到新的平衡。 */
+export function retuneGraphLayout(layout, forces) {
+  const params = graphForceParams(forces, layout.nodes.length);
+  layout.simulation.force('link').distance(params.distance).scale(params.link);
+  layout.simulation.force('charge').strength(params.charge);
+  layout.simulation.force('x').strength(params.gravity);
+  layout.simulation.force('y').strength(params.gravity);
 }
 
 /** 图谱仅持有可重建布局与镜头；知识关系及连接度始终由知识服务提供。 */
@@ -69,23 +90,40 @@ export function createGraphCanvas(React) {
   const { createElement: h, useEffect, useRef, useState } = React;
   const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 
-  /** 左上角一行图例：这张图上有哪几层、各是什么颜色；全库图再写一句没画哪些。不挡点击。 */
-  function GraphLegend({ graph, legend, label, hiddenNote }) {
-    const present = new Set(graph.nodes.map(node => graphLayer(node)?.id).filter(Boolean));
-    const shown = graphLayers.filter(layer => present.has(layer.id) && legend[layer.id]);
+  /**
+   * 左上角一行图例：这张图上有哪几种颜色、各是什么。不挡点击。
+   * items 是 [{ color, label }]（按图谱设置的颜色组给）；没给时按六层默认颜色和 legend 里的名字算。
+   */
+  function GraphLegend({ graph, items, legend, label, hiddenNote }) {
+    let shown = items;
+    if (!shown) {
+      const present = new Set(graph.nodes.map(node => graphLayer(node)?.id).filter(Boolean));
+      shown = legend ? graphLayers.filter(layer => present.has(layer.id) && legend[layer.id]).map(layer => ({ color: layer.color, label: legend[layer.id] })) : [];
+    }
     if (!shown.length && !hiddenNote) return null;
-    return h('div', { className: 'ww-graph-legend', role: 'note', 'aria-label': label, style: { position: 'absolute', left: 10, top: 10, maxWidth: 'calc(100% - 120px)', padding: '4px 8px', borderRadius: 8, background: 'color-mix(in srgb, var(--dsw-alias-bg-layer-1) 82%, transparent)', color: 'var(--dsw-alias-label-secondary)', fontSize: 11, lineHeight: '18px', pointerEvents: 'none' } },
+    return h('div', { className: 'ww-graph-legend', role: 'note', 'aria-label': label, style: { position: 'absolute', left: 10, top: 10, maxWidth: 'calc(100% - 140px)', padding: '4px 8px', borderRadius: 8, background: 'color-mix(in srgb, var(--dsw-alias-bg-layer-1) 82%, transparent)', color: 'var(--dsw-alias-label-secondary)', fontSize: 11, lineHeight: '18px', pointerEvents: 'none' } },
       shown.length > 0 && h('ul', { style: { display: 'flex', flexWrap: 'wrap', columnGap: 10, margin: 0, padding: 0, listStyle: 'none' } },
-        ...shown.map(layer => h('li', { key: layer.id, style: { display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' } },
-          h('span', { 'aria-hidden': true, style: { width: 8, height: 8, borderRadius: '50%', background: layer.color, flex: 'none' } }), legend[layer.id]))),
+        ...shown.map((item, i) => h('li', { key: `${item.color}-${i}`, style: { display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' } },
+          h('span', { 'aria-hidden': true, style: { width: 8, height: 8, borderRadius: '50%', background: item.color, flex: 'none' } }), item.label))),
       hiddenNote && h('div', { style: { color: 'var(--dsw-alias-label-tertiary)' } }, hiddenNote));
   }
 
-  return function GraphCanvas({ graph, selectedPath, disabled, onOpenNote, label, resetLabel, loadingLabel, canvasErrorLabel, dataErrorLabel, subscribeTheme, legend, legendLabel, hiddenNote }) {
+  const defaultDisplay = Object.freeze({ nodeSize: 1, lineSize: 1, textFade: 0, arrows: false });
+
+  /**
+   * display：图谱设置“样子”一组（点大小、线粗细、名字多少、箭头），改了只重画；
+   * forces：“排布”一组，改了整图慢慢挪到新的平衡；
+   * controllerRef：交给外面用的 grow（播放生长动画）、stopGrow、reset。
+   */
+  return function GraphCanvas({ graph, selectedPath, disabled, onOpenNote, label, resetLabel, loadingLabel, canvasErrorLabel, dataErrorLabel, subscribeTheme, legend, legendItems, legendLabel, hiddenNote, display = defaultDisplay, forces = defaultGraphForces, colors, controllerRef, showReset = true }) {
     const canvas = useRef(null);
     const controller = useRef(null);
     const latest = useRef(null);
     latest.current = { selectedPath, disabled, onOpenNote };
+    const settings = useRef(null);
+    settings.current = { display, forces, colors };
+    // 上一张图里每个点在哪：换筛选、换开关重新排布时，还在的点从原来的位置开始，不整张打乱。
+    const positions = useRef(new Map());
     const [focused, setFocused] = useState(null);
     const [settling, setSettling] = useState(true);
     const [painted, setPainted] = useState(0);
@@ -99,11 +137,21 @@ export function createGraphCanvas(React) {
       const nodes = graph.nodes;
       const n = nodes.length;
       const index = new Map(nodes.map((node, i) => [node.path, i]));
-      const layerColors = nodes.map(node => graphLayer(node)?.color || '');
-      let layout;
-      try { layout = createGraphLayout(graph); } catch {
+      // 颜色：标签、附件各一种；给了 colors（按图谱设置的颜色组算好的，空串表示哪组都不是）就用它，没给就按六层默认颜色。
+      const colorOf = (node, map) => node.kind === 'tag' ? graphKindColors.tag : node.kind === 'attachment' ? graphKindColors.attachment : map ? map.get(node.path) || '' : graphLayer(node)?.color || '';
+      const layerColors = nodes.map(node => colorOf(node, settings.current.colors));
+      let layout, seeded = 0;
+      try {
+        const remembered = positions.current;
+        const seededGraph = remembered.size ? { ...graph, nodes: nodes.map(node => { const p = remembered.get(node.path); if (!p) return node; seeded++; return { ...node, x: p.x, y: p.y }; }) } : graph;
+        layout = createGraphLayout(seededGraph, settings.current.forces);
+      } catch {
         setError(dataErrorLabel); setSettling(false); return;
       }
+      // 箭头按引用方向画（布局只用无向的边）。
+      const directed = graph.edges.map(edge => [index.get(edge.source), index.get(edge.target)]).filter(([a, b]) => a !== undefined && b !== undefined && a !== b);
+      const remember = () => { positions.current = new Map(nodes.map((node, i) => [node.path, { x: x[i], y: y[i] }])); };
+      let appliedForces = settings.current.forces;
       const { edges, neighbors, simulation } = layout;
       setEdgeCount(edges.length);
       const direct = edges.length <= 4096;
@@ -126,10 +174,13 @@ export function createGraphCanvas(React) {
       let fittedScale = 1;
       // 悬停邻域与入场只做透明度过渡，坐标和半径始终是收敛结果；系统要求减弱动态时直接切换。
       const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
-      let motion = !reducedMotion?.matches, shown = -1, glow = 0, intro = motion ? 0 : 1, reveal = null, clock = 0;
+      // 大半的点是从上一张图接着排的（只是换了筛选或开关），不再从中心淡入一遍。
+      let motion = !reducedMotion?.matches, shown = -1, glow = 0, intro = motion && seeded * 2 < n ? 0 : 1, reveal = null, clock = 0;
+      // 生长动画：按建立日期一个个长出来；ease 是动画放完后镜头慢慢退回看全图还剩几帧。
+      let growth = null, ease = 0;
       const motionChanged = () => { motion = !reducedMotion.matches; if (!motion) intro = 1; schedule(); };
       const target = () => hover >= 0 ? hover : keyboard;
-      const animating = () => intro < 1 || (target() >= 0 ? glow < 1 || shown !== target() : glow > 0);
+      const animating = () => Boolean(growth) || ease > 0 || intro < 1 || (target() >= 0 ? glow < 1 || shown !== target() : glow > 0);
       const animate = () => {
         const now = performance.now(), elapsed = clock ? now - clock : 16;
         clock = now;
@@ -172,10 +223,11 @@ export function createGraphCanvas(React) {
           return { text, width: context.measureText(text).width + 8 };
         });
       };
-      const fittedCamera = () => {
+      // which：只看哪些点（生长动画时只框住已经长出来的）；不给就是全部。
+      const fittedCamera = which => {
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        for (let i = 0; i < n; i++) { minX = Math.min(minX, x[i]); maxX = Math.max(maxX, x[i]); minY = Math.min(minY, y[i]); maxY = Math.max(maxY, y[i]); }
-        if (!n) { minX = minY = maxX = maxY = 0; }
+        for (let i = 0; i < n; i++) { if (which && !which(i)) continue; minX = Math.min(minX, x[i]); maxX = Math.max(maxX, x[i]); minY = Math.min(minY, y[i]); maxY = Math.max(maxY, y[i]); }
+        if (minX > maxX) { minX = minY = maxX = maxY = 0; }
         const scale = Math.min(Math.max(1, width - 70) / Math.max(100, maxX - minX), Math.max(1, height - 70) / Math.max(100, maxY - minY));
         const k = clamp(scale, 0.08, 8);
         return { k, x: width / 2 - (minX + maxX) / 2 * k, y: height / 2 - (minY + maxY) / 2 * k };
@@ -185,8 +237,9 @@ export function createGraphCanvas(React) {
       // GPU 对“一条路径一条线段”有专门的快速光栅；几千条线并成一条路径会退回通用路径光栅，
       // 放大后线变长时每帧要 0.1–0.3 秒。逐条不透明描到图层再整体按透明度贴回，重叠处与整条路径的观感一致。
       const strokeEach = (ctx, pairs) => { for (const [a, b] of pairs) { ctx.beginPath(); ctx.moveTo(sx[a], sy[a]); ctx.lineTo(sx[b], sy[b]); ctx.stroke(); } };
+      const lineWidth = () => 0.7 * settings.current.display.lineSize;
       const directLines = () => {
-        const key = `${camera.k} ${camera.x} ${camera.y} ${width} ${height} ${pixelRatio} ${geometry} ${palette.edge}`;
+        const key = `${camera.k} ${camera.x} ${camera.y} ${width} ${height} ${pixelRatio} ${geometry} ${palette.edge} ${lineWidth()}`;
         if (lineLayer?.key === key) return lineLayer.layer;
         if (!lineLayer) {
           // 离屏画布不进入文档；没有该能力的环境退回直接描线。
@@ -198,7 +251,7 @@ export function createGraphCanvas(React) {
         const { layer, ctx } = lineLayer, layerWidth = Math.max(1, Math.round(width * pixelRatio)), layerHeight = Math.max(1, Math.round(height * pixelRatio));
         if (layer.width !== layerWidth || layer.height !== layerHeight) { layer.width = layerWidth; layer.height = layerHeight; }
         ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, layerWidth, layerHeight);
-        ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0); ctx.lineWidth = 0.7; ctx.strokeStyle = palette.edge;
+        ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0); ctx.lineWidth = lineWidth(); ctx.strokeStyle = palette.edge;
         strokeEach(ctx, edges);
         lineLayer.key = key;
         return layer;
@@ -215,7 +268,7 @@ export function createGraphCanvas(React) {
         const base = { ...camera }, density = pixelRatio;
         layer.width = Math.max(1, Math.round(width * density)); layer.height = Math.max(1, Math.round(height * density));
         ctx.setTransform(density, 0, 0, density, 0, 0);
-        ctx.strokeStyle = palette.edge; ctx.lineWidth = 0.7;
+        ctx.strokeStyle = palette.edge; ctx.lineWidth = lineWidth();
         building = { layer, ctx, camera: base, width, height, next: 0, omit: drag?.moved && drag.node >= 0 ? drag.node : -1 };
         setSettling(true); setPainted(0); schedule();
       };
@@ -238,6 +291,7 @@ export function createGraphCanvas(React) {
         if (end === edges.length) { releaseLayer(edgeCache); edgeCache = cache; building = null; setSettling(false); }
       };
       const draw = () => {
+        const display = settings.current.display, now = performance.now();
         context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
         context.clearRect(0, 0, width, height);
         for (let i = 0; i < n; i++) {
@@ -251,22 +305,49 @@ export function createGraphCanvas(React) {
         }
         // 密集全连接压力图仍留出关系空间；真实稀疏图不再被统一压成细小黑点。
         const packing = n > 80 ? Math.min(Math.sqrt(camera.k), Math.sqrt(Math.max(1, (maxX - minX) * (maxY - minY)) * 0.2 / nodeArea)) : Math.sqrt(camera.k);
-        for (let i = 0; i < n; i++) sizes[i] = clamp(radius(nodes[i].degree) * packing, 1.7, 18);
+        // 点的大小再乘图谱设置里的“点的大小”（默认 1，和原来一样）。
+        for (let i = 0; i < n; i++) sizes[i] = clamp(radius(nodes[i].degree) * packing, 1.7, 18) * display.nodeSize;
+        // 生长动画：还没长出来的点和连着它的线不画；刚长出来的点从小到大、从淡到实，约 0.35 秒。
+        const born = growth?.born;
+        const grown = i => !born || born[i] > 0;
+        const sprout = i => born ? clamp((now - born[i]) / 350, 0, 1) : 1;
         const emphasized = shown;
         const related = i => i === emphasized || (emphasized >= 0 && neighbors[emphasized].has(i));
         // 非邻域按过渡进度淡出，指针在节点间快速掠过时整图不会在全亮与全暗之间跳变。
         const dim = (alpha, i) => emphasized >= 0 && !related(i) ? 1 - (1 - alpha) * glow : 1;
         if (intro < 1 && !reveal) reveal = revealOrder();
         const appear = i => intro < 1 ? fade(reveal[i] * 0.55, 0.45) : 1;
-        const cache = live ? null : edgeCache || building;
+        const cache = live || born ? null : edgeCache || building;
         const edgeAlpha = clamp(0.3 / Math.sqrt(1 + edges.length / Math.max(n, 1) / 4), 0.035, 0.24) * (1 - 0.8 * glow) * fade(0.25, 0.6);
-        if ((direct || live) && !running) {
+        if (born) {
+          // 生长期间只画两头都长出来的线（太多的大图放完再一起出来）。
+          if (edges.length <= 30000) {
+            context.globalAlpha = edgeAlpha; context.lineWidth = lineWidth(); context.strokeStyle = palette.edge;
+            strokeEach(context, edges.filter(([a, b]) => born[a] > 0 && born[b] > 0));
+            context.globalAlpha = 1;
+          }
+        } else if ((direct || live) && !running) {
           // 常见知识库（以及实时物理期间的图）按当前镜头和像素绘制全部几何线，图层与画布一一对应，不做位图缩放插值。
           const layer = directLines();
           context.globalAlpha = edgeAlpha;
           if (layer) context.drawImage(layer, 0, 0, width, height);
-          else { context.beginPath(); context.lineWidth = 0.7; context.strokeStyle = palette.edge; for (const [a, b] of edges) { context.moveTo(sx[a], sy[a]); context.lineTo(sx[b], sy[b]); } context.stroke(); }
+          else { context.beginPath(); context.lineWidth = lineWidth(); context.strokeStyle = palette.edge; for (const [a, b] of edges) { context.moveTo(sx[a], sy[a]); context.lineTo(sx[b], sy[b]); } context.stroke(); }
           context.globalAlpha = 1;
+          // 箭头：按引用方向在被引用的那头画一个小三角（图谱设置“样子”里打开）。
+          if (display.arrows && directed.length <= 12000) {
+            context.globalAlpha = Math.min(1, edgeAlpha * 2.5); context.fillStyle = palette.edge;
+            const w = 2 + 2 * display.lineSize;
+            for (const [a, b] of directed) {
+              const dx = sx[b] - sx[a], dy = sy[b] - sy[a], d = Math.hypot(dx, dy);
+              if (d < sizes[b] + w * 3) continue;
+              const ux = dx / d, uy = dy / d, tipX = sx[b] - ux * (sizes[b] + 1), tipY = sy[b] - uy * (sizes[b] + 1);
+              context.beginPath(); context.moveTo(tipX, tipY);
+              context.lineTo(tipX - ux * w * 1.8 - uy * w * 0.8, tipY - uy * w * 1.8 + ux * w * 0.8);
+              context.lineTo(tipX - ux * w * 1.8 + uy * w * 0.8, tipY - uy * w * 1.8 - ux * w * 0.8);
+              context.closePath(); context.fill();
+            }
+            context.globalAlpha = 1;
+          }
         }
         if (cache) {
           const ratio = camera.k / cache.camera.k;
@@ -277,9 +358,9 @@ export function createGraphCanvas(React) {
         }
         // 聚焦与拖动复用同一无向邻居投影，不另解释方向或重复引用。
         const moving = cache?.omit ?? -1;
-        for (const node of new Set([moving, emphasized])) {
+        for (const node of born ? [] : new Set([moving, emphasized])) {
           if (node < 0) continue;
-          context.lineWidth = node === emphasized ? 1 : 0.6;
+          context.lineWidth = (node === emphasized ? 1 : 0.6) * display.lineSize;
           context.strokeStyle = node === emphasized ? palette.accent : palette.edge;
           context.globalAlpha = node === emphasized ? 0.7 * glow : 0.2;
           // 枢纽笔记可能有上百个邻居，同样逐条描；线都从本节点出发，重叠只落在随后绘制的节点圆内。
@@ -288,38 +369,43 @@ export function createGraphCanvas(React) {
         }
         const chosen = index.get(latest.current.selectedPath);
         for (let i = 0; i < n; i++) {
+          if (!grown(i)) continue;
           if (sx[i] < -24 || sy[i] < -24 || sx[i] > width + 24 || sy[i] > height + 24) continue;
-          context.beginPath(); context.arc(sx[i], sy[i], sizes[i], 0, Math.PI * 2);
-          context.globalAlpha = dim(0.18, i) * appear(i);
-          // 当前、悬停和键盘选中的节点仍用强调色（和 Obsidian 一样），其余按层上色。
+          const grow = sprout(i);
+          context.beginPath(); context.arc(sx[i], sy[i], sizes[i] * (0.35 + 0.65 * grow), 0, Math.PI * 2);
+          context.globalAlpha = dim(0.18, i) * appear(i) * grow;
+          // 当前、悬停和键盘选中的节点用强调色，其余按颜色组上色；哪组都不是的用次要文字色（灰）。
           const highlighted = i === chosen || i === hover || i === keyboard;
           const color = highlighted ? palette.accent : palette.foreground;
-          context.fillStyle = nodes[i].kind === 'missing' ? palette.background : highlighted ? color : layerColors[i] || color;
+          context.fillStyle = nodes[i].kind === 'missing' ? palette.background : highlighted ? color : layerColors[i] || palette.edge;
           context.fill();
           // 缺失身份只用于关系投影；空心节点与实际可读笔记区分，点击仍返回完整节点。
           if (nodes[i].kind === 'missing') { context.lineWidth = 1.3; context.strokeStyle = color; context.stroke(); }
           if (i === keyboard) { context.lineWidth = 2; context.strokeStyle = palette.accent; context.stroke(); }
         }
         context.globalAlpha = 1;
-        // 在镜头平移之外选定标签，再做视口裁剪；出屏候选仍占位，不挤换可见标题。
-        if (!labelSelection) {
+        // 名字多少：“样子”里的滑块往右多显示、往左少显示（默认 0，和原来一样）。
+        const boost = 2 ** display.textFade;
+        // 在镜头平移之外选定标签，再做视口裁剪；出屏候选仍占位，不挤换可见标题。生长期间只写刚长出来的那几个。
+        if (born) labelSelection = growth.order.slice(Math.max(0, growth.next - 12), growth.next).filter(i => now - born[i] < 1100);
+        else if (!labelSelection) {
           const occupied = [];
-          const budget = n > 80 ? Math.max(8, Math.floor(width * height / 30000 * (camera.k / fittedScale) ** 2)) : n;
+          const budget = n > 80 ? Math.max(display.textFade < 0 ? 0 : 8, Math.floor(width * height / 30000 * (camera.k / fittedScale) ** 2 * boost * boost)) : boost < 0.5 ? 0 : n;
           labelSelection = [];
-          if (camera.k >= 0.15) for (const i of priorities) {
+          if (camera.k * boost >= 0.15) for (const i of priorities) {
             if (labelSelection.length >= budget) break;
             const rect = { left: x[i] * camera.k - labelCache[i].width / 2, top: y[i] * camera.k + sizes[i] + 5, width: labelCache[i].width };
             if (occupied.some(other => rect.left < other.left + other.width && rect.left + rect.width > other.left && rect.top < other.top + 17 && rect.top + 17 > other.top)) continue;
             occupied.push(rect); labelSelection.push(i);
           }
         }
-        const order = [...new Set([...labelSelection, chosen, keyboard, hover])].filter(i => i !== undefined && i >= 0);
+        const order = born ? labelSelection : [...new Set([...labelSelection, chosen, keyboard, hover])].filter(i => i !== undefined && i >= 0);
         context.font = '12px sans-serif'; context.textAlign = 'center'; context.textBaseline = 'top';
         for (const i of order) {
           const { text, width: textWidth } = labelCache[i];
           const left = sx[i] - textWidth / 2, top = sy[i] + sizes[i] + 5;
           if (left < 2 || left + textWidth > width - 2 || top < 2 || top + 17 > height - 2) continue;
-          context.globalAlpha = dim(0.25, i) * fade(0.7, 0.3);
+          context.globalAlpha = born ? clamp(1 - (now - born[i] - 500) / 600, 0, 1) * sprout(i) : dim(0.25, i) * fade(0.7, 0.3);
           context.lineWidth = 4; context.strokeStyle = palette.background; context.strokeText(text, sx[i], top);
           context.fillStyle = palette.foreground; context.fillText(text, sx[i], top);
         }
@@ -332,7 +418,7 @@ export function createGraphCanvas(React) {
         // running期间不绘制或交互，resize/reset的暂态fit也会在完成时重做；只发布完整300tick坐标。
         if (steps === 300) { geometry++; for (let i = 0; i < n; i++) {
           x[i] = layout.nodes[i].x; y[i] = layout.nodes[i].y;
-        } }
+        } remember(); }
         return steps < 300;
       };
       // 把模拟里的坐标换上画布；标题选哪些在实时物理期间不重排，免得跟着点的移动一闪一闪，停下后再重选。
@@ -362,12 +448,67 @@ export function createGraphCanvas(React) {
         const dragging = Boolean(drag?.live), quiet = !motion && !dragging;
         const until = performance.now() + 8;
         do {
-          if (!dragging) home(homeStrength.releasedPull / Math.max(simulation.alpha(), simulation.alphaMin()));
+          // 换了排布之后还没拖过，没有“家”可回：只按新的力自己找平衡。
+          if (!dragging && homed) home(homeStrength.releasedPull / Math.max(simulation.alpha(), simulation.alphaMin()));
           simulation.tick();
         } while (quiet && simulation.alpha() >= simulation.alphaMin() && performance.now() < until);
         if (!dragging && simulation.alpha() < simulation.alphaMin()) {
-          live = false; publish(); labelSelection = null; beginEdges();
+          live = false; publish(); remember(); labelSelection = null; beginEdges();
         } else if (!quiet) publish();
+      };
+      /** 换排布的四个数：小图逐帧慢慢挪到新的平衡（和拖动松手后一样），大图重新排一遍。 */
+      const retune = next => {
+        if (!next || ['center', 'repel', 'link', 'distance'].every(key => next[key] === appliedForces[key])) return;
+        appliedForces = next;
+        retuneGraphLayout(layout, next);
+        if (n < 2 || running) return;
+        if (growth) stopGrow();
+        if (liveCapable) {
+          // 原来记的“家”是旧排布的位置，换了力就作废，下次拖动时按新的平衡重新记。
+          if (homed) { simulation.force('homeX', null).force('homeY', null); homed = false; }
+          if (!live) { live = true; releaseLayer(edgeCache); edgeCache = null; releaseLayer(building); building = null; setSettling(false); }
+          simulation.alpha(Math.max(simulation.alpha(), 0.5)).alphaTarget(0);
+        } else { running = true; steps = 0; simulation.alpha(1); }
+        schedule();
+      };
+      /**
+       * 生长动画：按建立日期（没有日期的算最早）一个个长出来，约 6 到 14 秒；镜头跟着已经长出来的部分慢慢拉远，
+       * 放完再退回看全图。onTick 约每 0.1 秒报一次长到第几个、到了哪天；onEnd 放完或停下时报。
+       * 系统要求减弱动态效果时不播，直接报放完。布局还没排好时不播。
+       */
+      const grow = (callbacks = {}) => {
+        if (running || n === 0) return false;
+        stopDrag(true); hover = keyboard = -1; focus(-1);
+        const order = Array.from({ length: n }, (_, i) => i).sort((a, b) => (nodes[a].created || '').localeCompare(nodes[b].created || '') || a - b);
+        const last = nodes[order[n - 1]].created || '';
+        if (!motion) { callbacks.onEnd?.({ count: n, date: last, instant: true }); return true; }
+        if (growth) growth.callbacks.onEnd?.({ stopped: true });
+        growth = { order, born: new Float64Array(n), next: 0, start: performance.now(), duration: clamp(n * 28, 6000, 14000), callbacks, reported: 0, last };
+        intro = 1; ease = 0; touched = true;
+        releaseLayer(edgeCache); edgeCache = null; releaseLayer(building); building = null;
+        schedule();
+        return true;
+      };
+      const stopGrow = () => {
+        if (!growth) return;
+        const { callbacks } = growth;
+        growth = null; ease = 45; labelSelection = null; beginEdges(); schedule();
+        callbacks.onEnd?.({ stopped: true });
+      };
+      const easeCamera = (goal, rate) => { camera.k += (goal.k - camera.k) * rate; camera.x += (goal.x - camera.x) * rate; camera.y += (goal.y - camera.y) * rate; };
+      const advanceGrowth = () => {
+        const g = growth, now = performance.now();
+        const due = Math.min(n, Math.floor((now - g.start) / g.duration * n) + 1);
+        while (g.next < due) g.born[g.order[g.next++]] = now;
+        easeCamera(fittedCamera(i => g.born[i] > 0), 0.06);
+        if (now - g.reported > 90 || g.next === n) {
+          g.reported = now;
+          g.callbacks.onTick?.({ count: g.next, total: n, date: nodes[g.order[g.next - 1]].created || '' });
+        }
+        if (g.next === n && now - g.born[g.order[n - 1]] > 1200) {
+          growth = null; ease = 60; labelSelection = null; beginEdges();
+          g.callbacks.onEnd?.({ count: n, date: g.last });
+        }
       };
       const tick = () => {
         frame = 0;
@@ -381,6 +522,8 @@ export function createGraphCanvas(React) {
         if (!direct && !running && !live && !building && !edgeCache) beginEdges();
         paintEdges();
         // 未收敛坐标不呈现为可交互图，首个可见帧只使用最终 fit，避免缩放跳变。
+        if (growth && !running) advanceGrowth();
+        else if (ease > 0 && !drag) { easeCamera(fittedCamera(), 0.12); if (--ease === 0) { fit(); fittedScale = camera.k; touched = false; beginEdges(); } }
         if (!running) { animate(); draw(); }
         if (running || live || building || animating()) schedule(); else clock = 0;
       };
@@ -405,7 +548,7 @@ export function createGraphCanvas(React) {
       };
       const point = event => { const rect = element.getBoundingClientRect(); return { x: event.clientX - rect.left, y: event.clientY - rect.top }; };
       const hit = point => {
-        if (running) return -1;
+        if (running || growth) return -1;
         let found = -1, distance = Infinity;
         for (let i = 0; i < n; i++) {
           const d = (sx[i] - point.x) ** 2 + (sy[i] - point.y) ** 2;
@@ -475,6 +618,8 @@ export function createGraphCanvas(React) {
       };
       const leave = () => { if (!drag) { hover = -1; focus(keyboard); } };
       const reset = () => {
+        if (growth) { growth.callbacks.onEnd?.({ stopped: true }); growth = null; }
+        ease = 0;
         // 两个重置入口同时恢复镜头与边缓存，避免保留放大后的精绘线宽。
         clearTimeout(refineTimer); refineTimer = 0;
         stopDrag(true); hover = keyboard = -1; focus(-1); touched = false; fit(); beginEdges(); schedule();
@@ -525,23 +670,33 @@ export function createGraphCanvas(React) {
       const observer = new ResizeObserver(resize); observer.observe(element);
       const unsubscribe = subscribeTheme?.(() => { colors(); releaseLayer(edgeCache); edgeCache = null; beginEdges(); schedule(); });
       colors(); resize();
-      controller.current = { repaint: schedule, reset };
+      // 换了“样子”（点大小、线粗细、名字多少、箭头）：重新选名字、重画；连线图层按新线宽重建。
+      const redisplay = () => { labelSelection = null; releaseLayer(edgeCache); edgeCache = null; if (!running && !live && !growth) beginEdges(); schedule(); };
+      // 只改了颜色组：换颜色、重画，不重新排布。
+      const recolor = map => { for (let i = 0; i < n; i++) layerColors[i] = colorOf(nodes[i], map); schedule(); };
+      controller.current = { repaint: schedule, reset, grow, stopGrow, retune, redisplay, recolor };
+      if (controllerRef) controllerRef.current = controller.current;
       return () => {
         alive = false; simulation.stop(); if (frame) cancelAnimationFrame(frame); clearTimeout(refineTimer); stopDrag(true); observer.disconnect(); unsubscribe?.();
         for (const [name, handler] of Object.entries(listeners)) element.removeEventListener(name, handler);
         element.removeEventListener('wheel', wheel); document.removeEventListener('visibilitychange', visibility);
         reducedMotion?.removeEventListener('change', motionChanged);
         releaseLayer(building); releaseLayer(edgeCache); releaseLayer(lineLayer);
+        if (controllerRef && controllerRef.current === controller.current) controllerRef.current = null;
+        growth = null;
         controller.current = null;
       };
     }, [graph, subscribeTheme]);
     useEffect(() => { controller.current?.repaint(); }, [selectedPath, disabled]);
+    useEffect(() => { controller.current?.redisplay?.(); }, [display.nodeSize, display.lineSize, display.textFade, display.arrows]);
+    useEffect(() => { controller.current?.retune?.(forces); }, [forces.center, forces.repel, forces.link, forces.distance]);
+    useEffect(() => { controller.current?.recolor?.(colors); }, [colors]);
     return h('div', { className: 'ww-graph-canvas', style: { position: 'relative', height: '100%', flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', borderRadius: 10, background: 'var(--dsw-alias-bg-layer-1)' } },
       h('canvas', { ref: canvas, tabIndex: 0, role: 'group', 'aria-label': label, 'aria-busy': settling, style: { display: 'block', width: '100%', height: '100%', touchAction: 'none', cursor: 'grab', outlineOffset: -3 } }),
-      h('button', { type: 'button', onClick: () => controller.current?.reset(), style: { position: 'absolute', right: 8, top: 8 } }, resetLabel),
+      showReset && h('button', { type: 'button', onClick: () => controller.current?.reset(), style: { position: 'absolute', right: 8, top: 8 } }, resetLabel),
       settling && h('span', { role: 'status', style: { position: 'absolute', left: 10, top: 10, pointerEvents: 'none', fontSize: 12 } }, loadingLabel(painted, edgeCount)),
       // 图例只列这张图上有的层；准备图谱时让位给进度。
-      !settling && legend && h(GraphLegend, { graph, legend, label: legendLabel, hiddenNote }),
+      !settling && (legend || legendItems) && h(GraphLegend, { graph, items: legendItems, legend, label: legendLabel, hiddenNote }),
       focused && h('div', { role: 'status', style: { position: 'absolute', left: 10, bottom: 8, maxWidth: 'calc(100% - 20px)', padding: '5px 8px', borderRadius: 6, background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', pointerEvents: 'none', overflowWrap: 'anywhere', fontSize: 12 } }, focused.title),
       error && h('div', { role: 'alert' }, error));
   };

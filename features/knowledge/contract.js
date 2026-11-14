@@ -5,7 +5,8 @@ export function knowledgeContract(z) {
   const count = z.number().int().nonnegative();
   const hash = text;
   const input = z.discriminatedUnion('action', [
-    ...['status', 'initialize', 'validate'].map(action => z.strictObject({ action: z.literal(action) })),
+    // overview：知识积累右栏的标签、属性和快速切换用的笔记清单，只给员工的界面。
+    ...['status', 'initialize', 'validate', 'overview'].map(action => z.strictObject({ action: z.literal(action) })),
     z.strictObject({ action: z.literal('search'), query: text.max(200).optional() }),
     z.strictObject({ action: z.literal('browse'), directory: text.max(240).optional(), offset: count.optional() }),
     ...['read', 'document'].map(action => z.strictObject({ action: z.literal(action), path: notePath })),
@@ -13,6 +14,9 @@ export function knowledgeContract(z) {
     ...['remove', 'restore'].map(action => z.strictObject({ action: z.literal(action), path: notePath, expectedHash: hash })),
     z.strictObject({ action: z.literal('graph'), path: notePath.optional(), query: text.max(200).optional(), offset: count.optional() }),
     z.strictObject({ action: z.literal('question'), question: text.trim().min(1).max(4000), paths: z.array(notePath).max(12) }),
+    // 知识积累左下角切换：扩展列出的知识空间；把自己的一篇笔记交给扩展的某个知识空间。
+    z.strictObject({ action: z.literal('spaces') }),
+    z.strictObject({ action: z.literal('submit'), path: notePath, source: text.min(1).max(80), space: text.min(1).max(64), target: notePath }),
   ]);
   // 扩展提供的只读笔记带来源；个人笔记没有这个字段。
   const source = z.strictObject({ id: text, label: z.strictObject({ zh: text, en: text }) });
@@ -21,11 +25,14 @@ export function knowledgeContract(z) {
   const view = z.lazy(() => z.strictObject({ type: z.enum(['root', 'group', 'paragraph', 'heading', 'text', 'blockquote', 'code', 'inlineCode', 'strong', 'emphasis', 'delete', 'list', 'listItem', 'thematicBreak', 'break', 'table', 'tableRow', 'tableCell', 'footnoteDefinition', 'link', 'knowledgeLink']), line: count, value: text.optional(), level: z.number().int().min(1).max(6).optional(), ordered: z.boolean().optional(), start: count.optional(), checked: z.boolean().optional(), url: text.optional(), index: count.optional(), children: z.array(view).optional() }));
   // 版本属于整张图，空节点列表也必须拒收不带类型与连接度语义的旧响应。
   const graphResult = z.strictObject({ version: z.literal(2), nodes: z.array(z.discriminatedUnion('kind', [
-    z.strictObject({ kind: z.literal('note'), path: text, title: text, degree: count, readOnly: z.boolean() }),
+    // 员工看的全库图另带建立日期、标签和附件（2026-11-10 起），界面按图谱设置筛选、上色、播放生长动画。
+    z.strictObject({ kind: z.literal('note'), path: text, title: text, degree: count, readOnly: z.boolean(), created: text.optional(), tags: z.array(text).optional(), attachments: z.array(text).optional() }),
     z.strictObject({ kind: z.literal('missing'), path: text.regex(/^missing:(?:name|path):.+/), title: text, degree: count, sources: z.array(z.strictObject({ path: text, title: text, line: count })).min(1) }),
   ])), edges: z.array(z.strictObject({ source: text, target: text })), total: count, offset: count, truncated: z.boolean(), omittedEdges: count, unresolved: count,
     // 只有全库图带：没画的归档、模板和没有连线的笔记各有几篇。
     hidden: z.strictObject({ archive: count, templates: count, orphans: count }).optional() });
+  const space = z.strictObject({ id: text, name: text, group: text.optional(), note: text.optional(), editable: z.boolean(), notes: z.array(z.strictObject({ path: text, title: text })) });
+  const spacesResult = z.strictObject({ libraries: z.array(z.strictObject({ id: text, label: source.shape.label, submit: z.boolean(), spaces: z.array(space) })), issues: z.array(text) });
   const result = z.union([
     // bundle 只在有要提示的事时出现：edited 是规则、模板、视图、根目录入口里和新版不一样或不属于插件的文件（下次升级换成新版），
     // replaced 是这次升级换掉的文件和另存的位置，issue 是随包更新失败的原因。
@@ -39,6 +46,9 @@ export function knowledgeContract(z) {
     note.extend({ view, links: z.array(link), anchors: z.array(z.strictObject({ kind: z.enum(['heading', 'block']), value: text, line: count })), properties: z.array(z.strictObject({ key: text, values: z.array(z.strictObject({ text, link: count.optional() })) })).optional(), backlinks: z.array(z.strictObject({ path: text, title: text, line: count, context: text.optional(), property: text.optional() })), totalBacklinks: count, relationsIssue: text.optional() }),
     graphResult,
     z.strictObject({ prompt: text, sources: z.array(z.strictObject({ path: text, absolutePath: text, hash })) }),
+    spacesResult,
+    z.strictObject({ applied: z.boolean(), message: text.optional() }),
+    z.strictObject({ notes: z.array(z.strictObject({ path: text, title: text, aliases: z.array(text), created: text })), tags: z.array(z.strictObject({ name: text, count, notes: z.array(text) })), properties: z.array(z.strictObject({ name: text, count })) }),
   ]);
   const packageName = 'dsh-whalewing/knowledge';
   const descriptor = {

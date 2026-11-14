@@ -245,7 +245,7 @@ test('进入时先读日期索引和最新 30 期：页头、当天首页、今�
   const page = mount();
   assert.deepEqual(page.api.calls, [{ action: 'days', fieldId: 'ai-tips' }, { action: 'reports', fieldId: 'ai-tips' }]);
   assert.ok(all(page.tree, node => node.props?.['aria-busy'] === true).length, '读取中先显示骨架');
-  assert.match(text(page.tree), /知识卡片›AI 使用技巧/);
+  assert.match(text(page.tree), /每日阅读›AI 使用技巧/);
   const tree = await page.settle(), body = text(tree);
   assert.ok(body.includes('每天 08:00 随每日资讯整理 · 共 7 期'));
   assert.equal(page.api.calls.length, 2, '最新 30 期已经覆盖全部，不再多读');
@@ -264,20 +264,20 @@ test('进入时先读日期索引和最新 30 期：页头、当天首页、今�
   page.unmount();
 });
 
-test('面包屑回首页、编辑来源；停用时换成“到卡片设置开启”，删除后只读并隐藏按钮', async () => {
+test('面包屑回首页、编辑来源；停用时换成“到阅读设置开启”，删除后只读并隐藏按钮', async () => {
   const page = mount();
   await page.settle();
-  press(buttons(page.tree, '知识卡片')[0]); press(buttons(page.tree, '编辑来源')[0]);
+  press(buttons(page.tree, '每日阅读')[0]); press(buttons(page.tree, '编辑来源')[0]);
   assert.deepEqual(page.events, ['back', 'edit']);
   page.render({ busy: true });
   assert.equal(buttons(page.tree, '编辑来源')[0].props.disabled, true);
   page.render({ busy: false, field: { name: 'AI 使用技巧', enabled: false, deleted: false } });
   assert.ok(text(classed(page.tree, 'ww-tips-crumbs')[0]).includes('已停用'));
-  press(buttons(page.tree, '到卡片设置开启')[0]);
+  press(buttons(page.tree, '到阅读设置开启')[0]);
   assert.deepEqual(page.events, ['back', 'edit', 'edit']);
   page.render({ field: { name: 'AI 使用技巧', enabled: false, deleted: true } });
   assert.ok(text(page.tree).includes('领域已删除 · 只读'));
-  assert.equal(buttons(page.tree, '编辑来源').length + buttons(page.tree, '到卡片设置开启').length, 0);
+  assert.equal(buttons(page.tree, '编辑来源').length + buttons(page.tree, '到阅读设置开启').length, 0);
   page.render({ field: null });
   assert.ok(text(page.tree).includes('领域已删除 · 只读'), '领域记录不存在按只读处理');
   assert.ok(text(page.tree).includes('2026-10-24 第 1 条技巧'), '历史仍可读');

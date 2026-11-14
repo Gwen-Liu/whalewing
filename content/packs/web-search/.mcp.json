@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "bailian-websearch": {
+      "type": "http",
+      "url": "https://dashscope.aliyuncs.com/api/v1/mcps/WebSearch/mcp",
+      "headers": { "Authorization": "Bearer ${user_config.dashscopeKey}" }
+    },
+    "tavily": {
+      "type": "http",
+      "url": "https://mcp.tavily.com/mcp/?tavilyApiKey=${user_config.tavilyKey}"
+    }
+  }
+}

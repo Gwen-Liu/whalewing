@@ -123,7 +123,8 @@ test('工作台标记不初始化或采集来源，status自动就绪且持久�
   ctx.provide('skills', {});
   const service = await isolatedService(ctx, directory, { vaultRoot: path.join(directory, 'vault') });
   // 2026-10-25 定时任务新增运行结果投影 whalewingRuns：按会话折叠每次送达那一轮的结束情况。
-  assert.deepEqual(registered, ['whalewingWorkbench', 'whalewingAutomation', 'whalewingRuns']);
+  // 2026-11-10 扩展登记的任务新增归属投影 whalewingTaskOwner：和用途出自同一条认领回执。
+  assert.deepEqual(registered, ['whalewingWorkbench', 'whalewingAutomation', 'whalewingTaskOwner', 'whalewingRuns']);
   t.after(async () => { await ctx.fiber.dispose(); await fs.rm(directory, { recursive: true, force: true }); });
   const agent = { status: 'idle', session: { id: 'workbench-session' } };
   const run = action => command.handler({ agent, rawInput: JSON.stringify({ action }) });
@@ -364,6 +365,8 @@ test('资讯工具经Host统一生命周期到真实领域，采集预算不被�
   };
   const candidates = JSON.parse(await tools.get('whalewing_news').execute({ action: 'candidates', fieldId: 'work' }, exec));
   assert.equal(candidates.candidates.length, 1);
+  // 交给模型的候选是整理过的：编号只有 12 位，来源只留名字；拿这个短编号提交照样认。
+  assert.match(candidates.candidates[0].id, /^[a-f0-9]{12}$/); assert.equal(typeof candidates.candidates[0].source, 'string'); assert.equal(Object.hasOwn(candidates.field, 'sources'), false);
   const result = JSON.parse(await tools.get('whalewing_news').execute({ action: 'submit', receipt: candidates.receipt, items: [{ sourceIds: [candidates.candidates[0].id], category: 'model', label: 'official', title: '厂商发布「模型更新」', link: candidates.candidates[0].url, brief: '正式发布更新。', relevance: '与工作有关。', eventKey: '模型更新事件' }] }, exec));
   assert.equal(result.completed, true);
   assert.equal((await h.cards.manageNews({ action: 'report', fieldId: 'work', cutoff: candidates.cutoff })).report.items.length, 1);

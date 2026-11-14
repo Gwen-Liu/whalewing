@@ -6,11 +6,13 @@ import { isSourceNotePath } from './extension-sources.js';
 import { assistantNames } from './assistant-name.js';
 import { SkillLibrary } from './skills.js';
 import { ProfileSources } from './profile-sources.js';
+import { isExactProjection } from './session-projection.js';
+import { beijingDate, dayStart, pendingDays, readableWindows } from '../features/automation/extension-tasks.js';
 
 // 状态里的版本跟随插件包，发版只改 package.json 一处。
 const pluginVersion = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 export const schedulePrefix = '鲸翼知识沉淀\n';
-const humanOnly = new Set(['initialize', 'source_add', 'source_remove']);
+const humanOnly = new Set(['initialize', 'source_add', 'source_remove', 'spaces', 'submit', 'overview']);
 const retiredSchedules = new Set(['schedule_list', 'schedule_create', 'schedule_delete', 'schedule_run']);
 
 /** 保留可核对的对话原文，不把工具返回、请求头和自动整理再次喂回知识整理。 */
@@ -33,6 +35,12 @@ export function conversationText(events) {
 
 function sessionId(value) {
   if (typeof value !== 'string' || !/^[\w-]{1,100}$/.test(value)) fail('SESSION', '会话标识无效');
+  return value;
+}
+
+/** 扩展任务读会话的日期：北京时间 YYYY-MM-DD。 */
+function taskDay(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`)) || new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) !== value) fail('TASK_DAY', '日期写成北京时间的 YYYY-MM-DD');
   return value;
 }
 
@@ -148,13 +156,16 @@ export class WhalewingCore {
     }
     const sources = this.dependencies.sources?.();
     // 以 @ 开头的路径是扩展提供的只读笔记；扩展自己调用时只碰个人知识。
-    if (isSourceNotePath(args.path)) {
+    if (isSourceNotePath(args.path) && args.action !== 'submit') {
       if (caller.kind === 'plugin') fail('EXTENSION_NOTE_PLUGIN', '扩展只能读取个人知识，不能读取其它扩展提供的笔记');
-      if (['write', 'remove', 'restore'].includes(args.action)) fail('EXTENSION_NOTE_READ_ONLY', '这篇笔记由扩展提供，在鲸翼里只能阅读；要修改请到提供它的扩展里改');
+      // 维护人只能在知识积累里自己改团队笔记，模型不能替员工改；删除和恢复都交给提供它的扩展。
+      if (args.action === 'write' && caller.kind !== 'human') fail('EXTENSION_NOTE_READ_ONLY', '这篇笔记由扩展提供，模型不能改；员工是维护人的话，可以在知识积累里打开它自己改');
+      if (['remove', 'restore'].includes(args.action)) fail('EXTENSION_NOTE_READ_ONLY', '这篇笔记由扩展提供，在鲸翼里不能删除或恢复；要删请到提供它的扩展里删');
       if (args.action === 'graph') fail('EXTENSION_NOTE_GRAPH', '扩展提供的笔记不在个人知识的关系图谱里');
       if (!sources) fail('EXTENSION_SOURCE_CLOSED', '这篇笔记来自已关闭或卸载的扩展；请重新开启扩展后再打开');
       if (args.action === 'read') { const { absolutePath: _absolutePath, ...note } = await sources.readKnowledge(args.path, signal); return note; }
       if (args.action === 'document') return sourceDocument(await sources.readKnowledge(args.path, signal));
+      if (args.action === 'write') return sources.saveKnowledge(args.path, args.content, args.expectedHash, signal);
     }
     switch (args.action) {
       case 'status': return { version: pluginVersion, initialized: await this.vault.initialized(), root: this.vault.root, skillsDir: this.skills.root, limits: this.vault.limits, scheduleAvailable: Boolean(this.dependencies.schedule()), ...(await this.bundleStatus(signal)) };
@@ -168,6 +179,15 @@ export class WhalewingCore {
         return { notes: [...personal.notes, ...merged.notes], truncated: personal.truncated || merged.truncated, total: personal.total + merged.total, ...(Object.keys(merged.labels).length ? { sourceLabels: merged.labels } : {}), ...(merged.issues.length ? { sourceIssues: merged.issues } : {}) };
       }
       case 'browse': return this.vault.browse(args.directory, args.offset, signal);
+      // 知识积累左下角的知识库切换：扩展列出的知识空间；没有扩展时是空的。
+      case 'spaces': return sources ? sources.listKnowledge(signal) : { libraries: [], issues: [] };
+      // 把自己的一篇笔记交给扩展：读出这一篇现在的正文发过去，个人知识库不动。
+      case 'submit': {
+        if (!sources) fail('EXTENSION_SOURCE_CLOSED', '提供团队知识的扩展已关闭或卸载；请重新开启扩展后再提交');
+        if (isSourceNotePath(args.path)) fail('PATH', '只能提交自己的笔记');
+        const note = await this.vault.read(args.path);
+        return sources.submitKnowledge(args.source, { space: args.space, target: args.target, from: note.path, content: note.content }, signal);
+      }
       case 'read': return this.vault.read(args.path);
       case 'document': return this.vault.document(args.path, signal);
       // 员工在界面上看的是全库图；模型调用仍分页。
@@ -189,6 +209,8 @@ export class WhalewingCore {
         return result;
       }
       case 'validate': return this.vault.validate(signal);
+      // 知识积累右栏的标签、属性和快速切换用的笔记清单。
+      case 'overview': return this.vault.overview(signal);
       case 'sources': {
         const purpose = caller.agent && this.dependencies.automationIdentity ? await this.dependencies.automationIdentity(caller.agent.session.id, signal) : null;
         if (purpose === 'knowledge') return this.profileSources.list(caller);
@@ -204,8 +226,102 @@ export class WhalewingCore {
       case 'source_remove': return this.removeSource(args, signal);
       case 'source_read': return this.readSource(args, caller);
       case 'complete': return this.complete(args, caller);
+      case 'day_sources': return this.daySources(args, caller);
+      case 'day_read': return this.dayRead(args, caller);
+      case 'day_done': {
+        const task = await this.taskCaller(caller);
+        return this.dependencies.extensionTaskDone(task.owner, taskDay(args.date), signal);
+      }
       default: fail('ACTION', '未知知识动作');
     }
+  }
+
+  /**
+   * 扩展登记、允许读会话的定时任务（2026-11-10 起）：按北京时间一天一天读任务登记以后的对话原文。
+   * 和每日记忆的读法分开：不碰每日记忆的整理进度，也不写知识库；处理到哪天由任务自己记。
+   */
+  async taskCaller(caller) {
+    const id = caller.agent?.session.id;
+    const outside = () => fail('TASK_SESSIONS', 'day_sources、day_read、day_done 只在扩展登记、允许读会话的定时任务里用');
+    if (!id || !this.dependencies.automationClaim || !this.dependencies.extensionTask) outside();
+    const { purpose, owner } = await this.dependencies.automationClaim(id, caller.signal);
+    if (purpose !== 'extension' || !owner) outside();
+    const progress = await this.dependencies.extensionTask(owner, caller.signal);
+    if (!progress.registered) fail('EXTENSION_TASK_CLOSED', '登记这个任务的扩展没有打开，不读会话');
+    if (!progress.readSessions) fail('TASK_SESSIONS', '登记这个任务的扩展没有允许它读会话');
+    if (!progress.record) fail('TASK_NOT_FOUND', '这个任务的记录不在了，请让扩展重新登记');
+    return { owner, self: id, record: progress.record };
+  }
+
+  /** 能读的日子：登记那天到昨天（北京时间）；今天还没过完。 */
+  taskDayInRange(record, date) {
+    if (date < beijingDate(record.since)) fail('TASK_DAY', `这个任务 ${beijingDate(record.since)} 才登记，更早的会话不读`);
+    if (date >= beijingDate(Date.now())) fail('TASK_DAY', '今天还没过完，明天再读今天的会话');
+    return date;
+  }
+
+  /** 列出还没处理的日子，和某一天（默认最早没处理的那天）有对话的普通会话；会话多时分批，after 接着上一批。 */
+  async daySources(args, caller) {
+    const { record, self } = await this.taskCaller(caller);
+    const pending = pendingDays(record);
+    const date = args.date === undefined ? pending[0] : this.taskDayInRange(record, taskDay(args.date));
+    const head = { pending: pending.slice(0, 31), pendingTotal: pending.length };
+    if (!date) return { ...head, sessions: [], hasMore: false, note: '没有还没处理的日子；今天还没过完，明天再处理今天的' };
+    const windows = readableWindows(record, date), start = dayStart(date), end = start + 86_400_000;
+    const readable = windows.map(([from, to]) => ({ from: new Date(from).toISOString(), to: new Date(to).toISOString() }));
+    if (!windows.length) return { ...head, date, readable, sessions: [], hasMore: false, note: '这一天整天都在暂停，没有能读的对话' };
+    // 普通会话（不是子代理、不是任何定时任务自己的），那天结束前建的；最后一次提问早于那天开始 12 小时以上的跳过。
+    const headers = (await this.profileSources.directory(caller.signal)).filter(header => header.createdAt < end && header.id !== self);
+    let from = 0;
+    if (args.after !== undefined) {
+      const at = headers.findIndex(header => header.id === args.after);
+      if (typeof args.after !== 'string' || at < 0) fail('TASK_CURSOR', 'after 要用上一批返回的 after；会话目录变了就不带 after 从头列');
+      from = at + 1;
+    }
+    const batch = headers.slice(from, from + 40), sessions = [], issues = [];
+    let excluded = 0;
+    for (const header of batch) {
+      abort(caller.signal);
+      try {
+        const projection = await observeRead(() => this.dependencies.readProjection(header.id, caller.signal), caller.signal);
+        if (!isExactProjection(projection) || !Object.hasOwn(projection.values, 'whalewingAutomation')) { issues.push({ sessionId: header.id, message: '会话用途还没确认，先跳过' }); continue; }
+        if (projection.values.whalewingAutomation !== null) { excluded++; continue; }
+        const lastPromptAt = projection.values.sessionListMetadata?.lastPromptAt;
+        if (Number.isFinite(lastPromptAt) && Math.max(header.createdAt, lastPromptAt) < start - 12 * 3_600_000) continue;
+        sessions.push({ sessionId: header.id, cwd: header.cwd ?? '' });
+      } catch (error) { abort(caller.signal); issues.push({ sessionId: header.id, message: error.message }); }
+    }
+    const hasMore = headers.length > from + batch.length;
+    return { ...head, date, readable, sessions, issues, inspected: batch.length, excluded, hasMore, ...(hasMore && batch.length ? { after: batch.at(-1).id } : {}) };
+  }
+
+  /** 读一个普通会话在某一天能读的时段里的对话原文；一页放不下就带 afterSeq 接着读。 */
+  async dayRead(args, caller) {
+    const { record, self } = await this.taskCaller(caller);
+    const date = this.taskDayInRange(record, taskDay(args.date));
+    const id = sessionId(args.sessionId);
+    if (id === self) fail('SOURCE_SCOPE', '不读任务自己的会话');
+    if (args.afterSeq !== undefined && !Number.isSafeInteger(args.afterSeq)) fail('INPUT', 'afterSeq 要用上一页返回的 throughSeq');
+    const header = (await this.profileSources.directory(caller.signal)).find(item => item.id === id);
+    if (!header) fail('SOURCE_SCOPE', '这个会话不是普通会话或已经不在了，不读');
+    const projection = await observeRead(() => this.dependencies.readProjection(id, caller.signal), caller.signal);
+    if (!isExactProjection(projection) || projection.values.whalewingAutomation !== null) fail('SOURCE_SCOPE', '定时任务自己的会话和用途没确认的会话不读');
+    const windows = readableWindows(record, date);
+    const snapshot = await this.observation(id, caller.signal);
+    const projected = conversationText(snapshot.events);
+    const afterSeq = args.afterSeq ?? -1;
+    const remaining = snapshot.events.slice(snapshot.inheritedEventCount).filter(event => event.seq > afterSeq)
+      .map(event => projected.get(event.seq)).filter(text => text && windows.some(([from, to]) => text.time >= from && text.time < to));
+    const events = [];
+    let bytes = 0;
+    for (const text of remaining) {
+      const size = Buffer.byteLength(JSON.stringify(text));
+      if (size > this.vault.limits.maxNoteBytes) fail('EVENT_LIMIT', `事件 ${text.seq} 超出单页限制`);
+      if (events.length >= this.vault.limits.maxEvents || bytes + size > this.vault.limits.maxNoteBytes) break;
+      events.push(text);
+      bytes += size;
+    }
+    return { sessionId: id, date, events, throughSeq: events.at(-1)?.seq ?? afterSeq, hasMore: remaining.length > events.length, mode: 'conversation-text' };
   }
 
   async observation(id, signal) {

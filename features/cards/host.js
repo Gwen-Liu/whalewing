@@ -9,6 +9,7 @@ import { LockedDomain } from '../../src/host/locked-domain.js';
 import { News, newsDomain, newsLimits } from './news.js';
 import { newsContract } from './contract.js';
 import { Library } from './library/store.js';
+import { Reading } from './library/reading.js';
 import { apply as registerTool } from './tool.js';
 const profileNewsDomain = directory => defineDomain({ ...newsDomain, name: `${newsDomain.name}_${createHash('sha256').update(directory).digest('hex')}` });
 
@@ -25,6 +26,19 @@ export default class Cards extends Service {
       directory: signal => this.host.profileDirectory(signal),
       validate: { state: value => contract.library.state.parse(value), catalog: value => contract.library.catalog.parse(value) },
     });
+    // 阅读设置、划线、存过哪些：和书架同一个目录。知识库的读写交给底座；peek 不初始化知识库，给每日资讯读《关于我》用。
+    this.reading = new Reading({
+      directory: signal => this.host.profileDirectory(signal),
+      validate: { state: value => contract.reading.state.parse(value) },
+      knowledge: {
+        read: async (relative, signal) => {
+          try { const note = await this.host.execute({ action: 'read', path: relative }, { kind: 'human', signal }); return { content: note.content, hash: note.hash }; }
+          catch (error) { if (error.code === 'NOT_FOUND') return null; throw error; }
+        },
+        write: (relative, content, expectedHash, signal) => this.host.execute({ action: 'write', path: relative, content, expectedHash }, { kind: 'human', signal }),
+        peek: relative => this.host.vault.readInternal(relative),
+      },
+    });
     this.resource = new LockedDomain({
       directory: signal => this.host.profileDirectory(signal),
       facility: () => {
@@ -35,6 +49,8 @@ export default class Cards extends Service {
       lockName: 'whalewing-news', definition: profileNewsDomain,
       create: domain => new News(domain, {
         learning: nextSignal => this.library.daily(nextSignal),
+        me: nextSignal => this.reading.me(nextSignal),
+        weekly: nextSignal => this.reading.weekly(nextSignal),
         identity: (sessionId, nextSignal) => this.host.automationIdentity(sessionId, nextSignal),
         catalog: nextSignal => this.ctx.whalewingAutomation.automation.catalog(nextSignal),
         pause: (task, nextSignal) => {
@@ -65,8 +81,20 @@ export default class Cards extends Service {
     try {
       const { action, ...input } = contract.library.manage.parse(raw);
       signal = AbortSignal.any([this.libraryLifecycle.signal, ...(signal ? [signal] : [])]);
-      return contract.library.result.parse(await this.library[action](input, signal));
+      const result = contract.library.result.parse(await this.library[action](input, signal));
+      // 书删掉了，这本书的划线一起删；没删成不影响删书。
+      if (action === 'remove') await this.reading.dropBook(input.id, signal).catch(() => {});
+      return result;
     } catch (error) { throw new RemoteError(error.code || error.name || 'ERROR', String(error.message).slice(0, 400), {}); }
+  }
+
+  /** 阅读设置、划线、回顾和存一条；方法名与 action 一一对应。报错同样必须带 details。 */
+  async manageReading(raw, signal) {
+    try {
+      const { action, ...input } = contract.reading.manage.parse(raw);
+      signal = AbortSignal.any([this.libraryLifecycle.signal, ...(signal ? [signal] : [])]);
+      return contract.reading.result.parse(await this.reading[action](input, signal));
+    } catch (error) { throw new RemoteError(error.code || error.name || 'ERROR', String(error.message).replace(/^[A-Z_]+: /, '').slice(0, 400), {}); }
   }
 
   newsOwner(signal) { return this.resource.get(signal); }

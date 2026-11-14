@@ -1,4 +1,5 @@
-import { parts } from '../../features/index.js';
+import { parts, navGroups } from '../../features/index.js';
+import { DEFAULT_PINS, EXTENSION_GROUP, readPins, writePins, readSeen, writeSeen, createNavViews } from './launcher.js';
 import { createPresentation } from './presentation.js';
 import { assistantNames } from '../assistant-name.js';
 
@@ -7,7 +8,7 @@ const DOCK_SLOT = 'whalewing.workbench.dock';
 
 /** 外壳只持导航、等待和呈现租约；领域草稿及恢复判断由对应页签持有。 */
 export function createWorkbenchService(ctx, { bridge, clients, workbenchSession, t, notify, ui, explainError }) {
-  let state = { tab: 'experts', busy: false, revision: 0, recoverySession: '', layout: 'bubble' };
+  let state = { tab: 'experts', busy: false, revision: 0, recoverySession: '', layout: 'bubble', launcher: false };
   const listeners = new Set(), refreshers = new Map(), guards = new Map(), blockers = new Map();
   const visited = new Set(['experts']);
   const operation = { current: null };
@@ -23,7 +24,28 @@ export function createWorkbenchService(ctx, { bridge, clients, workbenchSession,
   const tabListeners = new Set();
   // 新订阅建立后，旧订阅的迟到 dispose/reset 也属于旧消息，不能再清除当前资格。
   const olderEpoch = next => next?.subscription < epoch?.subscription || next?.subscription === epoch?.subscription && next?.generation < epoch?.generation;
-  const emit = patch => { state = { ...state, ...patch, revision: state.revision + 1 }; for (const listener of listeners) listener(); };
+  // 页头：钉住的常用页签记在本机（pins 为 null 是员工还没动过，用默认的那几个）；tempTab 是没钉住、临时放在页头的那一个。
+  let pins = readPins(), tempTab = null;
+  // 哪个功能要员工回来看一眼（2026-11-14 办公工坊方案 A：不在那一页时做好了，页签上标个点）：{ 功能 id: { tone, label } }。
+  let attention = {};
+  const setMark = (id, value) => {
+    const next = value?.tone ? { tone: String(value.tone), label: String(value.label || '') } : null, before = attention[id];
+    if (!next && !before || next && before && next.tone === before.tone && next.label === before.label) return;
+    attention = { ...attention };
+    if (next) attention[id] = next; else delete attention[id];
+    emit({});
+  };
+  const seen = readSeen();
+  const labelOf = entry => (typeof entry?.options.label === 'function' ? entry.options.label() : entry?.options.label) || entry?.options.id || '';
+  const atEnd = id => metadata(id).placement === 'end';
+  const pinnable = () => tabs.map(entry => entry.options.id).filter(id => !atEnd(id));
+  // 钉着的功能一个都不在（比如都关掉了）时，把默认的那几个补在后面，页头不至于空着。
+  const storedPins = () => { const ids = pinnable(), own = pins ?? DEFAULT_PINS; return own.some(id => ids.includes(id)) ? own : [...own, ...DEFAULT_PINS.filter(id => !own.includes(id))]; };
+  const shownPins = () => { const ids = pinnable(); return storedPins().filter(id => ids.includes(id)); };
+  /** 这个页签现在有、但没钉在页头（也不是固定在最右的）。 */
+  const loose = id => pinnable().includes(id) && !shownPins().includes(id);
+  const emit = patch => { state = { ...state, ...patch, revision: state.revision + 1 }; if (loose(state.tab)) tempTab = state.tab; for (const listener of listeners) listener(); };
+  const savePins = next => { pins = next; writePins(next); emit({}); };
   const register = (map, id, fn) => { map.set(id, fn); return () => { if (map.get(id) === fn) map.delete(id); }; };
   const entries = () => tabs;
   const metadata = id => parts.find(part => part.id === id)?.tab || features?.features.find(feature => feature.id === id)?.tab || {};
@@ -62,7 +84,9 @@ export function createWorkbenchService(ctx, { bridge, clients, workbenchSession,
     const ready = refreshers.has(id);
     let pending;
     if (mounted && !visited.has(id)) pending = new Promise(resolve => entering.set(id, { resolve, warning }));
-    visited.add(id); emit({ tab: id });
+    visited.add(id);
+    if (!parts.some(part => part.id === id) && !seen.opened.has(id)) { seen.opened.add(id); writeSeen(seen); }
+    emit({ tab: id, launcher: false });
     const result = ready ? refresh(id, { entering: true }) : pending;
     if (warning) notify(warning, { kind: 'info' });
     return result;
@@ -78,7 +102,54 @@ export function createWorkbenchService(ctx, { bridge, clients, workbenchSession,
     internal: {
       bridge, clients, workbenchSession, t, operation, run, setError, entries, metadata, visited, refresh, presentation,
       subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener); },
+      attention: () => attention,
       snapshot: () => state,
+      /** 页头现在放哪些：钉住的（按员工排的顺序），和没钉住、临时放着的那一个。 */
+      nav() { return { pins: shownPins(), temp: loose(state.tab) ? state.tab : tempTab && loose(tempTab) ? tempTab : null }; },
+      /** “全部功能”里的每一项：名字、用途、分组、是不是钉在页头；扩展带来的没打开过标“新装的”。 */
+      directory() {
+        const shown = shownPins();
+        return tabs.map(entry => {
+          const id = entry.options.id, part = parts.find(part => part.id === id), meta = metadata(id);
+          const key = part ? part.label[0].toUpperCase() + part.label.slice(1) : '';
+          return { id, name: labelOf(entry), icon: meta.icon, group: navGroups.includes(meta.group) ? meta.group : EXTENSION_GROUP, purpose: part ? t(`navPurpose${key}`) : meta.summary ? ctx.locale.resolveText(meta.summary) : '', keys: part ? t(`navKeys${key}`) : '', fixed: meta.placement === 'end', pinned: shown.includes(id), extension: !part, fresh: !part && !seen.opened.has(id) };
+        });
+      },
+      pinTab(id) {
+        if (!alive || !loose(id)) return;
+        if (tempTab === id) tempTab = null;
+        savePins([...storedPins(), id]);
+        notify(t('navPinDone', { name: labelOf(tabs.find(entry => entry.options.id === id)) }));
+      },
+      unpinTab(id) {
+        const shown = shownPins();
+        if (!alive || !shown.includes(id)) return;
+        if (shown.length === 1) { notify(t('navKeepOne'), { kind: 'info' }); return; }
+        savePins(storedPins().filter(value => value !== id));
+        notify(t('navUnpinDone', { name: labelOf(tabs.find(entry => entry.options.id === id)) }));
+      },
+      /** 把钉住的页签挪到第 index 个（从 0 数，按页头上现在有的那几个算）；拖到哪放到哪用的就是它。位置没变就什么都不做。 */
+      movePinTo(id, index) {
+        const shown = shownPins(), from = shown.indexOf(id);
+        if (!alive || from < 0) return;
+        const order = shown.filter(value => value !== id), to = Math.max(0, Math.min(Math.trunc(index), order.length));
+        if (to === from) return;
+        order.splice(to, 0, id);
+        // 钉着但现在不在的功能（比如关掉了）留在原来的格子里，只重排现在有的。
+        let next = 0;
+        savePins(storedPins().map(value => shown.includes(value) ? order[next++] : value));
+      },
+      /** 钉住的页签往前（-1）或往后（1）挪一位，键盘上用。 */
+      movePin(id, step) { const from = shownPins().indexOf(id); if (from >= 0) service.internal.movePinTo(id, from + step); },
+      /** 关掉没钉住的那个页签；正看着它就回到第一个常用页签。 */
+      closeTemp() {
+        const temp = service.internal.nav().temp;
+        if (!alive || !temp || operation.current) return;
+        if (state.tab === temp) { const first = shownPins()[0]; if (!first) return; openTab(first); }
+        tempTab = null; emit({});
+      },
+      openLauncher() { if (alive && mounted && !state.launcher) emit({ launcher: true }); },
+      closeLauncher() { if (state.launcher) emit({ launcher: false }); },
       // 每个内容实例拿到绑定自己 id 的公共服务；隐藏页的 effect 不会写到当前页。
       scope(id) {
         if (!scopes.has(id) || scopes.get(id).owner.revoked && admissions.has(id)) {
@@ -99,6 +170,8 @@ export function createWorkbenchService(ctx, { bridge, clients, workbenchSession,
             setError(message, action) { if (message && !owner.revoked) { errorShown = true; scopedNotify(message, { kind: 'error', action }); } },
             run: (task, success, onError) => run(task, success, onError, owner),
             guardLeave: fn => owner.revoked ? () => {} : register(guards, id, fn),
+            /** 页头这个功能的页签上标个点（tone：busy 处理中、done 做好了、failed 没做成；label 是读屏和悬停说的话），传 null 去掉。 */
+            setAttention(value) { if (!owner.revoked) setMark(id, value); },
             onRefresh(fn) { if (owner.revoked) return () => {}; const off = register(refreshers, id, fn); emit({}); return () => { off(); if (!owner.revoked) emit({}); }; },
           }));
         }
@@ -109,6 +182,7 @@ export function createWorkbenchService(ctx, { bridge, clients, workbenchSession,
         if (scope) scope.owner.revoked = true;
         scopes.delete(id);
         if (client) { readiness.delete(id); clientErrors.delete(id); }
+        setMark(id, null);
         if (scope && noticeOwner === scope.owner) { noticeOwner = null; notify(null); }
         if (operation.current?.owner?.id === id) {
           operation.current.cancelled = true; operation.current.controller.abort(); operation.current = null;
@@ -167,6 +241,7 @@ export function createWorkbenchService(ctx, { bridge, clients, workbenchSession,
       mount() {
         mounted = true; leftTab = null;
         if (closedWhileAway) { notify(`「${closedWhileAway}」已关闭`, { kind: 'info' }); closedWhileAway = null; }
+        announce();
       },
       reset() {
         mounted = false; leftTab = state.tab;
@@ -178,7 +253,8 @@ export function createWorkbenchService(ctx, { bridge, clients, workbenchSession,
         for (const scope of scopes.values()) scope.owner.revoked = true; scopes.clear();
         refreshers.clear(); guards.clear(); blockers.clear();
         if (noticeOwner) { noticeOwner = null; notify(null); }
-        emit({ tab: 'experts', busy: false, recoverySession: '', layout: 'bubble' });
+        tempTab = null;
+        emit({ tab: 'experts', busy: false, recoverySession: '', layout: 'bubble', launcher: false });
       },
       hasRefresh: id => refreshers.has(id),
       registerBlock: (id, fn) => register(blockers, id, fn),
@@ -243,6 +319,18 @@ export function createWorkbenchService(ctx, { bridge, clients, workbenchSession,
     if ([...problems].some(id => !diagnostics.has(id))) notify('部分功能视图尚未匹配有效登记或存在同名冲突，请检查插件', { kind: 'error', action: { label: '管理功能', run: () => { if (alive) return manageFeatures?.(); } } });
     diagnostics = problems;
     for (const listener of tabListeners) listener();
+    announce();
+  }
+  // 扩展带来的页签先放进“全部功能”，不占页头；第一次出现时在右上角说一声，可以直接钉上。每个扩展只说一次。
+  function announce() {
+    if (!alive || !mounted) return;
+    for (const entry of tabs) {
+      const id = entry.options.id;
+      if (parts.some(part => part.id === id) || atEnd(id) || seen.told.has(id)) continue;
+      seen.told.add(id); writeSeen(seen);
+      if (!loose(id)) continue;
+      notify(t('navNewFeature', { name: labelOf(entry) }), { kind: 'info', duration: 10000, action: { label: t('navPin'), run: () => service.internal.pinTab(id) } });
+    }
   }
   service.internal.tabSnapshot = () => tabs;
   service.internal.subscribeTabs = listener => { tabListeners.add(listener); return () => tabListeners.delete(listener); };
@@ -256,8 +344,9 @@ export function createWorkbenchService(ctx, { bridge, clients, workbenchSession,
 
 const noSubscribe = () => () => {}, noSnapshot = () => null;
 
-export function createWorkbenchView({ React, css, Logo, Modal, ActionMenu }) {
-  const { createElement: h, useLayoutEffect, useSyncExternalStore } = React;
+export function createWorkbenchView({ React, css, Logo, Modal, ActionMenu, Glyph, useClosedPopover }) {
+  const { createElement: h, useRef, useLayoutEffect, useSyncExternalStore } = React;
+  const { NavTabs, Launcher } = createNavViews({ React, Glyph, ActionMenu, useClosedPopover });
   function TabContent({ core, id, children }) {
     useLayoutEffect(() => { core.pageMounted(id); }, [core, id]);
     return children;
@@ -271,18 +360,20 @@ export function createWorkbenchView({ React, css, Logo, Modal, ActionMenu }) {
     // 标志、页签和“…”同在一行；“管理功能”“刷新”是低频动作，收进右端菜单。
     const updater = core.updater, UpdateDialog = core.UpdateDialog;
     const update = useSyncExternalStore(updater?.subscribe || noSubscribe, updater?.snapshot || noSnapshot, updater?.snapshot || noSnapshot);
-    const tools = [core.canManageFeatures() && h('button', { type: 'button', key: 'manage', onClick: workbench.manageFeatures }, '管理功能'), core.hasRefresh(state.tab) && h(React.Fragment, { key: 'refresh' }, button('refresh', () => core.refresh())),
+    const head = useRef(null);
+    const tools = [h('button', { type: 'button', key: 'arrange', onClick: () => core.openLauncher() }, t('navArrange')), core.canManageFeatures() && h('button', { type: 'button', key: 'manage', onClick: workbench.manageFeatures }, '管理功能'), core.hasRefresh(state.tab) && h(React.Fragment, { key: 'refresh' }, button('refresh', () => core.refresh())),
       updater && h('button', { type: 'button', key: 'update', disabled: update?.phase === 'checking' || update?.phase === 'installing', onClick: () => updater.check('workbench') }, updater.t(update?.phase === 'checking' ? 'checking' : 'check'))].filter(Boolean);
     const tab = entry => {
       const id = entry.options.id, meta = core.metadata(id);
       return h('button', { type: 'button', key: id, 'data-tab': parts.find(part => part.id === id)?.label || id, disabled: state.busy, 'aria-pressed': state.tab === id, className: state.tab === id ? 'ww-selected' : '', onClick: () => workbench.openTab(id) }, typeof entry.options.label === 'function' ? entry.options.label() : entry.options.label, ...(meta.icon ? [h('span', { className: 'ww-tab-icon', 'aria-hidden': true, style: { display: 'inline-block', width: 16, height: 16, flexShrink: 0, backgroundColor: 'currentColor', mask: `url("data:image/svg+xml,${encodeURIComponent(meta.icon)}") center / contain no-repeat`, WebkitMask: `url("data:image/svg+xml,${encodeURIComponent(meta.icon)}") center / contain no-repeat` } })] : []));
     };
-    // 放末尾的页签（模型世界）不随功能开关增减，单独成组放在这一行最右，紧挨着“…”。
+    // 放末尾的页签（模型世界）不随功能开关增减，单独成组放在这一行最右，紧挨着“…”；其余页签只有钉住的才在页头（NavTabs）。
     const atEnd = entry => core.metadata(entry.options.id).placement === 'end';
     const endTabs = entries.filter(atEnd);
-    return h('div', { className: 'ww-page' }, h('style', null, css),
-      h('header', { className: 'ww-header ww-workbench-header' }, h('h1', null, h(Logo, { size: 24, tone: 'brand' }), t('panel')),
-      h('nav', { className: 'ww-tabs', 'aria-label': t('panel') }, ...entries.filter(entry => !atEnd(entry)).map(tab)),
+    return h('div', { className: 'ww-page' }, h('style', { 'data-ww-page-css': '' }, css),
+      h('header', { ref: head, className: 'ww-header ww-workbench-header' }, h('h1', null, h(Logo, { size: 24, tone: 'brand' }), t('panel')),
+      h(Launcher, { workbench, state, t, anchor: head }),
+      h(NavTabs, { workbench, state, entries, t }),
       endTabs.length > 0 && h('div', { className: 'ww-tabs ww-tabs-end' }, ...endTabs.map(tab)),
       tools.length > 0 && h(ActionMenu, { label: t('more'), iconOnly: true }, ...tools)),
       state.busy && h('div', { className: 'ww-busy', role: 'status' }, h('span', { className: 'ww-spinner', 'aria-label': t('loading') }), h('button', { type: 'button', onClick: core.stop }, t('stopWait'))),

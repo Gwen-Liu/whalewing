@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "feishu": {
+      "command": "npx",
+      "args": ["-y", "@larksuiteoapi/lark-mcp", "mcp", "--token-mode", "tenant_access_token"],
+      "env": {
+        "APP_ID": "${user_config.appId}",
+        "APP_SECRET": "${user_config.appSecret}"
+      }
+    }
+  }
+}

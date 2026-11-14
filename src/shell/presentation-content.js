@@ -113,7 +113,17 @@ export const css = [
   automation.styles[5],
   // 2026-11-02 补齐设计稿的点缀：技能页没选技能时的空卡、定时任务分栏的水印。
   skills.styles[2],
+  skills.styles[3],
   automation.styles[6],
+  // 2026-11-08 专家团改版：专家页查找筛选、名帖点开详情、详情抽屉。
+  experts.styles[5],
+  // 2026-11-08 小鲸面板上的“派出去的事”。
+  assistant.styles[13],
+  // 2026-11-10 知识积累左下角的知识库切换、团队知识空间目录、提交到团队。
+  knowledge.styles[18],
+  // 2026-11-10 关系图谱设置面板、右上角三颗按钮、生长动画的进度条。
+  knowledge.styles[19],
+  knowledge.styles[20],
   theme.shell
 ].join('');
 export const explainError = (code, message) => explainCommonError(code, message, domains);

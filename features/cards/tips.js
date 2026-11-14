@@ -1,7 +1,7 @@
 import { beijingDate } from './tip-index.js';
 import {
   tipsFieldId, dayNumber, dateParts, daysFromReports, buildTimeline, entryHeight, entryTops, entryAt, entrySpan, entryFor, featuredIndex, monoColor,
-  tipDays, snapDay, stepDay, stepMonth, monthLatest, yearLatest, stepTip, yearsOf, axisLayout, armSpan, armLayout, dayY, dateAtY, tickLength, thumbBox, planFetch,
+  tipDays, snapDay, stepDay, stepMonth, monthLatest, yearLatest, stepTip, yearsOf, axisLayout, armSpan, armLayout, dayY, dateAtY, tickLength, thumbBox, planFetch, tipsMetricVars,
 } from './tips-model.js';
 
 /**
@@ -30,13 +30,6 @@ export function createTipsView(kit) {
   const linkOf = item => item.link || item.sources?.[0]?.url || '';
   const pressable = open => ({ role: 'button', tabIndex: 0, onClick: open, onKeyDown: event => { if (event.target !== event.currentTarget) return; if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); } } });
   const spinner = () => h('span', { className: 'ww-tips-spin', 'aria-hidden': true });
-  const scrollParent = node => {
-    for (let element = node.parentElement; element; element = element.parentElement) {
-      const overflow = globalThis.getComputedStyle?.(element).overflowY;
-      if (overflow === 'auto' || overflow === 'scroll') return element;
-    }
-    return null;
-  };
   const formats = t => {
     const months = t('tipsMonths').split('|'), weeks = t('tipsWeekdays').split('|'), name = month => months[month - 1] ?? String(month);
     return {
@@ -179,7 +172,7 @@ export function createTipsView(kit) {
     }
     const { days, entries, dayMap, years } = derived;
     const ruled = indexReady && years.length > 0, narrow = size.width < 1100;
-    const armWidth = narrow ? 48 : 96, columns = size.width - size.scrollbar - (ruled ? armWidth + (narrow ? 16 : 24) : 0) - 140 >= 600 ? 2 : 1;
+    const armWidth = narrow ? 48 : 96, armGap = narrow ? 16 : 24, columns = size.width - size.scrollbar - (ruled ? armWidth + armGap : 0) - 140 >= 600 ? 2 : 1;
     // 一列和两列的条目高度不同，换列数时实测值作废。
     if (derived.columns !== undefined && derived.columns !== columns) heights.current = new Map();
     if (!derived.tops || derived.columns !== columns || derived.measured !== measured) {
@@ -304,16 +297,13 @@ export function createTipsView(kit) {
       }
       sync();
     });
-    // 尺寸：整页占满所在滚动容器剩下的高度，只让时间线在内部滚动。
+    // 尺寸：整页由外层 flex 撑满主区（样式里 .ww-cards 占满、.ww-tips flex:1），只让时间线在内部滚动；
+    // 这里只量页面自己的宽和时间线可视区的高，给虚拟列表和竖臂用。
     useLayoutEffect(() => {
       const node = root.current;
-      if (!node?.getBoundingClientRect) return;
+      if (!node) return;
       const fit = () => {
-        const parent = scrollParent(node), box = scroller.current;
-        if (parent) {
-          const outer = parent.getBoundingClientRect(), own = node.getBoundingClientRect(), padding = parseFloat(globalThis.getComputedStyle?.(parent).paddingBottom) || 0;
-          node.style.setProperty('--ww-tips-height', `${Math.max(420, Math.floor(parent.clientHeight - (own.top - outer.top + parent.scrollTop) - padding))}px`);
-        }
+        const box = scroller.current;
         const next = { width: node.clientWidth, height: box?.clientHeight || 640, scrollbar: box ? box.offsetWidth - box.clientWidth : 0 };
         setSize(value => value.width === next.width && value.height === next.height && value.scrollbar === next.scrollbar ? value : next);
       };
@@ -591,7 +581,7 @@ export function createTipsView(kit) {
         canPrev: Boolean(stepTip(days, at, -1)), canNext: Boolean(stepTip(days, at, 1)) || !complete });
     })();
 
-    return h('section', { ref: root, className: `ww-tips${ruled ? ' ww-tips-ruled' : ''}${narrow ? ' ww-tips-narrow' : ''}`, style: { '--ww-tips-arm': `${armHeight}px`, '--ww-tips-columns': columns } },
+    return h('section', { ref: root, className: `ww-tips${ruled ? ' ww-tips-ruled' : ''}${narrow ? ' ww-tips-narrow' : ''}`, style: { '--ww-tips-arm': `${armHeight}px`, '--ww-tips-columns': columns, '--ww-tips-arm-width': `${armWidth}px`, '--ww-tips-arm-gap': `${armGap}px`, ...tipsMetricVars } },
       head,
       axis(),
       h('div', { className: 'ww-tips-body' },

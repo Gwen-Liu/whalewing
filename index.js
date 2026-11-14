@@ -9,12 +9,13 @@ import { z as schema } from 'zod';
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths';
 import { bindTypertRemote, RemoteError } from '@deepseek-ai/dsh-typert-protocol';
 import { WhalewingCore } from './src/service.js';
-import { abort, defaultLimits, fail, frontmatter } from './src/vault.js';
+import { abort, defaultLimits, digest, fail, frontmatter } from './src/vault.js';
 import { vaultLocation } from './src/vault-location.js';
 import { FileSystemSkillProvider } from '@deepseek-ai/dsh-skill-filesystem';
-import { automationProjection, claimCommands, automationIdentity, automationPurposes } from './src/identity.js';
+import { automationProjection, taskOwnerProjection, claimCommands, automationIdentity, automationClaim, automationPurposes, taskOwnerPattern } from './src/identity.js';
 import { FeatureRegistry } from './src/features.js';
 import { ExtensionSources } from './src/extension-sources.js';
+import { ExtensionTasks } from './src/extension-tasks.js';
 import { assistantNames } from './src/assistant-name.js';
 import { installNewsGate } from './src/news-gate.js';
 import { workbenchContract } from './src/workbench-contract.js';
@@ -23,6 +24,7 @@ import { sessionSchedule } from './src/schedule-compat.js';
 import { evaluatePluginCompatibility, getDshRuntimeVersion } from '@deepseek-ai/dsh-app-boot';
 import { apply as installSkills } from './src/skill-provider.js';
 import { isInside } from './src/skill-roots.js';
+import { listScopedSkills, readScopedSkill } from './src/skill-scopes.js';
 import { parts } from './features/index.js';
 import * as Experts from './features/experts/host.js';
 import * as Assistant from './features/assistant/host.js';
@@ -89,6 +91,19 @@ export default class Whalewing extends Service {
       listWorkspaces: signal => this.listWorkspaces(signal),
       readSourceScope: (accept, signal) => this.readSourceScope(accept, signal),
       automationIdentity: (id, signal) => this.automationIdentity(id, signal),
+      automationClaim: (id, signal) => this.automationClaim(id, signal),
+      readProjection: (id, signal) => this.projectionReader()(id, signal),
+      // 扩展任务读会话：登记、读取进度都由定时任务功能持有；功能没加载时按没开处理。
+      extensionTask: (owner, signal) => {
+        const host = ctx.get('whalewingAutomation');
+        if (!host) fail('SCHEDULE_DISABLED', '鲸翼的定时任务功能还没加载，请稍后重试');
+        return host.taskProgress(owner, signal);
+      },
+      extensionTaskDone: (owner, date, signal) => {
+        const host = ctx.get('whalewingAutomation');
+        if (!host) fail('SCHEDULE_DISABLED', '鲸翼的定时任务功能还没加载，请稍后重试');
+        return host.markTaskDay(owner, date, signal);
+      },
       schedule: () => sessionSchedule(ctx.get('schedule')),
       sources: () => this.sources,
       changed: () => ctx.emit('whalewing/changed'),
@@ -117,15 +132,24 @@ export default class Whalewing extends Service {
     this.sources = new ExtensionSources(this.registry, { changed: kind => {
       if (kind === 'experts' || kind === 'assistant') ctx.emit('whalewing-experts/changed');
       if (kind === 'assistant') this.registry.changed();
+      // 技能来源换了能改的项：功能快照带上新的次数，技能页据此重读团队技能。
+      if (kind === 'skills') { this.skillSourceRevision = (this.skillSourceRevision ?? 0) + 1; this.registry.changed(); }
+      // 知识来源登记、撤销或扩展说目录变了：知识积累页据此重读知识空间。
+      if (kind === 'knowledge') { this.knowledgeSourceRevision = (this.knowledgeSourceRevision ?? 0) + 1; this.registry.changed(); }
     }, maxNoteBytes: this.vault.limits.maxNoteBytes, maxResults: this.vault.limits.maxResults });
-    this.registry.extras = () => { const assistant = this.sources.assistantName(); return assistant ? { assistant } : {}; };
+    this.registry.extras = () => { const assistant = this.sources.assistantName(); return { ...(assistant ? { assistant } : {}), ...(this.skillSourceRevision ? { skillSources: this.skillSourceRevision } : {}), ...(this.knowledgeSourceRevision ? { knowledgeSources: this.knowledgeSourceRevision } : {}) }; };
     ctx.effect(() => () => this.sources.dispose(), '鲸翼扩展来源');
+    // 扩展登记的定时任务：登记只在内存里，DSH 里的任务由定时任务功能建、改、删。
+    this.tasks = new ExtensionTasks(this.registry);
+    ctx.effect(() => () => this.tasks.dispose(), '鲸翼扩展定时任务');
+    this.attachSkillSource();
     this.features = Object.assign(() => this.registry.snapshot(), { register: (scope, manifest) => this.registry.register(scope, manifest) });
     const handlers = this.commandHandlers = new Map();
     this.typertRemote = bindTypertRemote(this, 'whalewing', { namespace: 'whalewingWorkbench' });
     ctx.typert.register(workbenchContract(schema).host);
     ctx.sessionProjections.register(workbenchProjection);
     ctx.sessionProjections.register(automationProjection);
+    ctx.sessionProjections.register(taskOwnerProjection);
     ctx.commands.register({
       name: 'whalewing', description: '鲸翼：专家知识、技能与定时整理', input: { hint: '<JSON>' }, recordInput: false,
       handler: async ({ agent, rawInput, signal }) => {
@@ -135,12 +159,15 @@ export default class Whalewing extends Service {
           const input = JSON.parse(rawInput);
           if (input?.action === 'automation_skip') return this.newsGate.notice(input, agent, signal);
           if (input?.action === 'automation_claim') {
-            if (Object.keys(input).length !== 2 || !automationPurposes.includes(input.purpose)) fail('INPUT', '自动任务认领只接受用途');
+            // 扩展登记的任务另带归属（功能id/任务id），其它用途只接受用途。
+            const extension = input.purpose === 'extension';
+            if (Object.keys(input).length !== (extension ? 3 : 2) || !automationPurposes.includes(input.purpose) || extension && (typeof input.owner !== 'string' || !taskOwnerPattern.test(input.owner))) fail('INPUT', '自动任务认领只接受用途（扩展任务另带归属）');
             if (agent.status !== 'idle' || agent.session.header?.origin === 'subagent' || agent.session.header?.agentPreset !== 'standard') fail('AUTOMATION_SESSION', '自动任务只认领空闲的 standard 普通会话');
             const previous = ctx.sessionProjections.stateOf(agent.session, 'whalewingAutomation')?.purpose;
             if (previous && previous !== input.purpose) fail('AUTOMATION_IDENTITY', '此会话已属于其它自动任务用途');
+            if (previous && extension && ctx.sessionProjections.stateOf(agent.session, 'whalewingTaskOwner')?.owner !== input.owner) fail('AUTOMATION_IDENTITY', '此会话已属于另一个扩展任务');
             if (!previous && agent.session.snapshotEvents().slice(agent.session.inheritedEventCount ?? 0).some(event => ['user/message', 'assistant/message'].includes(event.type))) fail('AUTOMATION_SESSION', '已有对话正文的会话不改为自动任务，请使用本次创建的独立会话');
-            return { kind: 'success', text: JSON.stringify({ action: 'automation_claim', purpose: input.purpose }) };
+            return { kind: 'success', text: JSON.stringify({ action: 'automation_claim', purpose: input.purpose, ...(extension ? { owner: input.owner } : {}) }) };
           }
           if (input?.action === 'workspace_attach') {
             if (Object.keys(input).length !== 1) fail('INPUT', '工作区关联只接受当前会话，不接受额外参数');
@@ -180,7 +207,7 @@ export default class Whalewing extends Service {
         } catch (error) { return { kind: 'error', text: JSON.stringify({ code: error.code || error.name || 'ERROR', message: error.message }) }; }
       },
     });
-    this.newsGate = installNewsGate(ctx, this.registry);
+    this.newsGate = installNewsGate(ctx, this.registry, this.tasks);
     ctx.effect(() => () => this.core.dispose(), '鲸翼知识底座');
     ctx.inject(['skills', 'whalewing'], scope => installSkills(scope));
     // 监督使用Cordis自身fiber；单个失败不从父启动函数继续抛出。
@@ -215,8 +242,18 @@ export default class Whalewing extends Service {
     return { registerSource: (scope, options) => this.sources.registerExperts(scope, options) };
   }
 
+  /** 技能库（内部用）上挂对外的 registerSource：扩展登记技能来源，名字和专家来源、知识来源一致。 */
+  attachSkillSource() {
+    Object.defineProperty(this.skills, 'registerSource', { value: (scope, options) => this.sources.registerSkills(scope, options), configurable: true });
+  }
+
   get assistant() {
     return { registerName: (scope, name) => this.sources.registerAssistantName(scope, name) };
+  }
+
+  /** 扩展登记定时任务（2026-11-10）：名字和 DSH 定时服务（schedule）一致。 */
+  get schedule() {
+    return { registerTask: (scope, options) => this.tasks.register(scope, options) };
   }
 
   /** 小鲸现在叫什么：扩展起了名就用扩展的（没有简称），否则是“小鲸助手”“小鲸”。 */
@@ -227,6 +264,20 @@ export default class Whalewing extends Service {
     return [...this.registry.entries.values()].filter(entry => entry.kind === 'extension' && entry.skills.length && entry.fiber.state === 2);
   }
 
+  /** 共用目录（~/.agents/skills）和各工作区项目里的技能，DSH 会用、鲸翼只读；见 src/skill-scopes.js。 */
+  async scopedSkills(signal) {
+    const registry = this.ctx.get('workspaceRegistry');
+    const workspaces = registry ? await registry.list() : [];
+    const { scopes, allowed } = await listScopedSkills(this.ctx, { dshHome: this.dshHome, workspaces, signal });
+    this.scopeAllowed = allowed;
+    return { scopes };
+  }
+
+  async scopedSkill(file, signal) {
+    if (!this.scopeAllowed?.has(path.resolve(file))) await this.scopedSkills(signal);
+    return { scoped: { path: path.resolve(file), content: await readScopedSkill(file, this.scopeAllowed, signal) } };
+  }
+
   async extensionSkills(signal) {
     const entries = this.extensionRoots();
     if (!entries.length) return { extensions: [] };
@@ -235,7 +286,7 @@ export default class Whalewing extends Service {
     // DSH 注册表报的是真实路径，扩展登记的目录可能是短文件名或联接，按真实路径比较。
     return { extensions: entries.map(entry => ({
       id: entry.id, package: entry.package, ...(this.sources.labelOf(entry.id) ? { label: this.sources.labelOf(entry.id) } : {}),
-      skills: listed.filter(skill => typeof skill.path === 'string' && entry.skills.some(directory => isInside(directory, skill.path))).map(({ name, description }) => ({ name, description: description ?? '' })).sort((a, b) => a.name.localeCompare(b.name)),
+      skills: listed.filter(skill => typeof skill.path === 'string' && entry.skills.some(directory => isInside(directory, skill.path))).map(({ name, description }) => ({ name, description: description ?? '', ...this.sources.skillInfo(entry.id, name) })).sort((a, b) => a.name.localeCompare(b.name)),
     })) };
   }
 
@@ -246,7 +297,16 @@ export default class Whalewing extends Service {
     abort(signal);
     const location = typeof skill?.path === 'string' ? skill.path : '';
     if (!skill || !entry.skills.some(directory => isInside(directory, location))) fail('SKILL_MISSING', '这项技能已不在扩展里，或被同名的其它技能顶替了，请刷新技能库');
-    return { extension: { id: entry.id, package: entry.package, ...(this.sources.labelOf(entry.id) ? { label: this.sources.labelOf(entry.id) } : {}), name: skill.name, description: skill.description ?? '', content: skill.content ?? '' } };
+    const content = skill.content ?? '';
+    return { extension: { id: entry.id, package: entry.package, ...(this.sources.labelOf(entry.id) ? { label: this.sources.labelOf(entry.id) } : {}), name: skill.name, description: skill.description ?? '', content, hash: digest(content), ...this.sources.skillInfo(entry.id, skill.name) } };
+  }
+
+  /** 维护人改团队技能：核对改之前看到的正文没变，交给扩展保存；DSH 发现新文件要一会儿，先把保存的正文交回界面。 */
+  async saveExtensionSkill(feature, name, content, expectedHash, signal) {
+    const current = (await this.extensionSkill(feature, name, signal)).extension;
+    if (current.hash !== expectedHash) fail('CONFLICT', '这项技能刚在别处改过，请保留你的修改，刷新后再核对');
+    await this.sources.saveSkill(feature, name, { content, expectedHash }, signal);
+    return { extension: { ...current, content, hash: digest(content) } };
   }
 
   watchFeatures(signal) { return this.registry.watch(signal); }
@@ -267,11 +327,17 @@ export default class Whalewing extends Service {
     return { ...(await checkUpdate({ current: pluginVersion, source, registries, compatible })), runtimeVersion };
   }
   automationIdentity(id, signal) {
-    return automationIdentity((sessionId, nextSignal) => {
+    return automationIdentity(this.projectionReader(), id, signal);
+  }
+  automationClaim(id, signal) {
+    return automationClaim(this.projectionReader(), id, signal);
+  }
+  projectionReader() {
+    return (sessionId, nextSignal) => {
       const controller = this.ctx.get('sessionController');
       if (!controller) fail('AUTOMATION_UNAVAILABLE', '宿主会话服务尚未加载');
       return controller.projections({ sessionId }, nextSignal);
-    }, id, signal);
+    };
   }
   async execute(input, caller) {
     const result = await this.core.execute(input, caller);

@@ -44,7 +44,7 @@ test('交接工具只在选了小鲸的普通主会话里出现，切换专家�
   await h.assistant.dispose(); await tick(); assert.equal(h.visible(), undefined);
 });
 
-test('交接新建专家任务：选好专家、设标题、不自动发送，结果带打开任务所需的信息', async t => {
+test('交接新建专家任务：选好专家、设标题，批准后把交接说明发进去直接开工；做完后小鲸下一轮知道结果', async t => {
   const h = await setup(t);
   await h.select();
   const before = new Set(h.ids());
@@ -56,16 +56,43 @@ test('交接新建专家任务：选好专家、设标题、不自动发送，�
   assert.equal(result.meta.sessionId, sessionId);
   assert.equal(result.meta.expertName, '研发专家');
   assert.equal(result.meta.draft, handoffInput(brief).draft);
+  assert.equal(result.meta.started, true);
   const task = h.ctx.agents.get(sessionId);
   assert.equal(h.ctx.sessionProjections.stateOf(task.session, 'whalewingExpert').view.expertId, 'development');
   assert.equal(task.session.header.cwd, h.agent.session.header.cwd, '新任务和小鲸在同一目录');
-  // 只选了专家：没有用户消息、没有开始轮次，草稿要员工自己发。
-  const types = task.session.snapshotEvents().map(event => event.type);
-  assert.equal(types.some(type => ['user/message', 'turn/start', 'assistant/message'].includes(type)), false, types.join(','));
   const text = result.content.map(part => part.text).join('\n');
-  assert.match(text, /打开任务/); assert.match(text, /不要为同一件事再次调用/); assert.ok(text.includes(result.meta.draft));
+  assert.match(text, /已经开工/); assert.match(text, /不要为同一件事再派一次/);
   assert.equal(h.ctx.whalewingExperts.selectedFor(task), 'development');
   assert.equal(h.visible(task), undefined, '接手的专家看不到交接工具');
+  // 交接说明作为员工的第一条消息发进去，专家这一轮跑完。
+  const dispatch = () => h.ctx.sessionProjections.stateOf(task.session, 'whalewingDispatch').dispatch;
+  for (let wait = 0; wait < 300 && dispatch()?.status !== 'completed'; wait++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.deepEqual(dispatch(), { title: '修复登录报错', from: h.agent.id, status: 'completed', reply: 'done', turns: 1 });
+  const first = task.session.snapshotEvents().find(event => event.type === 'user/message' && event.data.source.kind === 'user');
+  assert.equal(first.data.content[0].text, result.meta.draft);
+  // 小鲸下一轮开头带上“派出去的事”，做完的只说一次。
+  const digest = await h.ctx.whalewingDispatches.book.digest();
+  assert.match(digest, /【派出去的事 · 非用户原话】/);
+  assert.ok(digest.includes(`- 研发专家 · 修复登录报错（标识 ${sessionId}）：做完了。交付开头：done`), digest);
+  assert.equal(await h.ctx.whalewingDispatches.book.digest(), '');
+  // 小鲸读完整交付。
+  const read = await h.ctx.tools.execute({ calls: [{ id: 'result-test', name: 'whalewing_handoff_result', arguments: JSON.stringify({ sessionId }) }], agent: h.agent, signal: new AbortController().signal }).then(batch => batch.results[0].result);
+  assert.equal(read.isError, false, JSON.stringify(read.content));
+  assert.equal(read.content[0].text, `「修复登录报错」：做完了。\n专家最近一轮的回复：\ndone`);
+  assert.equal(h.ctx.tools.get('whalewing_handoff_result', task), undefined, '只有小鲸能读');
+});
+
+test('开不了工时退回原来的做法：任务建好、交接说明留给员工自己发', async t => {
+  const h = await setup(t);
+  await h.select();
+  h.ctx.whalewingDispatches.start = async () => { throw new Error('模拟派工失败'); };
+  const result = await h.execute();
+  assert.equal(result.isError, false, JSON.stringify(result.content));
+  assert.equal(result.meta.started, false);
+  assert.match(result.content.map(part => part.text).join('\n'), /没能让它开工：模拟派工失败[\s\S]*打开任务/);
+  const task = h.ctx.agents.get(result.meta.sessionId);
+  const types = task.session.snapshotEvents().map(event => event.type);
+  assert.equal(types.some(type => ['user/message', 'turn/start', 'assistant/message'].includes(type)), false, types.join(','));
 });
 
 test('小鲸在工作区里时，新任务挂到同一工作区', async t => {
@@ -187,8 +214,9 @@ test('交接卡片按工具名登记，打开任务经会话保留写草稿再�
     notify: text => calls.push(['notify', text]),
   };
   registerHandoffView(ctx, { React: react }, api);
-  assert.equal(registered.length, 1);
+  assert.equal(registered.length, 3);
   assert.deepEqual(registered[0].options, { name: 'tool.call.toolview', key: handoffToolName });
+  assert.deepEqual(registered[1].options, { name: 'tool.call.toolview', key: 'whalewing_expert_edit' });
   const Row = registered[0].Component;
   const nodes = tree => !tree || typeof tree !== 'object' ? [] : Array.isArray(tree) ? tree.flatMap(nodes) : [tree, ...nodes(tree.props?.children)];
   const textOf = tree => nodes(tree).flatMap(node => (node.props.children ?? []).filter(child => typeof child === 'string')).join('');

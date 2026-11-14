@@ -5,6 +5,12 @@ import { bookLimits, libraryLimits } from './library/limits.js';
 export const newsFieldLimit = 21;
 /** 每期条目上限（旧日报最多 15 条，只读兼容）、每期新提交上限、每个领域的来源上限。 */
 export const newsItemLimit = 15, newsSubmitLimit = 8, newsSourceLimit = 16;
+/** 候选正文摘要最多多少字：资讯领域 500；技巧领域取订阅里最长的那段正文、到 1500（做法在全文里，500 字多半只是开头）。 */
+export const newsExcerptLimit = 500, newsTipsExcerptLimit = 1500;
+/** 上周回顾最多挑几件；交给模型的《关于我》和日记合计最多多少字。 */
+export const newsWeekLimit = 5, newsMeLimit = 4000;
+/** 一次最多划多少字、员工写的那句和“为什么存”最多多少字、每天回顾可选几条。 */
+export const readingLimits = Object.freeze({ text: 300, before: 24, note: 200, why: 200, highlights: 5000, captures: 2000, review: [0, 2, 3] });
 /** 条目分类，顺序即日报排序：模型大事在前，其次智能体与产品、开源、多模态，最后研究与其他。 */
 export const newsCategories = Object.freeze({ model: '大模型', agent: '智能体与产品', opensource: '开源与工具', media: '图像·视频·语音', research: '研究与其他' });
 /** 消息性质；来源标题只表示证据范围，不是发布性质。 */
@@ -36,21 +42,24 @@ export function newsContract(z) {
   const execute = z.discriminatedUnion('action', [
     z.strictObject({ action: z.literal('fields') }),
     z.strictObject({ action: z.literal('candidates'), fieldId: id }),
-    z.strictObject({ action: z.literal('submit'), receipt: text.max(100), items: z.array(z.union([item, headline])).max(newsItemLimit) }),
+    // week：周一那一期从 candidates 给的 lastWeek 里挑的条目编号，最多五件；标题和链接由 Cards 从已保存的日报里取。
+    z.strictObject({ action: z.literal('submit'), receipt: text.max(100), items: z.array(z.union([item, headline])).max(newsItemLimit), week: z.array(text.max(40)).max(newsWeekLimit).optional() }),
   ]);
-  const timestamp = text.datetime(), window = { start: timestamp, cutoff: timestamp };
+  const timestamp = text.datetime(), window = { start: timestamp, cutoff: timestamp }, day = text.regex(/^\d{4}-\d{2}-\d{2}$/);
+  // 上周回顾：周一那一期带上上周挑出的几件；personal 表示这一期的关联是照《关于我》写的。
+  const weekPick = z.strictObject({ date: day, title: text.min(1).max(240), link: text.max(2048) });
   // links 是条目正文里指向其他网站的链接，供挑选一手来源；旧日报的来源没有这一项。
-  const candidate = z.strictObject({ id: text.regex(/^[a-f0-9]{64}$/), title: text.min(1).max(240), url: text.max(2048), publishedAt: timestamp, eventTime: timestamp.nullable(), collectedAt: timestamp, excerpt: text.max(500), links: z.array(text.max(2048)).max(6).optional(), source });
+  const candidate = z.strictObject({ id: text.regex(/^[a-f0-9]{64}$/), title: text.min(1).max(240), url: text.max(2048), publishedAt: timestamp, eventTime: timestamp.nullable(), collectedAt: timestamp, excerpt: text.max(newsTipsExcerptLimit), links: z.array(text.max(2048)).max(6).optional(), source });
   const sourceStatus = z.union([source.extend({ status: z.literal('ok'), candidates: z.number().int().min(0).max(100) }), source.extend({ status: z.literal('failed'), message: text.max(400) })]);
   const headlineReport = item.omit({ sourceIds: true }).extend({ label: z.literal('headline'), title: text.min(1).max(240), sources: z.array(candidate).length(1) });
   const reportItem = z.union([headlineReport, item.omit({ sourceIds: true }).extend({ sources: z.array(candidate).min(1).max(10) }), legacyItem.omit({ sourceIds: true }).extend({ sources: z.array(candidate).min(1).max(10) })]);
-  const report = z.strictObject({ fieldId: id, fieldName: text.min(1).max(80), fieldRevision: z.number().int().positive(), ...window, sessionId: id, completedAt: timestamp, items: z.array(reportItem).max(newsItemLimit), sourceStatus: z.array(sourceStatus).min(1).max(newsSourceLimit), status: z.enum(['complete', 'partial', 'empty']), coverage: text.min(1).max(1000) });
+  const report = z.strictObject({ fieldId: id, fieldName: text.min(1).max(80), fieldRevision: z.number().int().positive(), ...window, sessionId: id, completedAt: timestamp, items: z.array(reportItem).max(newsItemLimit), sourceStatus: z.array(sourceStatus).min(1).max(newsSourceLimit), status: z.enum(['complete', 'partial', 'empty']), coverage: text.min(1).max(1000), personal: z.boolean().optional(), week: z.strictObject({ picks: z.array(weekPick).max(newsWeekLimit) }).optional() });
   // 计划事实仅保留本页直接消费字段，编辑和历史仍回原生自动任务入口。
   const schedule = z.strictObject({ id, sessionId: id, title: text.max(120), status: z.enum(['active', 'paused', 'inactive']), kind: text.max(30), scheduledAt: timestamp });
   const issue = z.strictObject({ sessionId: id, message: text.max(400) });
   const historyField = z.strictObject({ id, name: text.min(1).max(80), deleted: z.boolean() });
   const limits = z.strictObject({ maxFields: z.number().int().min(1).max(100), maxResponseBytes: z.number().int().min(1).max(10485760), maxBodyChars: z.number().int().min(1).max(10485760), maxCandidates: z.number().int().min(1).max(1000), deadlineMs: z.number().int().min(1).max(300000), receiptMs: z.number().int().min(1).max(3600000) });
-  const library = libraryContract(z);
+  const library = libraryContract(z), reading = readingContract(z);
   // 当日 AI 技巧取自“AI 使用技巧”领域最新一期日报；index 是该条在当期的序号，count 是当期条数，cutoff 定位整期。
   const date = text.regex(/^\d{4}-\d{2}-\d{2}$/), dayStatus = z.enum(['complete', 'partial', 'empty']);
   const tip = z.strictObject({ title: text.min(1).max(240), brief: text.max(1200), link: text.max(2048), source: text.max(100), date, fieldId: id, index: z.number().int().nonnegative(), count: z.number().int().min(1).max(newsItemLimit), cutoff: timestamp });
@@ -66,8 +75,9 @@ export function newsContract(z) {
     z.strictObject({ fieldId: id, first: date.nullable(), days: z.array(tipDay).max(3660) }),
   ]);
   const executionResult = z.union([
-    z.strictObject({ fields: z.array(z.strictObject({ id, name: text.min(1).max(80), focus: text.min(1).max(2000) })).max(newsFieldLimit), window: z.strictObject(window) }),
-    z.strictObject({ receipt: text.uuid(), field: storedField, ...window, candidates: z.array(candidate).max(200), sources: z.array(sourceStatus).min(1).max(newsSourceLimit), coverage: text.min(1).max(1000) }),
+    // me：阅读设置“按我的情况来挑”开着且《关于我》有内容时才带，供模型写每条的关联。
+    z.strictObject({ fields: z.array(z.strictObject({ id, name: text.min(1).max(80), focus: text.min(1).max(2000) })).max(newsFieldLimit), window: z.strictObject(window), me: z.strictObject({ about: text.min(1).max(newsMeLimit), diary: text.max(newsMeLimit).optional() }).optional() }),
+    z.strictObject({ receipt: text.uuid(), field: storedField, ...window, candidates: z.array(candidate).max(200), sources: z.array(sourceStatus).min(1).max(newsSourceLimit), coverage: text.min(1).max(1000), lastWeek: z.array(z.strictObject({ ref: text.max(40), date: day, title: text.min(1).max(240) })).max(7 * newsItemLimit).optional() }),
     z.strictObject({ completed: z.literal(true), recovered: z.boolean().optional(), report }),
   ]);
   const packageName = 'dsh-whalewing/cards';
@@ -76,8 +86,9 @@ export function newsContract(z) {
   const scheduleResult = automationContract(z).result;
   const scheduleDescriptor = { ...descriptor, id: `${packageName}#whalewingCards/manageSchedules`, method: 'manageSchedules', parameters: [{ name: 'input', wire: 'input', source: 'json', codec: { mode: 'strict', typeSymbol: `${packageName}#NewsScheduleInput`, create: () => scheduleInput } }], result: { mode: 'strict', typeSymbol: `${packageName}#NewsScheduleResult`, create: () => scheduleResult } };
   const libraryDescriptor = { ...descriptor, id: `${packageName}#whalewingCards/manageLibrary`, method: 'manageLibrary', parameters: [{ name: 'input', wire: 'input', source: 'json', codec: { mode: 'strict', typeSymbol: `${packageName}#LibraryInput`, create: () => library.manage } }], result: { mode: 'strict', typeSymbol: `${packageName}#LibraryResult`, create: () => library.result } };
-  const invocations = [descriptor, scheduleDescriptor, libraryDescriptor];
-  return { manage, execute, result, scheduleInput, scheduleResult, executionResult, field: storedField, report, library, host: { package: packageName, face: 'host', schemas: [], invocations, model: { package: packageName, face: 'host' } }, client: { package: packageName, descriptors: invocations } };
+  const readingDescriptor = { ...descriptor, id: `${packageName}#whalewingCards/manageReading`, method: 'manageReading', parameters: [{ name: 'input', wire: 'input', source: 'json', codec: { mode: 'strict', typeSymbol: `${packageName}#ReadingInput`, create: () => reading.manage } }], result: { mode: 'strict', typeSymbol: `${packageName}#ReadingResult`, create: () => reading.result } };
+  const invocations = [descriptor, scheduleDescriptor, libraryDescriptor, readingDescriptor];
+  return { manage, execute, result, scheduleInput, scheduleResult, executionResult, field: storedField, report, library, reading, host: { package: packageName, face: 'host', schemas: [], invocations, model: { package: packageName, face: 'host' } }, client: { package: packageName, descriptors: invocations } };
 }
 
 /** 本地书架：导入、分组、阅读和在线书目共用的唯一边界。 */
@@ -142,4 +153,46 @@ export function libraryContract(z) {
   const chapterRef = z.strictObject({ index: count, title: text.min(1).max(200), chars: count });
   const daily = z.strictObject({ date: text.regex(/^\d{4}-\d{2}-\d{2}$/), total: count, daily: count, notice: notice.optional(), books: z.array(z.strictObject({ id, title: text.min(1).max(200), author: text.max(200), cover: z.boolean(), chapters: count.min(1), finished: z.boolean(), missing: z.literal(true).optional(), chapter: chapterRef.extend({ excerpt: text.max(400) }).optional(), next: z.array(chapterRef).max(3) })).max(2) });
   return { manage, result, state, catalog, book, group, view, daily, notice };
+}
+
+/**
+ * 每日阅读自己的本机数据：阅读设置的开关、书里的划线（原文不进知识库）、存过哪些资讯和技巧。
+ * 存在 profile 目录 whalewing-library/reading.json，和书架用同一个目录。
+ */
+export function readingContract(z) {
+  const text = z.string(), count = z.number().int().nonnegative();
+  const id = text.regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/), day = text.regex(/^\d{4}-\d{2}-\d{2}$/);
+  const settings = z.strictObject({ personal: z.boolean(), diary: z.boolean(), usage: z.boolean(), weekly: z.boolean(), review: z.union(readingLimits.review.map(value => z.literal(value))) });
+  // before 是划线前面紧挨着的几个字，同一句在本章出现几次时用它认是哪一处；seen 是哪几天点过“看过了”。
+  const highlight = z.strictObject({ id, book: id, bookTitle: text.min(1).max(200), chapter: count, chapterTitle: text.max(200), text: text.min(1).max(readingLimits.text), before: text.max(readingLimits.before), note: text.max(readingLimits.note), at: text.datetime(), seen: z.array(day).max(400) });
+  const captureKey = text.min(1).max(400);
+  const capture = z.strictObject({ key: captureKey, path: text.min(1).max(400), name: text.min(1).max(200), at: text.datetime() });
+  const state = z.strictObject({ version: z.literal(1), settings, highlights: z.array(highlight).max(readingLimits.highlights), captures: z.array(capture).max(readingLimits.captures) });
+  const fresh = highlight.pick({ book: true, bookTitle: true, chapter: true, chapterTitle: true, before: true }).extend({ text: text.trim().min(2).max(readingLimits.text) });
+  const manage = z.discriminatedUnion('action', [
+    z.strictObject({ action: z.literal('home') }),
+    z.strictObject({ action: z.literal('settings'), settings }),
+    z.strictObject({ action: z.literal('highlights'), book: id }),
+    z.strictObject({ action: z.literal('highlight'), ...fresh.shape }),
+    z.strictObject({ action: z.literal('note'), id, note: text.trim().max(readingLimits.note) }),
+    z.strictObject({ action: z.literal('unhighlight'), id }),
+    // 撤销“取消划线”：把刚取消的那条原样放回去。
+    z.strictObject({ action: z.literal('restore'), highlight }),
+    z.strictObject({ action: z.literal('looked'), id }),
+    z.strictObject({ action: z.literal('more') }),
+    z.strictObject({ action: z.literal('capture'), key: captureKey, title: text.trim().min(1).max(240), brief: text.max(1200), url: text.url().max(2048), why: text.trim().max(readingLimits.why) }),
+  ]);
+  // home：开关、今天到期要回顾的几条、每本书划了几条、总数、上周存了几条划了几条、最近存过的。
+  const home = z.strictObject({ date: day, settings, review: z.array(highlight).max(3), byBook: z.record(id, count), counts: z.strictObject({ highlights: count, captures: count }), lastWeek: z.strictObject({ highlights: count, captures: count }), captures: z.array(capture).max(400) });
+  const result = z.union([
+    z.strictObject({ home }),
+    z.strictObject({ settings }),
+    z.strictObject({ highlights: z.array(highlight).max(readingLimits.highlights) }),
+    // note：员工写了那句话时，记进了知识库哪一篇来源笔记；created 表示这一篇是这次新建的。
+    z.strictObject({ highlight, note: z.strictObject({ path: text.min(1).max(400), created: z.boolean() }).optional() }),
+    z.strictObject({ removed: highlight }),
+    z.strictObject({ review: z.array(highlight).max(3) }),
+    z.strictObject({ capture }),
+  ]);
+  return { manage, result, state, settings, highlight, capture, home };
 }

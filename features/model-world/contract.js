@@ -1,6 +1,9 @@
 import { worldEfforts } from '../../src/model-world-index.js';
+import { probeTestIds } from '../../src/model-world-probe.js';
 
 export const worldLimits = Object.freeze({ plans: 400, efforts: 8, snapshotBytes: 8 * 1024 * 1024, responseBytes: 12 * 1024 * 1024, models: 10000, vendors: 500, operationMs: 60000, sources: 10, scores: 300, modalities: 20, text: 500, id: 240, sourceId: 100, query: 160, link: 2000, sourceNote: 4000, error: 1000, page: 200, defaultPage: 100, compare: 4 });
+/** 我的模型、用量和模型测智的上限：测智一次调用最长等 4 分钟，回答最多留 6 万字，记录最多留 30 轮。 */
+export const deskLimits = Object.freeze({ probeMs: 240000, reply: 60000, runs: 30, records: 48, groups: 100, models: 500, used: 2000, days: 400, issues: 50 });
 export const worldCapabilityKeys = Object.freeze(['promptCaching', 'reasoning', 'structuredOutput', 'toolCall']);
 export const worldPriceKeys = Object.freeze(['cachedInputPerMTok', 'inputPerMTok', 'outputPerMTok']);
 
@@ -87,6 +90,7 @@ export function modelWorldContract(z) {
     z.strictObject({ action: z.literal('refresh') }),
     z.strictObject({ action: z.literal('setIndexKey'), key: z.string().min(8).max(200).regex(/^[\x21-\x7e]+$/) }),
     z.strictObject({ action: z.literal('clearIndexKey') }),
+    z.strictObject({ action: z.literal('all') }),
     z.strictObject({ action: z.literal('list'), ...filters }),
     z.strictObject({ action: z.literal('timeline'), ...filters }),
     z.strictObject({ action: z.literal('ranking'), league: z.enum(worldRankingBoards), direction: z.enum(['asc', 'desc']).optional(), ...filters }),
@@ -96,6 +100,7 @@ export function modelWorldContract(z) {
   ]);
   const result = z.discriminatedUnion('action', [
     ...['status', 'refresh', 'setIndexKey', 'clearIndexKey'].map(action => z.strictObject({ action: z.literal(action), ...status })),
+    z.strictObject({ action: z.literal('all'), ...status, models: z.array(model).max(worldLimits.models) }),
     ...['list', 'timeline', 'ranking'].map(action => z.strictObject({ action: z.literal(action), ...status, ...page })),
     z.strictObject({ action: z.literal('value'), ...status, bands: z.array(band).max(10), plans: z.array(plan).max(worldLimits.plans) }),
     z.strictObject({ action: z.literal('detail'), ...status, model: model.nullable(), vendor: vendor.nullable() }),
@@ -110,5 +115,48 @@ export function modelWorldContract(z) {
     parameters: [{ name: 'input', wire: 'input', source: 'json', codec: { mode: 'strict', typeSymbol: `${packageName}#ModelWorldInput`, create: () => input } }],
     cancellation: { parameter: 'signal' }, result: { mode: 'strict', typeSymbol: `${packageName}#ModelWorldResult`, create: () => result },
   };
-  return { input, result, snapshot, model, host: { package: packageName, face: 'host', schemas: [], invocations: [descriptor], model: { package: packageName, face: 'host' } }, client: { package: packageName, descriptors: [descriptor] } };
+  // ---- 我的模型、用量、模型测智：读 DSH 的模型目录和会话用量，按员工的操作改默认模型、直接调一次模型 ----
+  const count = z.number().int().min(0).max(1e15), day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+  const provider = text.max(120), modelName = text.max(160), effortName = text.max(80);
+  const target = { provider, model: modelName, effort: effortName.optional() };
+  const totals = { inputTokens: count, outputTokens: count, cacheReadTokens: count, cacheWriteTokens: count, calls: count };
+  const runId = z.string().regex(/^[a-z0-9-]{6,60}$/), probeId = z.enum(probeTestIds), seed = z.number().int().min(0).max(0xffffffff);
+  const grade = z.strictObject({ made: z.boolean().nullable(), pass: z.boolean().nullable(), answer: z.string().max(400).nullable(), expect: z.string().max(100).nullable(), note: z.string().max(400) });
+  const record = { runId, at: time, testId: probeId, seed, classic: z.boolean(), provider, model: modelName, effort: effortName.nullable(), ms: count, usage: z.strictObject(totals).nullable(), finish: z.string().max(40), error: z.string().max(worldLimits.error).nullable(), grade };
+  const deskInput = z.discriminatedUnion('action', [
+    z.strictObject({ action: z.literal('mine') }),
+    z.strictObject({ action: z.literal('setMapping'), provider, model: modelName, modelId: id.nullable() }),
+    z.strictObject({ action: z.literal('setDefault'), ...target }),
+    z.strictObject({ action: z.literal('selectModel'), sessionId: text.max(200), ...target }),
+    z.strictObject({ action: z.literal('usage'), days: z.number().int().min(1).max(deskLimits.days) }),
+    z.strictObject({ action: z.literal('probe'), runId, testId: probeId, seed, classic: z.boolean(), ...target }),
+    z.strictObject({ action: z.literal('probes') }),
+    z.strictObject({ action: z.literal('probeRun'), runId }),
+    z.strictObject({ action: z.literal('probeStar'), runId, row: z.string().regex(/^[a-z]+\|[01]$/), key: z.string().max(300).nullable() }),
+    z.strictObject({ action: z.literal('probeDelete'), runId }),
+  ]);
+  const mineModel = z.strictObject({ id: modelName, name: text.max(200), efforts: z.array(z.strictObject({ id: effortName, name: text.max(120) })).max(12), defaultEffort: effortName.nullable(), contextWindow: numeric });
+  const mineGroup = z.strictObject({ id: provider, name: text.max(200), kind: z.enum(['official', 'relay', 'local', 'unknown']), host: z.string().max(253).nullable(), models: z.array(mineModel).max(deskLimits.models) });
+  const runSummary = z.strictObject({ runId, at: time, stars: z.record(z.string().max(40), z.string().max(300)), records: z.array(z.strictObject(record)).max(deskLimits.records) });
+  const deskResult = z.discriminatedUnion('action', [
+    z.strictObject({ action: z.literal('mine'), supported: z.strictObject({ catalog: z.boolean(), setDefault: z.boolean(), probe: z.boolean(), selectModel: z.boolean() }), defaultModel: z.strictObject(target).nullable(),
+      groups: z.array(mineGroup).max(deskLimits.groups), mapping: z.record(z.string().max(300), id.nullable()), used: z.array(z.strictObject({ provider, model: modelName, calls: count, tokens: count, lastDay: day })).max(deskLimits.used), issues: z.array(z.string().max(worldLimits.error)).max(deskLimits.issues) }),
+    z.strictObject({ action: z.literal('setMapping'), mapping: z.record(z.string().max(300), id.nullable()) }),
+    z.strictObject({ action: z.literal('setDefault'), defaultModel: z.strictObject(target) }),
+    z.strictObject({ action: z.literal('selectModel'), sessionId: text.max(200), selected: z.strictObject(target) }),
+    z.strictObject({ action: z.literal('usage'), today: day, since: day.nullable(), backfilled: z.boolean(), days: z.array(z.strictObject({ day, ...totals })).max(deskLimits.days), rows: z.array(z.strictObject({ provider, model: modelName, ...totals })).max(deskLimits.used) }),
+    z.strictObject({ action: z.literal('probe'), ...record, reply: z.string().max(deskLimits.reply) }),
+    z.strictObject({ action: z.literal('probes'), runs: z.array(runSummary).max(deskLimits.runs) }),
+    z.strictObject({ action: z.literal('probeRun'), runId, at: time, stars: z.record(z.string().max(40), z.string().max(300)), records: z.array(z.strictObject({ ...record, reply: z.string().max(deskLimits.reply) })).max(deskLimits.records) }),
+    z.strictObject({ action: z.literal('probeStar'), runId, stars: z.record(z.string().max(40), z.string().max(300)) }),
+    z.strictObject({ action: z.literal('probeDelete'), runs: z.array(runSummary).max(deskLimits.runs) }),
+  ]);
+  // 落盘格式：对应关系、账本（days[日期][渠道][型号]）、测智轮次摘要。读回时按它校验，对不上就另存原文件、从空的开始。
+  const stored = z.strictObject({ version: z.literal(1), mapping: z.record(z.string().max(300), id), ledger: z.strictObject({ since: day, backfilled: z.boolean(), days: z.record(day, z.record(provider, z.record(modelName, z.strictObject(totals)))) }), runs: z.array(runSummary).max(deskLimits.runs) });
+  const deskDescriptor = {
+    id: `${packageName}#whalewingModelWorld/manageModelDesk`, service: 'whalewingModelWorld', namespace: 'whalewingModelWorld', method: 'manageModelDesk', invocation: { kind: 'direct' },
+    parameters: [{ name: 'input', wire: 'input', source: 'json', codec: { mode: 'strict', typeSymbol: `${packageName}#ModelDeskInput`, create: () => deskInput } }],
+    cancellation: { parameter: 'signal' }, result: { mode: 'strict', typeSymbol: `${packageName}#ModelDeskResult`, create: () => deskResult },
+  };
+  return { input, result, snapshot, model, desk: { input: deskInput, result: deskResult, stored }, host: { package: packageName, face: 'host', schemas: [], invocations: [descriptor, deskDescriptor], model: { package: packageName, face: 'host' } }, client: { package: packageName, descriptors: [descriptor, deskDescriptor] } };
 }

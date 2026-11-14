@@ -147,6 +147,8 @@ export function forceLink(pairs) {
   var nodes,
       random,
       distance = 30,
+      // 图谱设置里“相连的点互相拉多紧”乘在 d3 默认强度上；默认 1，乘 1 不改任何浮点结果，和上游逐 tick 对照照旧成立。
+      scale = 1,
       count,
       inverse,
       px,
@@ -162,7 +164,7 @@ export function forceLink(pairs) {
       x = px[t] + vx[t] - px[s] - vx[s] || jiggle(random);
       y = py[t] + vy[t] - py[s] - vy[s] || jiggle(random);
       l = Math.sqrt(x * x + y * y);
-      l = (l - distance) / l * alpha * Math.max(inverse[s], inverse[t]);
+      l = (l - distance) / l * alpha * Math.max(inverse[s], inverse[t]) * scale;
       x *= l, y *= l;
       vx[t] -= x * (b = count[s] / (count[s] + count[t]));
       vy[t] -= y * b;
@@ -187,6 +189,10 @@ export function forceLink(pairs) {
 
   force.distance = function(_) {
     return arguments.length ? (distance = +_, force) : distance;
+  };
+
+  force.scale = function(_) {
+    return arguments.length ? (scale = +_, force) : scale;
   };
 
   return force;

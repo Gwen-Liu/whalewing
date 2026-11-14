@@ -21,9 +21,16 @@ function jpegSize(bytes) {
   return null;
 }
 
+/** 打开模型世界并切到里面的一个页签（2026-11-12 改版后默认停在「我的模型」，图鉴要点一下）。 */
+async function openWorld(page, sub = '角色图鉴') {
+  await openTab(page, '模型世界');
+  await page.locator('.ww-mw-tabs button', { hasText: sub }).click();
+  await page.locator(`.ww-mw-body[data-tab]`).waitFor();
+}
+
 /** 打开模型世界的角色图鉴，点第 index 张卡片的“查看大图”，等带水印的大图出来。 */
 async function openViewer(page, index = 0) {
-  await openTab(page, '模型世界');
+  await openWorld(page);
   const zoom = page.locator('.ww-mw-zoom').nth(index);
   const name = (await zoom.getAttribute('aria-label')).replace(/^查看大图：/, '');
   await zoom.click();
@@ -111,7 +118,7 @@ test('反例：大图取不到时保留小图、不能保存，网络恢复后�
   await withPage(browser, t, async ({ page }) => {
     await openWhaleWing(page, dsh.url);
     await page.route('**/client.portrait-*.js*', route => route.abort());
-    await openTab(page, '模型世界');
+    await openWorld(page);
     const zoom = page.locator('.ww-mw-zoom').first(), name = (await zoom.getAttribute('aria-label')).replace(/^查看大图：/, '');
     await zoom.click();
     const viewer = page.getByRole('dialog', { name: `立绘大图：${name}` });
@@ -129,18 +136,16 @@ test('反例：大图取不到时保留小图、不能保存，网络恢复后�
 // ---- 图鉴、列表、时间线、详情、价格、实力榜、对决、综合实力数据 ----
 // 预期按 support/world-fixture.mjs 里放进去的合成模型算；实力榜的分数来自随插件发布的榜单，只检查规则（排序、梯队），不检查具体分数。
 
-const search = async (page, text) => {
-  await page.getByPlaceholder('搜索模型或厂商').fill(text);
-  await page.getByRole('button', { name: '查找', exact: true }).click();
-};
-const modelRow = (page, name) => page.locator('.ww-mw-model-row').filter({ has: page.locator('strong', { hasText: new RegExp(`^${name}$`) }) });
-/** 在当前列表里打开某个模型的详情窗口。 */
+const subTab = (page, name) => page.locator('.ww-mw-tabs button', { hasText: name }).click();
+/** 「新模型」页签里按名字找一行（2026-11-12 改版：型号名是可点的按钮，点了看详情）。 */
+const modelRow = (page, name) => page.locator('.ww-mw-model-row').filter({ has: page.locator('.ww-mw-name', { hasText: new RegExp(`^${name}$`) }) });
+/** 从「新模型」打开某个模型的详情窗口。 */
 async function openDetail(page, name) {
-  await search(page, name);
+  await subTab(page, '新模型');
   const row = modelRow(page, name).first();
-  await row.hover();
-  await row.getByRole('button', { name: `详情 ${name}` }).click();
-  const dialog = page.locator('dialog.ww-mw-dialog[open]').filter({ has: page.locator('h2', { hasText: new RegExp(`^${name}$`) }) });
+  await row.waitFor();
+  await row.locator('.ww-mw-name').click();
+  const dialog = page.locator('dialog.ww-modal[open]').filter({ has: page.locator('header h2', { hasText: new RegExp(`^${name}$`) }) });
   await dialog.waitFor();
   return dialog;
 }
@@ -156,13 +161,13 @@ const readRows = page => rankingRows(page).evaluateAll(rows => rows.map(row => {
 const tierOf = score => { const shown = Math.round(score); return shown >= 52 ? 'T0' : shown >= 44 ? 'T1' : shown >= 34 ? 'T2' : 'T3'; };
 
 // 需求§模型世界·数据（只收录有角色立绘的 18 家厂商）
-test('角色图鉴：18 家厂商各一张卡，每张有立绘、梯队或最强型号、模型数和“查看大图”', async t => {
+test('角色图鉴：19 位角色各一张卡（18 家厂商加 DeepSeek Flash），每张有立绘、梯队或最强型号、模型数和“查看大图”', async t => {
   await withPage(browser, t, async ({ page, errors }) => {
     await openWhaleWing(page, dsh.url);
-    await openTab(page, '模型世界');
+    await openWorld(page);
     const slots = page.locator('.ww-mw-role-slot');
     await slots.first().waitFor();
-    assert.equal(await slots.count(), 18);
+    assert.equal(await slots.count(), 19);
     const cards = await slots.evaluateAll(nodes => nodes.map(node => ({ art: Boolean(node.querySelector('img.ww-mw-persona')), count: /\d+ 个模型/.test(node.textContent), zoom: Boolean(node.querySelector('button.ww-mw-zoom[aria-label^="查看大图："]')) })));
     assert.ok(cards.every(card => card.art && card.count && card.zoom), JSON.stringify(cards));
     assert.deepEqual(errors, []);
@@ -170,18 +175,21 @@ test('角色图鉴：18 家厂商各一张卡，每张有立绘、梯队或最�
 });
 
 // 需求§模型世界（图鉴：点厂商看它的模型）
-test('点厂商卡片看这家的模型，带发布日期和上下文；“返回角色图鉴”回到 18 张卡', async t => {
+test('点角色卡片看档案：一句话介绍、必杀名、官网和开放平台入口；“看这家的全部模型”跳到实力榜并按这家筛好', async t => {
   await withPage(browser, t, async ({ page }) => {
     await openWhaleWing(page, dsh.url);
-    await openTab(page, '模型世界');
-    await page.getByRole('button', { name: '浏览 OpenAI 的模型' }).click();
-    const row = modelRow(page, 'GPT E2E');
-    await row.waitFor();
-    assert.equal((await row.locator('small').innerText()).trim(), 'OpenAI · 2026-09-20 · 128K 上下文');
-    assert.equal(await page.locator('.ww-mw-model-row').filter({ hasText: 'Claude E2E' }).count(), 0, '只有这家的模型');
-    await page.getByRole('button', { name: '返回角色图鉴' }).click();
-    await page.locator('.ww-mw-role-slot').nth(17).waitFor();
-    assert.equal(await page.locator('.ww-mw-role-slot').count(), 18);
+    await openWorld(page);
+    await page.getByRole('button', { name: 'OpenAI 的角色档案' }).click();
+    const profile = page.locator('dialog.ww-modal[open]');
+    await profile.waitFor();
+    assert.match(await profile.locator('header h2').innerText(), /^OpenAI · /);
+    assert.match(await profile.locator('.ww-mw-tags').innerText(), /必杀 · 神谕降临/); assert.match(await profile.locator('.ww-mw-kit').innerText(), /神谕诗人，使白羽笔和神谕卷轴：落羽、展卷、谶言/);
+    const links = await profile.locator('footer a').evaluateAll(nodes => nodes.map(node => [node.textContent.trim(), node.href, node.target, node.rel]));
+    assert.deepEqual(links, [['官网', 'https://openai.com/', '_blank', 'noopener noreferrer'], ['开放平台', 'https://platform.openai.com/', '_blank', 'noopener noreferrer']]);
+    await profile.getByRole('button', { name: /^看这家的全部 \d+ 个模型$/ }).click();
+    await profile.waitFor({ state: 'detached' });
+    assert.equal(await page.locator('.ww-mw-tabs button[aria-pressed=true]').innerText(), '实力榜');
+    assert.equal(await page.locator('.ww-mw-toolbar select').inputValue(), 'openai');
   });
 });
 
@@ -189,8 +197,8 @@ test('点厂商卡片看这家的模型，带发布日期和上下文；“返�
 test('反例：只有年月的发布日期原样显示，不补成具体日期', async t => {
   await withPage(browser, t, async ({ page }) => {
     await openWhaleWing(page, dsh.url);
-    await openTab(page, '模型世界');
-    await search(page, 'Kimi E2E');
+    await openWorld(page);
+    await subTab(page, '新模型');
     await modelRow(page, 'Kimi E2E').waitFor();
     assert.equal((await modelRow(page, 'Kimi E2E').locator('small').innerText()).trim(), '月之暗面 · 2026-08 · 128K 上下文');
     const dialog = await openDetail(page, 'Kimi E2E');
@@ -202,7 +210,7 @@ test('反例：只有年月的发布日期原样显示，不补成具体日期',
 test('反例：没有综合实力分的模型显示“—”和“评测不足”，不当成 0 分', async t => {
   await withPage(browser, t, async ({ page }) => {
     await openWhaleWing(page, dsh.url);
-    await openTab(page, '模型世界');
+    await openWorld(page);
     const dialog = await openDetail(page, 'GPT E2E');
     const score = dialog.locator('.ww-mw-rating-score');
     assert.equal((await score.locator('strong').innerText()).trim(), '—');
@@ -215,10 +223,10 @@ test('反例：没有综合实力分的模型显示“—”和“评测不足�
 test('价格按币种：海外模型显示公开目录的美元价，价目表里的国产模型显示官网人民币价并注明', async t => {
   await withPage(browser, t, async ({ page }) => {
     await openWhaleWing(page, dsh.url);
-    await openTab(page, '模型世界');
+    await openWorld(page);
     let dialog = await openDetail(page, 'GPT E2E');
     assert.deepEqual([await metric(dialog, '输入价格').innerText(), await metric(dialog, '输出价格').innerText()].map(text => text.trim()), ['$1.25', '$10']);
-    await dialog.getByRole('button', { name: '关闭' }).click();
+    await dialog.locator('footer').getByRole('button', { name: '关闭' }).click();
     dialog = await openDetail(page, 'DeepSeek V4 Flash');
     assert.deepEqual([await metric(dialog, '输入价格').innerText(), await metric(dialog, '缓存输入价格').innerText(), await metric(dialog, '输出价格').innerText()].map(text => text.trim()), ['¥2', '¥0.04', '¥8']);
     assert.match(await dialog.innerText(), /人民币 \/ 百万 tokens，按厂商官网标价/);
@@ -229,7 +237,7 @@ test('价格按币种：海外模型显示公开目录的美元价，价目表�
 test('反例：没核对过官网价的国产模型不显示价格，也不拿美元价换算', async t => {
   await withPage(browser, t, async ({ page }) => {
     await openWhaleWing(page, dsh.url);
-    await openTab(page, '模型世界');
+    await openWorld(page);
     const dialog = await openDetail(page, 'DeepSeek V4');
     // 不显示价格：价格那几项要么没有，要么是“—”。
     for (const label of ['输入价格', '缓存输入价格', '输出价格']) {
@@ -242,16 +250,16 @@ test('反例：没核对过官网价的国产模型不显示价格，也不拿�
 });
 
 // 需求§模型世界（发布时间线）
-test('发布时间线按年分组，同一年里新的在上', async t => {
+test('新模型按月分组，新的月份在上，同一个月里新的在上', async t => {
   await withPage(browser, t, async ({ page }) => {
     await openWhaleWing(page, dsh.url);
-    await openTab(page, '模型世界');
-    await search(page, 'E2E');
-    await page.getByRole('button', { name: '发布时间线' }).click();
-    await page.locator('.ww-mw-timeline').waitFor();
-    assert.deepEqual(await page.locator('.ww-mw-timeline .ww-mw-year').allInnerTexts(), ['2026']);
+    await openWorld(page, '新模型');
+    await page.locator('.ww-mw-timeline').first().waitFor();
+    const months = (await page.locator('.ww-mw-timeline .ww-mw-year').allInnerTexts()).map(text => /^(\d{4}) 年 (\d+) 月/.exec(text)).map(match => Number(match[1]) * 100 + Number(match[2]));
+    assert.ok(months.length >= 2 && months.every((month, index) => index === 0 || month < months[index - 1]), `月份从新到旧：${months}`);
     // 合成数据里名字带 E2E 的五个，按发布日期从新到旧。
-    assert.deepEqual(await page.locator('.ww-mw-timeline .ww-mw-model-row strong').allInnerTexts(), ['GPT E2E', 'Claude E2E', 'Gemini E2E', 'Qwen E2E', 'Kimi E2E']);
+    const names = (await page.locator('.ww-mw-timeline .ww-mw-name').allInnerTexts()).filter(name => / E2E$/.test(name));
+    assert.deepEqual(names, ['GPT E2E', 'Claude E2E', 'Gemini E2E', 'Qwen E2E', 'Kimi E2E']);
   });
 });
 
@@ -259,10 +267,10 @@ test('发布时间线按年分组，同一年里新的在上', async t => {
 test('实力榜：五个榜单，默认综合实力从高到低；点箭头改成从低到高，顺序反过来', async t => {
   await withPage(browser, t, async ({ page }) => {
     await openWhaleWing(page, dsh.url);
-    await openTab(page, '模型世界');
+    await openWorld(page);
     await page.getByRole('button', { name: '实力榜' }).click();
     await rankingRows(page).first().waitFor();
-    assert.deepEqual((await page.locator('.ww-mw-boards > button:not(.ww-mw-sort)').allInnerTexts()).map(text => text.trim()), ['综合实力', '推理与知识', '编程', '智能体', '性价比']);
+    assert.deepEqual((await page.locator('.ww-mw-boards').first().locator('> button:not(.ww-mw-sort)').allInnerTexts()).map(text => text.trim()), ['综合实力', '推理与知识', '编程', '智能体', '性价比']);
     const sort = page.locator('.ww-mw-sort');
     assert.equal((await sort.innerText()).trim(), '↓ 从高到低');
     const down = (await readRows(page)).map(row => row.score);
@@ -279,7 +287,7 @@ test('实力榜：五个榜单，默认综合实力从高到低；点箭头改�
 test('实力榜每一行的梯队都和综合实力分对得上', async t => {
   await withPage(browser, t, async ({ page }) => {
     await openWhaleWing(page, dsh.url);
-    await openTab(page, '模型世界');
+    await openWorld(page);
     await page.getByRole('button', { name: '实力榜' }).click();
     await rankingRows(page).first().waitFor();
     const wrong = (await readRows(page)).filter(row => row.tier !== tierOf(row.score));
@@ -287,57 +295,52 @@ test('实力榜每一行的梯队都和综合实力分对得上', async t => {
   });
 });
 
-/** 从实力榜挑分数不同的两行加入对决，返回它们的名字和分数。 */
-async function pickTwo(page) {
-  await page.getByRole('button', { name: '实力榜' }).click();
-  await rankingRows(page).first().waitFor();
-  const rows = await readRows(page);
-  const high = rows[0], low = rows.find(row => row.score < high.score - 5);
-  for (const row of [high, low]) await page.getByRole('button', { name: `加入对决 ${row.name}` }).first().click();
-  return { high, low };
-}
-
 // 需求§角色与对决（选两个不同的模型，只看综合实力，分高的一方最后击倒对方）
-test('对决：选两个模型，综合实力高的一方获胜，胜方还剩体力、败方体力为 0', async t => {
-  await withPage(browser, t, async ({ page }) => {
+test('对决：在对决台上从名单里点两位，开打后综合实力高的一方获胜，胜方还剩体力、败方体力为 0', async t => {
+  await withPage(browser, t, { reducedMotion: 'reduce' }, async ({ page, errors }) => {
     await openWhaleWing(page, dsh.url);
-    await openTab(page, '模型世界');
-    const { high, low } = await pickTwo(page);
-    const bar = page.locator('.ww-mw-selected');
-    assert.equal((await bar.locator('span').first().innerText()).trim(), '对决 · 2/2');
-    await bar.getByRole('button', { name: '对决', exact: true }).click();
-    const duel = page.locator('dialog.ww-mw-dialog[open][aria-label="对决"]');
-    await duel.getByRole('button', { name: '开始对决' }).click();
-    await duel.getByText(`${high.name} 获胜 · 综合实力`).waitFor({ timeout: 20000 });
+    await openWorld(page, '对决');
+    await page.locator('.ww-mw-boards button', { hasText: '每家最强' }).click();
+    const roster = page.locator('.ww-mw-rost');
+    await roster.nth(3).waitFor();
+    const read = async index => ({ name: await roster.nth(index).locator('strong').innerText(), score: Number(await roster.nth(index).locator('b').innerText()) });
+    const high = await read(0), low = await read(3);
+    assert.equal(await page.locator('.ww-mw-desk .ww-primary').isDisabled(), true, '没选齐不能开打');
+    await roster.nth(3).click();
+    assert.equal(await page.locator('.ww-mw-slot[data-side=right]').getAttribute('data-active'), 'true', '放好左边自动跳到右边');
+    await roster.nth(0).click();
+    await page.locator('.ww-mw-desk .ww-primary').click();
+    const duel = page.locator('dialog.ww-modal[open]');
+    await duel.getByText(`${high.name} 获胜，剩`).waitFor({ timeout: 20000 });
     const hp = (await duel.locator('.ww-mw-hp-num').allInnerTexts()).map(text => Number(/体力 (\d+)/.exec(text)[1]));
-    const highFirst = (await duel.locator('.ww-mw-hud-side.left .ww-mw-hud-name').innerText()).startsWith(high.name);
-    const [winner, loser] = highFirst ? hp : [hp[1], hp[0]];
-    assert.ok(winner > 0, `胜方体力 ${winner}`); assert.equal(loser, 0, '败方被击倒');
-    assert.ok(low.score < high.score);
+    assert.equal(hp[0], 0, '左边是分低的一方，被击倒'); assert.ok(hp[1] > 0, `胜方体力 ${hp[1]}`); assert.ok(low.score < high.score);
+    assert.equal(await duel.locator('.ww-mw-duel-log li').count(), 4, '四个回合的记录');
+    const kits = await duel.locator('.ww-mw-kits p').allInnerTexts();
+    assert.equal(kits.length, 2, '两位各一行职业和招式'); assert.ok(kits.every(text => /使.+：.+、.+、.+；必杀「.+」/.test(text)), JSON.stringify(kits));
+    assert.equal(await duel.locator('canvas').count(), 1);
+    assert.deepEqual(errors, []);
   });
 });
 
 // 需求§角色与对决（选两个不同的模型）
-test('反例：只选一个模型不能开始对决，同一个模型不能选两次，“清空”后对决栏消失', async t => {
+test('反例：同一个模型不会占两边；比一比最多放 4 个，超过两位不能直接对决，“清空”后底栏消失', async t => {
   await withPage(browser, t, async ({ page }) => {
     await openWhaleWing(page, dsh.url);
-    await openTab(page, '模型世界');
-    await page.getByRole('button', { name: '实力榜' }).click();
+    await openWorld(page, '对决');
+    await page.locator('.ww-mw-boards button', { hasText: '每家最强' }).click();
+    const roster = page.locator('.ww-mw-rost');
+    await roster.nth(1).waitFor();
+    await roster.nth(0).click(); await roster.nth(0).click();
+    assert.equal(await page.locator('.ww-mw-rost[aria-pressed=true]').count(), 1, '再点同一位只是把他换到亮着的那一边，不会两边都是他');
+    assert.equal(await page.locator('.ww-mw-desk .ww-primary').isDisabled(), true);
+    await subTab(page, '实力榜');
     await rankingRows(page).first().waitFor();
-    const [first] = await readRows(page);
-    // 选中后按钮的名字会变，所以按行找，取行里的第二个按钮（详情、加入对决）。
-    const add = rankingRows(page).filter({ has: page.locator('strong', { hasText: new RegExp(`^${first.name}$`) }) }).first().getByRole('button').nth(1);
-    await add.click();
+    const adds = page.locator('.ww-mw-table .ww-mw-iconbtn');
+    for (const index of [0, 1, 2, 3]) await adds.nth(index).click();
     const bar = page.locator('.ww-mw-selected');
-    assert.equal((await bar.locator('span').first().innerText()).trim(), '对决 · 1/2');
-    assert.equal(await bar.getByRole('button', { name: '对决', exact: true }).isDisabled(), true, '只有一个时不能对决');
-    assert.equal(await add.getAttribute('aria-pressed'), 'true');
-    await add.click();
-    // 再点一次：取消选择（对决栏消失）或者不变（仍是 1/2），绝不会变成 2/2。
-    await add.evaluate(button => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-    const after = await bar.count() ? (await bar.locator('span').first().innerText()).trim() : '';
-    assert.notEqual(after, '对决 · 2/2', '同一个不会算两次');
-    if (!after) await add.click();
+    assert.equal((await bar.locator('span').first().innerText()).trim(), '比一比 · 4/4');
+    assert.equal(await adds.nth(4).isDisabled(), true, '第五个放不进去');
+    assert.equal(await bar.getByRole('button', { name: '去对决台' }).isDisabled(), true, '超过两位不能直接对决');
     await bar.getByRole('button', { name: '清空' }).click();
     await bar.waitFor({ state: 'detached' });
     assert.equal(await page.locator('.ww-mw-table button[aria-pressed=true]').count(), 0);
@@ -350,7 +353,7 @@ test('立绘大图点开哪张才下载哪张，切到下一位才下载下一�
     const chunks = [];
     page.on('request', request => { const match = /\/client\.portrait-([a-z0-9-]+)\.js/.exec(request.url()); if (match) chunks.push(match[1]); });
     await openWhaleWing(page, dsh.url);
-    await openTab(page, '模型世界');
+    await openWorld(page);
     await page.locator('.ww-mw-role-slot').first().waitFor();
     assert.deepEqual(chunks, [], '只看图鉴时不下载大图');
     await page.getByRole('button', { name: '查看大图：OpenAI' }).click();
@@ -364,12 +367,12 @@ test('立绘大图点开哪张才下载哪张，切到下一位才下载下一�
 });
 
 // 需求§查看大图与保存（模型详情里的立绘也能直接点开）；需求§角色与对决（DeepSeek 分 Pro 和 Flash 两个形象）
-test('模型详情里的立绘也能点开大图；DeepSeek Flash 打开的是小肥鱼那张', async t => {
+test('模型详情里的立绘也能点开大图；DeepSeek Flash 打开的是小飞鱼那张', async t => {
   await withPage(browser, t, async ({ page }) => {
     const chunks = [];
     page.on('request', request => { const match = /\/client\.portrait-([a-z0-9-]+)\.js/.exec(request.url()); if (match) chunks.push(match[1]); });
     await openWhaleWing(page, dsh.url);
-    await openTab(page, '模型世界');
+    await openWorld(page);
     const dialog = await openDetail(page, 'DeepSeek V4 Flash');
     await dialog.getByRole('button', { name: '查看大图：深度求索 Flash' }).click();
     const viewer = page.getByRole('dialog', { name: '立绘大图：深度求索 Flash' });
@@ -397,7 +400,7 @@ async function clearKey(page, dialog) {
 test('综合实力数据窗口：说明用的是随插件发布的数据，给出 AA 登录页和免费接口文档；保存 Key 后不显示明文，可以清除', async t => {
   await withPage(browser, t, async ({ page }) => {
     await openWhaleWing(page, dsh.url);
-    await openTab(page, '模型世界');
+    await openWorld(page);
     let { dialog, status } = await openAaWindow(page);
     assert.match(status, /^当前使用：随插件发布的数据，截至 \d{4}-\d{2}-\d{2} · 还没有填写 Key$/);
     const hrefs = await dialog.locator('a').evaluateAll(links => links.map(link => link.href));
@@ -426,7 +429,7 @@ test('综合实力数据窗口：说明用的是随插件发布的数据，给�
 test('反例：Key 为空、太短或带空格时不能保存，状态不变', async t => {
   await withPage(browser, t, async ({ page }) => {
     await openWhaleWing(page, dsh.url);
-    await openTab(page, '模型世界');
+    await openWorld(page);
     const { dialog, status } = await openAaWindow(page);
     const field = dialog.getByLabel('Artificial Analysis API Key'), save = dialog.getByRole('button', { name: '保存', exact: true });
     for (const value of ['', 'short', 'has space key 123']) {

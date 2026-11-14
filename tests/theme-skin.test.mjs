@@ -26,7 +26,7 @@ test('主要卡片的底色都来自变量，不写死颜色挡住皮肤', () =>
     assert.ok(values.length > 0, `${selector} 有底色声明`);
     for (const value of values) assert.match(value, /^(var\(--(dsw|ww)-|transparent$)/, `${selector} 的底色 ${value} 不是写死的颜色`);
   }
-  // 书房的纸、笺、界、墨跟随 DSH：知识卡片页上不再有写死的暖纸色（阅读器是盖在页面上的弹窗，书页保留纸色）。
+  // 书房的纸、笺、界、墨跟随 DSH：每日阅读页上不再有写死的暖纸色（阅读器是盖在页面上的弹窗，书页保留纸色）。
   const desk = rulesOf(css).filter(rule => rule.selector === '.ww-cards').map(rule => rule.body).join(';');
   for (const name of ['--ww-paper', '--ww-sheet', '--ww-rule', '--ww-ink', '--ww-ink-2']) {
     const values = [...desk.matchAll(new RegExp(`${name}:([^;]+)`, 'g'))].map(match => match[1]);

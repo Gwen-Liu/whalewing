@@ -141,7 +141,7 @@ test('生成物不包含机器安装路径或任何用户知识正文', () => {
   assert.match(output, /Copyright \(c\) 2025 Colin McDonnell/);
 });
 
-const remoteNames = ['whalewingWorkbench', 'whalewingExperts', 'whalewingKnowledge', 'whalewingSkills', 'whalewingAutomation', 'whalewingAiWeb', 'whalewingCards', 'whalewingModelWorld'];
+const remoteNames = ['whalewingWorkbench', 'whalewingExperts', 'whalewingKnowledge', 'whalewingSkills', 'whalewingAutomation', 'whalewingAiWeb', 'whalewingCards', 'whalewingModelWorld', 'whalewingToolbox'];
 const treeNodes = tree => !tree || typeof tree !== 'object' ? [] : Array.isArray(tree) ? tree.flatMap(treeNodes) : [tree, ...treeNodes(tree.props?.children)];
 const tabButton = (f, id) => {
   const button = treeNodes(f.render()).find(node => node.type === 'button' && node.props['data-tab'] === (parts.find(part => part.id === id)?.label || id));
@@ -176,6 +176,17 @@ test('真实生成Client自带严格校验器，各功能独立挂接且资源�
           assert.equal(item.result.create().safeParse(snapshot).success, true);
           assert.equal(item.result.create().safeParse({ ...snapshot, caller: 'human' }).success, false);
         }
+        order.push(`mount:${service}`);
+        return () => order.push(`unmount:${service}`);
+      }
+      if (service === 'whalewingToolbox') {
+        // 办公工坊（2026-11-12 改版）：交给小鲸、订阅小鲸推过来的请求、交回结果，三个调用都带严格校验。
+        // 2026-11-14 加 listPath、readPathFile：员工贴的文件夹路径由主机列出、一个一个读给页面。
+        assert.deepEqual(contribution.descriptors.map(item => item.method), ['start', 'watch', 'reply', 'handoffs', 'officePdf', 'claim', 'listPath', 'readPathFile']);
+        const start = descriptor.parameters[0].codec.create();
+        assert.equal(start.safeParse({ text: '合成一个 PDF', files: [{ id: 'f1', name: 'a.pdf', type: 'pdf', size: 1 }] }).success, true);
+        assert.equal(start.safeParse({ text: ' ', files: [] }).success, false, '没文件也没要求不交');
+        assert.equal(start.safeParse({ text: 'x', files: [], caller: 'human' }).success, false);
         order.push(`mount:${service}`);
         return () => order.push(`unmount:${service}`);
       }
@@ -274,7 +285,7 @@ test('AI网页Remote挂载失败只隔离AI网页，核心与兄弟仍可用且�
 
 test('分发清单只包含运行内容与公开扩展资料，不将含隐私检测样例的测试封装进去', async () => {
   const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
-  assert.deepEqual(manifest.files, ['index.js', 'client.js', 'client.toolbox.js', 'client.model-world.js', 'client.portrait-openai.js', 'client.portrait-anthropic.js', 'client.portrait-google.js', 'client.portrait-deepseek.js', 'client.portrait-alibaba.js', 'client.portrait-moonshotai.js', 'client.portrait-zhipuai.js', 'client.portrait-bytedance-seed.js', 'client.portrait-minimax.js', 'client.portrait-tencent.js', 'client.portrait-baidu.js', 'client.portrait-xiaomi.js', 'client.portrait-meituan.js', 'client.portrait-stepfun.js', 'client.portrait-xai.js', 'client.portrait-meta.js', 'client.portrait-mistral.js', 'client.portrait-perplexity.js', 'client.portrait-deepseek-flash.js', 'src', 'content/roles.js', 'content/experts', 'content/expert-templates', 'content/skills', 'content/model-world', 'content/avatars', 'content/utilities', 'content/vault', 'cordis.patch.yml', 'README.md', 'COMPATIBILITY.md', 'EXTENDING.md', 'MAINTAINING.md', 'examples/feature-starter', 'examples/stateful-feature', 'LICENSE', 'NOTICE', 'art/brand', 'features', 'locale']);
+  assert.deepEqual(manifest.files, ['index.js', 'client.js', 'client.toolbox.js', 'client.model-world.js', 'client.portrait-openai.js', 'client.portrait-anthropic.js', 'client.portrait-google.js', 'client.portrait-deepseek.js', 'client.portrait-alibaba.js', 'client.portrait-moonshotai.js', 'client.portrait-zhipuai.js', 'client.portrait-bytedance-seed.js', 'client.portrait-minimax.js', 'client.portrait-tencent.js', 'client.portrait-baidu.js', 'client.portrait-xiaomi.js', 'client.portrait-meituan.js', 'client.portrait-stepfun.js', 'client.portrait-xai.js', 'client.portrait-meta.js', 'client.portrait-mistral.js', 'client.portrait-perplexity.js', 'client.portrait-deepseek-flash.js', 'src', 'content/roles.js', 'content/experts', 'content/expert-templates', 'content/skills', 'content/packs', 'content/model-world', 'content/avatars', 'content/utilities', 'content/vault', 'cordis.patch.yml', 'README.md', 'COMPATIBILITY.md', 'EXTENDING.md', 'MAINTAINING.md', 'examples/feature-starter', 'examples/stateful-feature', 'LICENSE', 'NOTICE', 'art/brand', 'features', 'locale']);
   assert.ok(!manifest.files.some(item => item === 'content' || item.includes('test')));
   // 示例的独立测试属于可复制开发材料；主项目测试和本地依赖仍不分发。
   const exampleFiles = await readdir(new URL('../examples/feature-starter/', import.meta.url), { recursive: true });

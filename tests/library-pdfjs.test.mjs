@@ -41,13 +41,8 @@ test('随包文件就是已安装那一版 pdfjs-dist 的原文件', () => {
 
 test('找不到原生画布程序时，PDF.js 照样加载并提取文字', { skip: canResolveCanvas() && '开发环境能找到 @napi-rs/canvas，核对不了“没有它也能用”' }, async () => {
   const { parseBook } = await import('../features/cards/library/formats.js');
-  const { wordPdf } = await import('../src/utilities/pdf.js');
-  const { Document, Packer, Paragraph, HeadingLevel } = await import('docx');
-  const docx = new Uint8Array(await Packer.toBuffer(new Document({ sections: [{ children: [
-    new Paragraph({ text: '第一章 北冥有鱼', heading: HeadingLevel.HEADING_1 }),
-    new Paragraph('北冥有鱼，其名为鲲。鲲之大，不知其几千里也。化而为鸟，其名为鹏。'.repeat(3)),
-  ] }] })));
-  const pdf = (await wordPdf(docx, 'book.docx')).files[0].bytes;
+  const { renderDefinition } = await import('../src/utilities/pdf.js');
+  const pdf = await renderDefinition({ content: [{ text: '第一章 北冥有鱼', fontSize: 18 }, '北冥有鱼，其名为鲲。鲲之大，不知其几千里也。化而为鸟，其名为鹏。'.repeat(3)] });
   const book = await parseBook(pdf, 'book.pdf');
   assert.match(book.chapters.map(chapter => chapter.markdown).join('\n'), /北冥有鱼/);
 });

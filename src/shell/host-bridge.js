@@ -127,12 +127,16 @@ export function createHostBridge(ctx, t, explainError) {
     bindFeatureRemote(name, value) { featureRemotes.set(name, value); return () => { if (featureRemotes.get(name) === value) featureRemotes.delete(name); }; },
     session: { create: input => ctx.remote.session.create(input), rename: input => ctx.remote.session.rename(input), projections: (input, signal) => ctx.remote.session.projections(input, signal) },
     sessionSnapshot: () => ctx.sessions.list.getSnapshot(), subagentAddress: id => ctx.sessions.subagentAddress(id),
+    subscribeSessions: listener => (typeof ctx.sessions.list?.subscribe === 'function' ? ctx.sessions.list.subscribe(listener) : () => {}),
     inputBinding: reference => ctx.get('uiSession')?.bindingSource(reference).getSnapshot(),
     insertInputReference: (id, value) => { const binding = ctx.sessions.binding(id); return binding ? { bound: true, accepted: binding.ctx.bail(binding.ctx, 'slash/input-insert-reference', value) === true } : { bound: false };  },
     browserMounted: () => ctx.get('sidebarRight')?.mounted?.getSnapshot(), browserAvailable: requireBrowser,
     // 右侧栏所有会话里开着的标签（rc.5 起有，含没在屏幕上的会话，重启后从本机记录恢复）；拿不到时返回空。
     browserTabs: () => { const store = ctx.get('sidebarRight')?.openTabs; return typeof store?.getSnapshot === 'function' && typeof store?.subscribe === 'function' ? store : null; },
     // 回到鲸翼页面并切到指定页签：左侧栏“鲸翼”那一行就是选中同名的主区面板。
+    // DSH 自带的文件动作（保存、另存为、复制图片），办公工坊保存结果用；没装这个插件时为空。
+    fileActions: () => ctx.get('fileActions'),
+    revealPath: async path => { const reply = await ctx.remote.session.openWorkspacePath({ path, action: 'reveal' }); if (!reply?.ok) throw new Error('文件位置打不开'); },
     showWorkbench: tab => {
       (ctx.get('layout') || ctx.layout)?.selectPanel('whalewing');
       if (tab) setTimeout(() => ctx.get('whalewingWorkbench')?.openTab(tab), 0);

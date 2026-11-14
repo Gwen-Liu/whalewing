@@ -8,6 +8,7 @@ import { createAutomationClient } from '../../features/automation/client-api.js'
 import { createCardsClient } from '../../features/cards/client-api.js';
 import { createAiWebClient } from '../../features/ai-web/client-api.js';
 import { createModelWorldClient } from '../../features/model-world/client-api.js';
+import { createToolboxClient } from '../../features/toolbox/client-api.js';
 
 /** 只组合真实消费者；每个领域实例保留自己的状态。 */
 export function createClients(ctx, t, z, explainError) {
@@ -15,14 +16,16 @@ export function createClients(ctx, t, z, explainError) {
   const workbenchSession = createWorkbenchSession(bridge, t, z);
   const experts = createExpertsClient(bridge, t);
   const assistant = createAssistantClient(bridge, t, experts);
-  const automation = createAutomationClient(bridge, t, z);
+  const automation = createAutomationClient(bridge, t, z, experts);
+  const knowledge = createKnowledgeClient(bridge, t, z, assistant);
   const clients = {
-    experts, assistant, automation,
-    knowledge: createKnowledgeClient(bridge, t, z, assistant),
+    experts, assistant, automation, knowledge,
     skills: createSkillsClient(bridge, t),
     cards: createCardsClient(bridge, t, z, automation),
-    'ai-web': createAiWebClient(bridge, t, z, workbenchSession),
+    // AI 网页的提问台要读《关于我》和笔记，带回来的回答存进收件箱，都经知识积累自己的接口。
+    'ai-web': createAiWebClient(bridge, t, z, workbenchSession, knowledge.knowledge),
     'model-world': createModelWorldClient(bridge, t, z),
+    toolbox: createToolboxClient(bridge, experts),
   };
   // Cards连接消失时只撤销提交适配，不清除定时领域的待确认身份。
   clients.cards.connectSchedule = () => automation.bindNewsAdapter(clients.cards.scheduleAdapter);

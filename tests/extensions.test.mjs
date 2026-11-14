@@ -126,7 +126,10 @@ test('模板用真实工作台 scoped 接口刷新和保活，取消后无成功
   const plugin = load(await read('client.js'), f.react, { setTimeout(fn) { timers.set(++next, fn); return next; }, clearTimeout(id) { timers.delete(id); } });
   plugin.apply(remoteScope(f.ctx, plugin.inject, [], cleanups));
   await f.featureUpdate({ revision: 1, features: [...parts.map((part, index) => ({ id: part.id, kind: part.kind, api: 1, package: 'dsh-whalewing', skills: [], instance: index + 1 })), { id: 'hello', kind: 'extension', api: 1, package: 'dsh-whalewing-hello', skills: [], instance: 10, tab: { keepAlive: true } }] });
-  await button(f.render(), '文本预览').props.onClick(); f.flushEffects();
+  // 2026-11-13 页头改版：扩展的页签先在“全部功能”里，从那里打开；之后页头上有它的临时页签。
+  assert.equal(button(f.render(), '文本预览'), undefined, '扩展的页签不占页头');
+  nodes(f.render()).find(node => node.type === 'button' && node.props.className === 'ww-launch').props.onClick();
+  const opening = nodes(f.render()).find(node => node.type === 'button' && node.props['data-feature'] === 'hello').props.onClick(); f.render(); await opening; f.flushEffects();
   let tree = f.render();
   const input = nodes(tree).find(node => node.props['aria-label'] === '预览文字');
   input.props.onChange({ target: { value: '临时文字' } });

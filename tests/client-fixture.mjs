@@ -96,11 +96,14 @@ async function fixture(overrides = {}) {
   let renderAgain = false, isolated = false;
   const childScopes = new Map();
   const storage = overrides.storage || new Map();
+  // 专家团队页“在用”的选用 / 放回记号和天数（宿主另存）；用例可以预先给。
+  const rosterState = { marks: { ...(overrides.rosterMarks || {}) }, idleDays: overrides.idleDays ?? 14 };
   const existing = overrides.existing || new Map();
   const workspaceCalls = [];
   const inputs = new Map();
   const workspaceState = overrides.workspaceState || { items: [{ workspaceId: 'default-workspace', path: 'E:\\默认工作区', sessionIds: [...existing.keys()] }] };
-  const selected = new Map();
+  // 会话选了哪位专家；模拟重开 DSH 时可以带到下一个夹具（真实 DSH 里这记在会话记录里）。
+  const selected = overrides.selected || new Map();
   const modelSelections = new Map();
   const automationClaims = overrides.automationClaims || new Map();
   const react = {
@@ -122,6 +125,12 @@ async function fixture(overrides = {}) {
       if (!effects[index] || !deps || deps.some((value, i) => value !== effects[index].deps[i])) { effects[index]?.cleanup?.(); effects[index] = { fn, deps, pending: true }; }
     },
     useLayoutEffect(fn, deps) { react.useEffect(fn, deps); effects[effectIndex - 1].layout = true; },
+    // 和 React 一样：依赖没变就返回上次算好的同一个值（知识页的图谱按设置算要画的图，靠它不每次重排）。
+    useMemo(fn, deps) {
+      const memo = react.useRef(null);
+      if (!memo.current || !deps || deps.length !== memo.current.deps.length || deps.some((value, i) => !Object.is(value, memo.current.deps[i]))) memo.current = { value: fn(), deps };
+      return memo.current.value;
+    },
     useSyncExternalStore(subscribe, get) { react.useLayoutEffect(() => subscribe(() => { renderAgain = true; }), [subscribe]); return get(); },
   };
   const store = (value) => { const listeners = new Set(); return { getSnapshot: () => value, subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener); }, set: next => { value = next; listeners.forEach(listener => listener()); } }; };
@@ -132,7 +141,7 @@ async function fixture(overrides = {}) {
     pluginNavigation: overrides.pluginNavigation,
     provide(name, value) { ctx[name] = value; },
     plugin(plugin) { plugin.apply(ctx); },
-    get(name) { if (Object.hasOwn(ctx, name)) return ctx[name]; if (name === 'pluginNavigation') return undefined; if (name === 'sidebarRightTabs') return Object.hasOwn(overrides, 'browserTabs') ? overrides.browserTabs : { get: kind => kind === 'browser' ? { kind } : undefined }; if (name === 'uiSession') return { bindingSource(reference) { const input = inputFor(reference.sessionId); return { getSnapshot: () => ({ key: reference.sessionId, hooks: { input: input.state }, props: { inputActions: input.actions } }) }; } }; assert.equal(name, 'sidebarRight'); return sidebarRight; },
+    get(name) { if (Object.hasOwn(ctx, name)) return ctx[name]; if (name === 'pluginNavigation' || name === 'layout') return undefined; if (name === 'sidebarRightTabs') return Object.hasOwn(overrides, 'browserTabs') ? overrides.browserTabs : { get: kind => kind === 'browser' ? { kind } : undefined }; if (name === 'uiSession') return { bindingSource(reference) { const input = inputFor(reference.sessionId); return { getSnapshot: () => ({ key: reference.sessionId, hooks: { input: input.state }, props: { inputActions: input.actions } }) }; } }; assert.equal(name, 'sidebarRight'); return sidebarRight; },
     on(name, callback) { const handlers = eventHandlers.get(name) || []; handlers.push(callback); eventHandlers.set(name, handlers); return () => eventHandlers.set(name, (eventHandlers.get(name) || []).filter(item => item !== callback)); },
     inputTriggers: { registerSource(source) { triggerSources.set(source.name, source); return () => triggerSources.delete(source.name); } },
     uiScheduleNavigation: { hide() { navigation.push('hide'); return () => navigation.push('restore'); } },
@@ -172,8 +181,8 @@ async function fixture(overrides = {}) {
       pluginManager: overrides.pluginManager,
       $on(name, callback) { return ctx.on(name, callback); },
       $mount(contribution) { assert.equal(contribution.descriptors[0].result.mode, 'strict'); const name = contribution.descriptors[0].namespace; remoteMounts.push(['mount', name]); if (overrides.mount) return overrides.mount(contribution); return () => { remoteMounts.push(['unmount', name]); }; },
-      whalewingExperts: { manage: async (input, signal) => { if (input.action === 'prepare_model') { const list = overrides.experts ? await overrides.experts({ action: 'list' }) : { value: { experts: roles } }; const role = list.value.experts.find(item => item.id === input.expertId); const model = role.model ?? { provider: 'fixture', model: 'default' }; const receipt = await ctx.remote.session.selectModel({ ...model, sessionId: input.sessionId, saveAsDefault: false }); if (receipt.ok) modelSelections.set(input.sessionId, receipt.value.selected); return receipt; } return (overrides.experts || (async input => { if (input.action === 'list') return { ok: true, value: { experts: roles, deleted: [] } }; if (input.action === 'templates') return { ok: true, value: { templates: [] } }; if (input.action === 'catalog') return { ok: true, value: { models: [{ id: 'deepseek-official', name: 'DeepSeek', models: [{ id: 'deepseek-flash', name: 'DeepSeek v4.1 flash' }] }], defaultModel: { provider: 'deepseek-official', model: 'deepseek-flash' }, skills: [], mcpServers: [], issues: [] } }; throw new Error('unexpected expert action'); }))(input, signal); } },
-      whalewingKnowledge: { manageAiWeb: async (input, signal) => { aiWebContract(z).input.parse(input); calls.push(['aiWeb', input]); return overrides.aiWeb ? overrides.aiWeb(input, signal) : { ok: true, value: { entries: aiWebEntries } }; }, manageNews: async (input, signal) => { newsContract(z).manage.parse(input); calls.push(['news', input]); if (overrides.news) return overrides.news(input, signal); throw new Error('unexpected news action'); }, manageModelWorld: async (input, signal) => { modelWorldContract(z).input.parse(input); calls.push(['world', input]); if (overrides.world) return overrides.world(input, signal); throw new Error('unexpected world action'); }, manageAutomation: async (input, signal) => { automationContract(z).input.parse(input); if (input.action === 'directory') return { ok: true, value: { directory: overrides.taskDirectory || 'E:\\DSH\\whalewing-tasks' } }; calls.push(['automation', input]); if (overrides.automation) return overrides.automation(input, signal); if (input.action === 'catalog') return { ok: true, value: { available: true, tasks: [], legacyTasks: [], issues: [] } }; throw new Error('unexpected automation action'); }, manageSkills: async (input, signal) => { skillLibraryContract(z).input.parse(input); if (overrides.skillLibrary) return overrides.skillLibrary(input, signal); if (input.action === 'list') return { ok: true, value: { entries: [], offset: input.offset || 0, total: 0, truncated: false } }; throw new Error('unexpected skill library action'); }, manage: async (input, signal) => {
+      whalewingExperts: { manage: async (input, signal) => { if (input.action === 'prepare_model') { const list = overrides.experts ? await overrides.experts({ action: 'list' }) : { value: { experts: roles } }; const role = list.value.experts.find(item => item.id === input.expertId); const model = role.model ?? { provider: 'fixture', model: 'default' }; const receipt = await ctx.remote.session.selectModel({ ...model, sessionId: input.sessionId, saveAsDefault: false }); if (receipt.ok) modelSelections.set(input.sessionId, receipt.value.selected); return receipt; } return (overrides.experts || (async input => { if (input.action === 'list') return { ok: true, value: { experts: roles, deleted: [], roster: rosterState } }; if (input.action === 'roster_mark') { rosterState.marks[input.id] = { state: input.state, at: Date.now() }; calls.push(['roster', input.id, input.state]); return { ok: true, value: { roster: rosterState } }; } if (input.action === 'roster_settings') { rosterState.idleDays = input.idleDays; calls.push(['rosterSettings', input.idleDays]); return { ok: true, value: { roster: rosterState } }; } if (input.action === 'templates') return { ok: true, value: { templates: [] } }; if (input.action === 'catalog') return { ok: true, value: { models: [{ id: 'deepseek-official', name: 'DeepSeek', models: [{ id: 'deepseek-flash', name: 'DeepSeek v4.1 flash' }] }], defaultModel: { provider: 'deepseek-official', model: 'deepseek-flash' }, skills: [], mcpServers: [], issues: [] } }; throw new Error('unexpected expert action'); }))(input, signal); } },
+      whalewingKnowledge: { manageAiWeb: async (input, signal) => { aiWebContract(z).input.parse(input); calls.push(['aiWeb', input]); return overrides.aiWeb ? overrides.aiWeb(input, signal) : { ok: true, value: { entries: aiWebEntries } }; }, manageNews: async (input, signal) => { newsContract(z).manage.parse(input); calls.push(['news', input]); if (overrides.news) return overrides.news(input, signal); throw new Error('unexpected news action'); }, manageModelWorld: async (input, signal) => { modelWorldContract(z).input.parse(input); calls.push(['world', input]); if (overrides.world) return overrides.world(input, signal); throw new Error('unexpected world action'); }, manageAutomation: async (input, signal) => { automationContract(z).input.parse(input); if (input.action === 'directory') return { ok: true, value: { directory: overrides.taskDirectory || 'E:\\DSH\\whalewing-tasks' } }; calls.push(['automation', input]); if (overrides.automation) return overrides.automation(input, signal); if (input.action === 'catalog') return { ok: true, value: { available: true, tasks: [], legacyTasks: [], issues: [] } }; throw new Error('unexpected automation action'); }, manageSkills: async (input, signal) => { skillLibraryContract(z).input.parse(input); if (input.action === 'scopes' && !overrides.skillScopes) return { ok: true, value: { scopes: [] } }; if (input.action === 'scopes') return overrides.skillScopes(input, signal); if (overrides.skillLibrary) return overrides.skillLibrary(input, signal); if (input.action === 'list') return { ok: true, value: { entries: [], offset: input.offset || 0, total: 0, truncated: false } }; throw new Error('unexpected skill library action'); }, manage: async (input, signal) => {
         calls.push(['knowledge', input]);
         if (overrides.knowledge) return overrides.knowledge(input, signal);
         if (overrides.execute) {
@@ -282,7 +291,9 @@ async function fixture(overrides = {}) {
   });
   // 与生产生成方式一致：闭包外变量不会被偷偷依赖。
   const windowEvents = new Map();
-  const browser = { innerWidth: 1440, innerHeight: 900, addEventListener(name, fn) { const listeners = windowEvents.get(name) || new Set(); listeners.add(fn); windowEvents.set(name, listeners); }, removeEventListener(name, fn) { windowEvents.get(name)?.delete(fn); }, matchMedia: overrides.matchMedia, location: { origin: overrides.origin || 'http://fixture.local' }, localStorage: { getItem: (key) => storage.get(key), setItem: (key, value) => storage.set(key, value), removeItem: (key) => storage.delete(key) } };
+  const browser = { innerWidth: 1440, innerHeight: 900, addEventListener(name, fn) { const listeners = windowEvents.get(name) || new Set(); listeners.add(fn); windowEvents.set(name, listeners); }, removeEventListener(name, fn) { windowEvents.get(name)?.delete(fn); }, matchMedia: overrides.matchMedia, location: { origin: overrides.origin || 'http://fixture.local' }, // 专家团队页第一次进来时小鲸会自己停靠（2026-11-08 第三版）；大多数用例当员工已经选过悬浮（只在读的时候给默认值，不写进存储），测第一次停靠的用例传 assistantForm: null。
+    // 页头的常用页签（2026-11-13）：大多数用例当员工已经把七个功能都钉在页头，页签都在；测默认页头的用例传 headerPins: null，测别的排法传一组 id。
+    localStorage: { getItem: (key) => storage.has(key) ? storage.get(key) : key === 'whalewing.assistantForm.v1' && overrides.assistantForm !== null ? overrides.assistantForm ?? 'float' : key === 'whalewing.header.pins.v1' && overrides.headerPins !== null ? JSON.stringify({ pins: overrides.headerPins ?? parts.filter(part => part.label && part.tab?.placement !== 'end').sort((a, b) => a.order - b.order).map(part => part.id) }) : storage.get(key), setItem: (key, value) => storage.set(key, value), removeItem: (key) => storage.delete(key) } };
   // 分发测试执行完整 ModuleLoader 产物；业务测试继续使用同一真实模块闭包。
   if (overrides.clientSource) browser.__ModuleLoader__ = { load(entry) { this.entry = entry; } };
   // 每次重新执行函数体；模块工厂、全局对象、React状态与资源清理仍归本次fixture。
@@ -291,11 +302,44 @@ async function fixture(overrides = {}) {
     ctx.remote[namespace] = { [method]: ctx.remote.whalewingKnowledge[method] };
     delete ctx.remote.whalewingKnowledge[method];
   }
+  // 办公工坊（2026-11-12 改版）：交给小鲸、订阅小鲸推过来的请求、交回结果。订阅一直挂着，页面卸载时取消。
+  ctx.remote.whalewingToolbox = {
+    start: async input => { calls.push(['toolbox', input]); return overrides.toolbox ? overrides.toolbox(input) : { ok: true, value: { sessionId: 'toolbox-session' } }; },
+    watch: signal => (async function* () { await new Promise(resolve => { if (signal?.aborted) resolve(); else signal?.addEventListener('abort', resolve, { once: true }); }); })(),
+    reply: async input => { calls.push(['toolbox-reply', input]); return { ok: true, value: { accepted: true } }; },
+    handoffs: signal => (async function* () { await new Promise(resolve => { if (signal?.aborted) resolve(); else signal?.addEventListener('abort', resolve, { once: true }); }); })(),
+    claim: async input => { calls.push(['toolbox-claim', input]); return { ok: true, value: { accepted: true } }; },
+  };
+  // 技能中心页的 MCP：和技能同一个远程服务。
+  ctx.remote.whalewingSkills.manageMcp = async (input, signal) => {
+    skillLibraryContract(z).mcpInput.parse(input);
+    calls.push(['mcp', input]);
+    if (overrides.mcp) return overrides.mcp(input, signal);
+    if (input.action === 'list') return { ok: true, value: { servers: [], profile: [], credentials: true } };
+    throw new Error('unexpected mcp action');
+  };
+  // 插件包：也是同一个远程服务；没给替身时“我的”是空的。
+  ctx.remote.whalewingSkills.managePacks = async (input, signal) => {
+    skillLibraryContract(z).packInput.parse(input);
+    calls.push(['packs', input]);
+    if (overrides.packs) return overrides.packs(input, signal);
+    if (input.action === 'list') return { ok: true, value: { packs: [] } };
+    throw new Error('unexpected pack action');
+  };
   ctx.remote.whalewingCards.manageLibrary = async (input, signal) => {
     newsContract(z).library.manage.parse(input);
     calls.push(['library', input]);
     if (overrides.library) return overrides.library(input, signal);
     throw new Error('unexpected library action');
+  };
+  // 每日阅读的设置、划线、回顾和存一条：没给替身时是默认开关、什么都没划没存。
+  ctx.remote.whalewingCards.manageReading = async (input, signal) => {
+    newsContract(z).reading.manage.parse(input);
+    calls.push(['reading', input]);
+    if (overrides.reading) return overrides.reading(input, signal);
+    if (input.action === 'home') return { ok: true, value: { home: { date: '2026-10-12', settings: { personal: true, diary: false, usage: true, weekly: true, review: 2 }, review: [], byBook: {}, counts: { highlights: 0, captures: 0 }, lastWeek: { highlights: 0, captures: 0 }, captures: [] } } };
+    if (input.action === 'highlights') return { ok: true, value: { highlights: [] } };
+    throw new Error('unexpected reading action ' + input.action);
   };
   ctx.remote.whalewingCards.manageSchedules = async (input, signal) => {
     newsContract(z).scheduleInput.parse(input);
@@ -339,7 +383,7 @@ async function fixture(overrides = {}) {
     if (Array.isArray(tree)) return tree.map((node, index) => expand(node, `${path}/${node?.props?.key === undefined ? index : 'key:' + node.props.key}`, inside, seen));
     const feature = typeof tree.type === 'function' && ['FeatureGate', 'DeferredFeature', 'TabContent', 'ExtensionsSection', 'ExtensionList', 'UpdateSection', 'UpdateBlock', 'UpdateDialog', 'ExpertsView', 'KnowledgeView', 'SkillsView', 'AutomationView', 'CardsView', 'AssistantDock', 'AiWebFeature', 'ToolboxFeature', 'ModelWorldFeature'].includes(tree.type.name);
     // 分发产物会压缩函数名，递归执行真实组件，不依赖源码中的调试名称。
-    if (typeof tree.type === 'function' && (overrides.clientSource || feature || inside || ['ModelWorldView', 'WorkspacePicker', 'Modal', 'ConfirmDialog', 'Drawer', 'Toast', 'ExpertPicker', 'BookReader', ...(overrides.expand || [])].includes(tree.type.name))) {
+    if (typeof tree.type === 'function' && (overrides.clientSource || feature || inside || ['ModelWorldView', 'WorkspacePicker', 'Modal', 'ConfirmDialog', 'Drawer', 'PageHead', 'Toast', 'ExpertPicker', 'BookReader', 'HomeBoard', 'Roster', 'RosterItem', 'ExpertPane', 'LibraryPane', 'LibraryRow', 'WelcomePane', 'IdleSelect', 'Segment', 'Tiles', 'MineSkills', 'SkillDrawer', 'DiscoverSkills', 'MarketDrawer', 'MineMcp', 'McpDrawer', 'DiscoverMcp', 'MinePacks', 'PackDrawer', 'DiscoverPacks', 'PackPreview', 'MarketEditor', 'NavTabs', 'Launcher', ...(overrides.expand || [])].includes(tree.type.name))) {
       const id = `${path}/${tree.type.name}/${tree.props.key ?? ''}`; seen.add(id);
       const local = childScopes.get(id) || { state: [], refs: [], effects: [] }; childScopes.set(id, local);
       const previous = [state, refs, effects, stateIndex, refIndex, effectIndex];
@@ -379,7 +423,7 @@ async function fixture(overrides = {}) {
   function flushEffects() { for (const list of [effects, ...(isolated ? [] : [...childScopes.values()].map(local => local.effects))]) for (const effect of list) if (effect.pending) { effect.pending = false; effect.cleanup = effect.fn(); } }
   function unmount() { for (const list of [effects, ...[...childScopes.values()].map(local => local.effects)]) list.forEach(effect => effect.cleanup?.()); state = []; refs = []; effects = []; childScopes.clear(); isolated = false; }
   function isolate(node) { isolated = true; state.length = 0; refs.length = 0; effects.length = 0; return () => { stateIndex = 0; refIndex = 0; effectIndex = 0; return node.type(node.props); }; }
-  return { remoteMounts, featureUpdate, settlePlugins, react, localeListeners, registrations, document, navigation, inputFor, inputs, browser, windowEvents, presentations, eventHandlers, triggerSources, ctx, calls, entries, disposed, dictionaries, timers, plugin, bridge: props.bridge, clients: props.clients, workbenchSession: props.workbenchSession, render, isolate, flushEffects, unmount, storage, existing, automationClaims, workspaceCalls, workspaceState };
+  return { selected, remoteMounts, featureUpdate, settlePlugins, react, localeListeners, registrations, document, navigation, inputFor, inputs, browser, windowEvents, presentations, eventHandlers, triggerSources, ctx, calls, entries, disposed, dictionaries, timers, plugin, bridge: props.bridge, clients: props.clients, workbenchSession: props.workbenchSession, render, isolate, flushEffects, unmount, storage, existing, automationClaims, workspaceCalls, workspaceState };
 }
 
 export { fixture, remoteScope, roles, emptyGraph, success };

@@ -1,0 +1,20 @@
+{
+  "name": "feishu-office",
+  "displayName": "飞书办公",
+  "version": "1.0.0",
+  "description": "连上飞书，把会议纪要写成飞书文档，从第二大脑的日记和任务记录写周报。",
+  "author": { "name": "鲸翼" },
+  "userConfig": {
+    "appId": {
+      "type": "string",
+      "title": "飞书应用 App ID",
+      "description": "先在飞书开放平台（open.feishu.cn/app）建企业自建应用、开好文档和消息权限并发布，可能要管理员审批。"
+    },
+    "appSecret": {
+      "type": "string",
+      "title": "飞书应用 App Secret",
+      "description": "在同一个应用的“凭证与基础信息”里复制。",
+      "sensitive": true
+    }
+  }
+}

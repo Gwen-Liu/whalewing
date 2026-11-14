@@ -17,7 +17,7 @@ export async function nativeSlots() {
 
   // 只保留元素描述，测试实际 renderer 的选举与参数投递；真实 React mount/unmount 另由隔离浏览器验收。
   const jsx = (type, props, key) => ({ type, props: { ...props, ...(key === undefined ? {} : { key }) } });
-  const React = { Component: class {}, createContext: value => ({ value }), Fragment: 'fragment', createElement: (type, props, ...children) => jsx(type, { ...props, children }), useLayoutEffect() {}, useSyncExternalStore(_subscribe, get) { return get(); } };
+  const React = { Component: class {}, createContext: value => ({ value }), Fragment: 'fragment', createElement: (type, props, ...children) => jsx(type, { ...props, children }), useRef: current => ({ current }), useLayoutEffect() {}, useSyncExternalStore(_subscribe, get) { return get(); } };
   const renderer = new URL(import.meta.resolve('@deepseek-ai/dsh-client-ui-renderer/package.json'));
   const raw = await readFile(new URL('lib/client.js', renderer), 'utf8');
   const seam = 'exports.SlotRegistry = SlotRegistry;';

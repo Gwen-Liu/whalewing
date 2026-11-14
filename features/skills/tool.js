@@ -1,6 +1,7 @@
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import { approveEscalation } from '@deepseek-ai/dsh-sandbox';
-/** 写入继续经过原生审批和唯一知识算法，不取得额外文件权限。 */
+/** 查看（list、read）不审批，和知识库只读一样（2026-11-08 用户定）；暂存、发布、停用、恢复、回滚每次经原生审批，不取得额外文件权限。 */
+export const skillReadOnly = new Set(['list', 'read']);
 export function apply(ctx) {
   const skillParameters = {
     action: { type: 'string', required: true, enum: ['list', 'read', 'stage', 'publish', 'disable', 'restore', 'rollback'] },
@@ -18,11 +19,11 @@ export function apply(ctx) {
       name, description, parameters: skillParameters,
       output: { schema: { type: 'string' }, render: (_args, result) => [{ type: 'text', text: result }] },
       async execute(args, exec) {
-        // 技能目录和知识库独立于工程；Host直写不继承工具沙箱，每个动作显式复用原生一次授权。
+        // 技能目录和知识库独立于工程；Host直写不继承工具沙箱，每个改动显式复用原生一次授权。
         const policy = ctx.sandboxPolicy.resolve(exec.agent ? { session: exec.agent.session } : {});
-        await approveEscalation({ requestedMode: 'danger-full-access', effectiveMode: policy.mode, subject: '鲸翼个人技能操作', justification: `${name}/${args.action}，范围仅个人技能目录 ${ctx.whalewing.skills.root}，并读取知识库 ${ctx.whalewing.vault.root} 中作为来源的笔记；不改变会话权限模式。` }, { approver: ctx.get('approval'), agent: exec.agent, callId: exec.callId, toolName: name, signal: exec.signal });
+        if (!skillReadOnly.has(args.action)) await approveEscalation({ requestedMode: 'danger-full-access', effectiveMode: policy.mode, subject: '鲸翼个人技能操作', justification: `${name}/${args.action}，范围仅个人技能目录 ${ctx.whalewing.skills.root}，并读取知识库 ${ctx.whalewing.vault.root} 中作为来源的笔记；不改变会话权限模式。` }, { approver: ctx.get('approval'), agent: exec.agent, callId: exec.callId, toolName: name, signal: exec.signal });
         return JSON.stringify(await ctx.whalewing.execute({ ...args, domain: 'skill' }, { kind: 'model', agent: exec.agent, signal: exec.signal }));
       },
-      presentCall: args => ({ card: 'generic', title: '鲸翼技能演进', kind: ['list', 'read'].includes(args.action) ? 'read' : 'other', rawInput: args }),
+      presentCall: args => ({ card: 'generic', title: '鲸翼技能演进', kind: skillReadOnly.has(args.action) ? 'read' : 'other', rawInput: args }),
     }));
 }

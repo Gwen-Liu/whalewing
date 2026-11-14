@@ -9,7 +9,7 @@ import { extraTools, extraTask } from './extras.js';
 export async function runUtility(request, progress) {
   const { tool, files, options, text } = request || {};
   if (extraTools.includes(tool)) return extraTask(tool, files, options, text);
-  if (tool === 'word-pdf' || tool === 'images-pdf' || tool?.startsWith('pdf-')) return pdfTask(tool, files, options);
+  if (tool === 'images-pdf' || tool?.startsWith('pdf-')) return pdfTask(tool, files, options);
   if (['excel-merge', 'excel-split', 'excel-split-by', 'excel-headers', 'excel-join', 'excel-dedupe', 'excel-compare', 'excel-filter', 'excel-sort', 'excel-clean', 'word-text', 'word-compare', 'text-replace'].includes(tool)) return officeTask(tool, files, options, text);
   if (['image', 'image-rotate', 'image-crop', 'image-stitch', 'image-watermark'].includes(tool)) return convertImages(files, { ...options, action: tool }, progress);
   if (['line-compare', 'text-case', 'timestamp', 'base64', 'url-codec', 'uuid'].includes(tool)) return smallTextTool(tool, text, options);

@@ -13,8 +13,9 @@ import { Automation, initializeBuiltIns } from './automation.js';
 import { sessionSchedule } from '../../src/schedule-compat.js';
 import { automationContract } from './contract.js';
 import { runsProjection } from './runs.js';
+import { ExtensionTaskOwner } from './extension-tasks.js';
 const taskWorkspaceTitle = '鲸翼定时任务';
-const purposeLabel = { news: '资讯', knowledge: '每日记忆', thinking: '每周思考' };
+const purposeLabel = { news: '资讯', knowledge: '每日记忆', thinking: '每周思考', extension: '扩展任务' };
 
 // 每日记忆和每周思考“已自动建过”的记录，按 profile 分开；和资讯一样，只记会话身份和是否建过。
 const defaultsDomain = defineDomain({ name: 'whalewing_automation_defaults', version: 1, tables: { lifecycle: domainTable(z.union([z.strictObject({ accepted: z.literal(true) }), z.strictObject({ sessionId: z.string().regex(/^[\w-]{1,100}$/) })])) } });
@@ -45,11 +46,30 @@ export default class AutomationHost extends Service {
         const session = ctx.sessions.get(sessionId);
         if (!session || !await ctx.sessions.flush(session)) fail('PERSISTENCE', '自动任务用途尚未确认持久化，请保留原会话并回读');
       },
+      bindExpert: (sessionId, expertId, title, signal) => this.bindExpert(sessionId, expertId, title, signal),
       prepareModel: (sessionId, signal) => {
         const experts = ctx.get('whalewingExperts');
         if (!experts) fail('MODEL_UNAVAILABLE', '专家模型准备服务尚未加载');
         return experts.prepareModel({ sessionId, automation: true }, signal);
       },
+      // 扩展登记的任务：页面上显示归属，扩展开着时员工不能取消，暂停恢复后告诉扩展。
+      extensionInfo: (owner, signal) => this.extensionTasks.info(owner, signal),
+      extensionRegistered: owner => Boolean(this.host.tasks?.live(owner)),
+      extensionToggled: (owner, state, signal) => this.extensionTasks.toggled(owner, state, signal),
+    });
+    this.extensionTasks = new ExtensionTaskOwner(this);
+    // 扩展登记、改内容或撤销时对一遍 DSH 里的任务；扩展 remove() 由这里删。
+    if (this.host.tasks) {
+      this.host.tasks.remover = (owner, signal) => this.extensionTasks.remove(owner, signal);
+      const off = this.host.tasks.subscribe(() => { this.extensionTasks.sync(this.closing.signal).catch(() => {}); });
+      ctx.effect(() => () => { off(); if (this.host.tasks.remover) this.host.tasks.remover = undefined; });
+      if (this.host.tasks.list().length) this.extensionTasks.sync(this.closing.signal).catch(() => {});
+    }
+    // 扩展任务的一轮跑完（任务会话空闲下来）就把结果告诉扩展。
+    ctx.on('agent/status', ({ status, agent }) => {
+      if (status !== 'idle' || !agent?.session) return;
+      const owner = ctx.get('sessionProjections')?.stateOf(agent.session, 'whalewingTaskOwner')?.owner;
+      if (owner) this.extensionTasks.reportRuns(owner).catch(() => {});
     });
     this.defaults = new LockedDomain({
       directory: signal => this.host.profileDirectory(signal),
@@ -69,12 +89,15 @@ export default class AutomationHost extends Service {
       const lifecycle = new AbortController();
       scope.effect(() => () => lifecycle.abort(new Error('每日记忆和每周思考的默认任务依赖已卸载')));
       try { await this.openBuiltIns(lifecycle.signal); } catch { /* 原因记在 builtInsError，打开定时任务页时再试。 */ }
+      // 扩展登记的任务在依赖齐了以后再对一遍（扩展可能比定时服务先登记）。
+      try { await this.extensionTasks.sync(lifecycle.signal); } catch { /* 每个任务的原因已经告诉扩展。 */ }
     });
 
     ctx.effect(() => async () => {
       this.closing.abort(new Error('功能已卸载，当前操作停止'));
       await Promise.allSettled([...this.pending]);
       await this.defaults.close();
+      await this.extensionTasks.close();
     });
   }
   async manageAutomation(raw, signal) {
@@ -84,12 +107,18 @@ export default class AutomationHost extends Service {
       signal = AbortSignal.any([this.closing.signal, AbortSignal.timeout(this.host.vault.limits.operationMs), ...(signal ? [signal] : [])]);
       // 启动时没配模型或没建成的，员工打开定时任务页时再试一次；没建成不影响列出任务。
       if (input.action === 'catalog' && this.builtInsRetry && this.modelReady()) await this.openBuiltIns(signal).catch(() => {});
+      if (input.action === 'catalog' && this.extensionTasks.retry) await this.extensionTasks.sync(signal).catch(() => {});
       const operation = this.automation.manage(input, signal);
       this.pending.add(operation);
       try { return contract.result.parse(await operation); }
       finally { this.pending.delete(operation); }
     } catch (error) { throw new RemoteError(error.code || error.name || 'ERROR', error.message, error.recovery ? { sessionId: error.sessionId, recovery: error.recovery } : {}); }
   }
+
+  /** 扩展任务读会话：任务的记录（从什么时候起读、暂停过的时段、处理到哪天）和登记情况。 */
+  taskProgress(owner, signal) { return this.extensionTasks.progress(owner, signal); }
+  /** 扩展任务读会话：模型标记一天做完了。 */
+  markTaskDay(owner, date, signal) { return this.extensionTasks.markDay(owner, date, signal); }
 
   modelReady() {
     const selected = this.ctx.get('agentDefaultModel')?.currentSelection?.();
@@ -126,9 +155,10 @@ export default class AutomationHost extends Service {
 
   /**
    * 定时任务的会话：建在“鲸翼定时任务”工作区里（宿主没有工作区服务时退回只给目录），认领用途并确认已经写盘。
-   * fresh 为假时只恢复同一个会话，不另建。每日资讯和默认打开的每日记忆、每周思考共用。
+   * fresh 为假时只恢复同一个会话，不另建。每日资讯、默认打开的每日记忆和每周思考、扩展登记的任务共用；
+   * 扩展任务另带归属 owner（`功能id/任务id`），认领时一起记进会话。
    */
-  async claimTaskSession(sessionId, purpose, signal, fresh = false) {
+  async claimTaskSession(sessionId, purpose, signal, fresh = false, owner) {
     const label = purposeLabel[purpose];
     const controller = this.ctx.get('sessionController');
     const workspace = await this.taskWorkspace(signal);
@@ -160,16 +190,44 @@ export default class AutomationHost extends Service {
       }
     }
     abort(signal);
-    if (await this.host.automationIdentity(sessionId, signal) !== purpose) {
+    const claimed = async () => {
+      const current = await this.host.automationClaim(sessionId, signal);
+      return current.purpose === purpose && (purpose !== 'extension' || current.owner === owner);
+    };
+    if (!await claimed()) {
       agent ||= this.ctx.get('agents')?.get(sessionId);
       if (!agent) fail('AUTOMATION_UNAVAILABLE', `${label}会话尚未就绪，请按原身份重试`);
       const commands = this.ctx.get('commands');
       if (!commands) fail('AUTOMATION_UNAVAILABLE', '宿主命令服务尚未加载，请稍后重试');
-      const execution = await commands.execute(agent, `/whalewing ${JSON.stringify({ action: 'automation_claim', purpose })}`, [], signal);
+      const execution = await commands.execute(agent, `/whalewing ${JSON.stringify({ action: 'automation_claim', purpose, ...(purpose === 'extension' ? { owner } : {}) })}`, [], signal);
       if (execution?.result?.kind !== 'success') fail('AUTOMATION_IDENTITY', `${label}会话用途认领失败，请按原身份重试`);
     }
     await this.automation.dependencies.confirmClaim(sessionId, signal);
-    if (await this.host.automationIdentity(sessionId, signal) !== purpose) fail('AUTOMATION_IDENTITY', `${label}会话用途尚未回读确认`);
+    if (!await claimed()) fail('AUTOMATION_IDENTITY', `${label}会话用途尚未回读确认`);
+  }
+
+  /** 把自建任务的会话挂到专家名下：用正式的专家选择命令，写盘后回读确认；标题改成“专家名 · 任务名”方便在侧栏找。 */
+  async bindExpert(sessionId, expertId, title, signal) {
+    const experts = this.ctx.get('whalewingExperts'), commands = this.ctx.get('commands'), controller = this.ctx.get('sessionController'), projections = this.ctx.get('sessionProjections');
+    if (!experts || !commands || !projections) fail('AUTOMATION_UNAVAILABLE', '专家服务尚未加载，请稍后重试');
+    const expert = experts.get(expertId);
+    if (expert.id === 'manager') fail('AUTOMATION_EXPERT', '定时任务请交给负责这件事的专家，不挂在助手自己名下');
+    let agent = this.ctx.get('agents')?.get(sessionId);
+    if (!agent && controller) {
+      const resolved = await controller.resolveAgent(sessionId);
+      if (resolved.error) throw resolved.error;
+      agent = resolved.agent;
+    }
+    if (!agent) fail('AUTOMATION_UNAVAILABLE', '任务会话尚未就绪，请按原身份重试');
+    abort(signal);
+    const done = await commands.execute(agent, `/whalewing-expert ${JSON.stringify({ expertId: expert.id })}`, [], signal ?? new AbortController().signal);
+    if (done?.result?.kind !== 'success') fail('AUTOMATION_EXPERT', `没能挂到「${expert.name}」名下：${done?.result?.text || '专家选择没有完成'}`);
+    if (!(await this.ctx.sessions.flush(agent.session))) fail('PERSISTENCE', '专家选择尚未确认保存，请保留原会话并回读');
+    if (projections.stateOf(agent.session, 'whalewingExpert')?.view.expertId !== expert.id) fail('AUTOMATION_EXPERT', '专家选择读回不一致，请保留原会话核对');
+    if (typeof controller?.rename === 'function') {
+      try { await controller.rename({ sessionId, title: `${expert.name} · ${title}` }); }
+      catch { /* 标题只方便查找，设不上不影响任务。 */ }
+    }
   }
 
   async taskDirectory(signal) {

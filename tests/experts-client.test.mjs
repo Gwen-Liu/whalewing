@@ -9,38 +9,45 @@ const button = (tree, label) => {
   assert.ok(found, `按钮 ${label} 存在`);
   return found;
 };
-const cards = f => nodes(f.render()).filter(node => node.type === 'article' && node.props.className === 'ww-card');
+// 第三版专家团队页：从专家库点名字，在中间那栏打开这位专家；它的“···”菜单在那栏标题上。
+const pane = (f, name) => {
+  nodes(f.render()).find(node => node.type === 'button' && String(node.props.className).includes('ww-roster-library')).props.onClick();
+  nodes(f.render()).find(node => node.type === 'button' && node.props['aria-label'] === `打开${name}`).props.onClick();
+  const found = nodes(f.render()).find(node => node.type === 'section' && node.props['aria-label'] === `${name}说的话`);
+  assert.ok(found, `中间那栏是${name}`);
+  return found;
+};
 
 test('恢复原版可以只选几项：确认框列出改过的内容并标出原版有更新的，只提交选中的字段', async () => {
-  let data = [{ ...roles[0], customized: ['prompt', 'skills'], baseUpdated: ['prompt'] }, roles[1]];
+  let data = [roles[0], { ...roles[1], customized: ['prompt', 'skills'], baseUpdated: ['prompt'] }];
   const changes = [];
   const f = await fixture({ experts: async input => {
     if (input.action === 'list') return { ok: true, value: { experts: data, deleted: [] } };
     changes.push(input);
-    const expert = { ...roles[0], revision: input.expectedRevision + 1 };
-    data = [{ ...expert, customized: ['skills'], baseUpdated: [] }, roles[1]];
+    const expert = { ...roles[1], revision: input.expectedRevision + 1 };
+    data = [roles[0], { ...expert, customized: ['skills'], baseUpdated: [] }];
     return { ok: true, value: { expert } };
   } });
-  button(cards(f)[0], '恢复原版').props.onClick();
+  button(pane(f, '研发专家'), '恢复原版').props.onClick();
   const dialog = () => nodes(f.render()).find(node => node.type === 'dialog' && JSON.stringify(node).includes('选择要换回原版的内容：'));
-  const options = nodes(dialog()).filter(node => node.type === 'label' && node.props.className === 'ww-check');
+  const options = nodes(dialog()).filter(node => node.type === 'label' && node.props.className === 'ww-choice');
   assert.deepEqual(options.map(text), ['提示词（原版有更新）', '技能']);
   nodes(options[1]).find(node => node.type === 'input').props.onChange({ target: { checked: false } });
   await button(dialog(), '恢复原版').props.onClick();
-  assert.deepEqual(changes, [{ action: 'restore', id: 'manager', expectedRevision: 0, fields: ['prompt'] }]);
+  assert.deepEqual(changes, [{ action: 'restore', id: 'development', expectedRevision: 0, fields: ['prompt'] }]);
   assert.equal(dialog(), undefined);
-  assert.deepEqual(f.clients.experts.experts().experts[0].customized, ['skills']);
+  assert.deepEqual(f.clients.experts.experts().experts[1].customized, ['skills']);
 });
 
 test('一项都不选不提交；没有改动的内置专家不出现恢复原版', async () => {
   const changes = [];
   const f = await fixture({ experts: async input => {
-    if (input.action === 'list') return { ok: true, value: { experts: [{ ...roles[0], customized: ['avatar'], baseUpdated: [] }, { ...roles[1], customized: [], baseUpdated: [] }], deleted: [] } };
+    if (input.action === 'list') return { ok: true, value: { experts: [roles[0], { ...roles[1], customized: ['avatar'], baseUpdated: [] }, { ...roles[1], id: 'testing', name: '测试专家', customized: [], baseUpdated: [] }], deleted: [] } };
     changes.push(input);
     throw new Error('不应提交');
   } });
-  assert.equal(nodes(cards(f)[1]).some(node => node.type === 'button' && [node.props.children].flat().includes('恢复原版')), false);
-  button(cards(f)[0], '恢复原版').props.onClick();
+  assert.equal(nodes(pane(f, '测试专家')).some(node => node.type === 'button' && [node.props.children].flat().includes('恢复原版')), false);
+  button(pane(f, '研发专家'), '恢复原版').props.onClick();
   const dialog = nodes(f.render()).find(node => node.type === 'dialog' && JSON.stringify(node).includes('选择要换回原版的内容：'));
   nodes(dialog).find(node => node.type === 'input' && node.props.type === 'checkbox').props.onChange({ target: { checked: false } });
   await button(nodes(f.render()).find(node => node.type === 'dialog' && JSON.stringify(node).includes('选择要换回原版的内容：')), '恢复原版').props.onClick();
@@ -54,7 +61,7 @@ test('由内置专家转来的自定义专家同时有恢复原版和删除；�
     if (input.action === 'catalog') return { ok: true, value: { models: [], defaultModel: null, skills: [], mcpServers: [], issues: [] } };
     throw new Error(`意外动作 ${input.action}`);
   } });
-  const card = cards(f)[1];
+  const card = pane(f, '售前专家');
   assert.ok(button(card, '恢复原版'));
   assert.ok(button(card, '删除专家'));
   button(card, '编辑专家').props.onClick();
@@ -100,8 +107,11 @@ test('扩展给小鲸起名：编辑小鲸时名字只读并写明由谁设定�
   const before = lists;
   await renamed(f, 1, team);
   assert.ok(lists > before, '名字变了重新读专家列表');
+  // 第三版：小鲸不在左栏，改小鲸从小鲸面板右上角的“···”进；其他专家在中间那栏的“···”里。
+  f.render(); f.flushEffects();
   const nameInput = index => {
-    button(cards(f)[index], '编辑专家').props.onClick();
+    if (index === 0) button(f.render(), '改名字、头像和说明').props.onClick();
+    else button(pane(f, '研发专家'), '编辑专家').props.onClick();
     const editor = nodes(f.render()).find(node => typeof node.type === 'function' && node.type.name === 'ExpertEditor');
     const render = f.isolate(editor); render(); f.flushEffects();
     const label = nodes(render()).find(node => node.type === 'label' && text(node).startsWith('专家名字'));

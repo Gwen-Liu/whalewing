@@ -1,4 +1,4 @@
-// 技能成长的测试数据：技能目录在临时 DSH 的 DSH_HOME/skills（员工电脑上就是 ~/.dsh/skills），
+// 技能中心页的测试数据：技能目录在临时 DSH 的 DSH_HOME/skills（员工电脑上就是 ~/.dsh/skills），
 // 随包系统技能装在其中的 .system/whalewing/builtin，员工自己的技能和企业技能包直接放在下一层。
 import fs from 'node:fs';
 import path from 'node:path';

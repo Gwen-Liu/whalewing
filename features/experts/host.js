@@ -1,5 +1,13 @@
 import { registerBuiltin } from '../../src/features.js';
-import { apply as registerTool } from './tool.js';
+import { apply as registerTool, applyMemory as registerMemoryTool } from './tool.js';
+import { ExpertMemory } from './memory.js';
+import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain';
+
+// 置顶是员工自己的排序偏好，另存一个域：专家记录不加字段，旧版插件照常读专家。2026-11-08 起不再用，只在第一次时把置顶过的专家记成“选用”。
+export const pinDomain = defineDomain({ name: 'whalewing_expert_pins', version: 1, tables: { pins: domainTable(z.strictObject({ at: z.number() })) } });
+// 专家团队页的“在用”：员工手动“选用 / 放回”的记号，和多久不用就放回专家库的天数。在不在用由浏览器按会话列表算，这里只存员工的选择。
+export const rosterDomain = defineDomain({ name: 'whalewing_expert_roster', version: 1, tables: { marks: domainTable(z.strictObject({ state: z.enum(['picked', 'returned']), at: z.number() })), settings: domainTable(z.strictObject({ value: z.number().int().min(0) })) } });
+export const defaultIdleDays = 14;
 import { z } from 'zod';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { Service } from '@deepseek-ai/cordis';
@@ -25,6 +33,17 @@ function isSubagent(ctx, agent) {
   if (parent && ctx.agents.isOwnedBy(agent.id, parent)) return true;
   // 运行时所有权先于可选日志元数据成立，缺 parentSession 也不是普通主会话。
   return ctx.agents.list().some(candidate => candidate !== agent && ctx.agents.isOwnedBy(agent.id, candidate));
+}
+
+/**
+ * 专家选择记录。知识整理、每日思考、新闻这几种内置定时任务按自己的说明跑，会话里就算以前选上过专家（2026-11-08 之前没拦）也当没选，
+ * 免得专家说明把任务说明顶掉；自建任务和普通会话照常。
+ */
+export function expertState(ctx, session) {
+  const state = ctx.sessionProjections.stateOf(session, 'whalewingExpert');
+  const purpose = ctx.sessionProjections.stateOf(session, 'whalewingAutomation')?.purpose;
+  if (!state?.view.expertId || !purpose || purpose === 'custom') return state;
+  return { ...state, view: { ...state.view, expertId: null } };
 }
 
 async function observed(promise, signal) {
@@ -82,6 +101,8 @@ export class ExpertRegistry extends Service {
     this.store = store;
     this.config = config;
     this.closing = new AbortController();
+    // 专家记忆和全局记忆都在员工的知识库里，读写复用核心的知识库。
+    this.memory = new ExpertMemory(ctx.whalewing);
     ctx.effect(() => () => this.closing.abort(new Error('专家服务已卸载，未提交的操作停止')), 'whalewing expert requests');
     this.typertRemote = bindTypertRemote(this, 'whalewingExperts', { namespace: 'whalewingExperts' });
     ctx.typert.register(contract.host);
@@ -127,7 +148,7 @@ export class ExpertRegistry extends Service {
   /** 管理能力只消费已完成的普通主会话选择，不自行重建专家身份。 */
   selectedFor(agent) {
     if (!agent || this.ctx.agents.get(agent.id) !== agent || isSubagent(this.ctx, agent)) return null;
-    const state = this.ctx.sessionProjections.stateOf(agent.session, 'whalewingExpert');
+    const state = expertState(this.ctx, agent.session);
     return state?.selected ? state.view.expertId : null;
   }
   /**
@@ -144,6 +165,14 @@ export class ExpertRegistry extends Service {
     return !owner || typeof owner.catalog === 'function';
   }
   list() { return this.withSources(this.namedList(this.store.list())); }
+  /** 员工的“选用 / 放回”记号（已经不在的专家不列）和天数。 */
+  roster() {
+    const idle = this.rosterSettings?.get('idleDays')?.value;
+    if (!this.rosterMarks) return { marks: {}, idleDays: Number.isInteger(idle) ? idle : defaultIdleDays };
+    const present = new Set([...this.store.list().experts, ...(this.sources()?.expertList() ?? [])].map(expert => expert.id));
+    const marks = Object.fromEntries([...this.rosterMarks.keys()].filter(id => present.has(id)).map(id => [id, { ...this.rosterMarks.get(id) }]));
+    return { marks, idleDays: Number.isInteger(idle) ? Math.min(idle, 365) : defaultIdleDays };
+  }
   /** 客户端图片准入和 Host 组装共用此准备；默认值只读宿主，不保存另一份路由配置。 */
   async prepareModel(input, signal) {
     signal = AbortSignal.any([this.closing.signal, AbortSignal.timeout(this.config.operationMs), ...(signal ? [signal] : [])]);
@@ -155,7 +184,9 @@ export class ExpertRegistry extends Service {
       signal.throwIfAborted();
       if (automation) {
         if (this.ctx.agents.get(input.sessionId) !== agent || this.ctx.sessionProjections.stateOf(agent.session, 'whalewingAutomation')?.purpose !== automation) throw expertError('AUTOMATION_IDENTITY', '自动任务身份已变化，请从原会话重新准备');
-        return null;
+        // 挂在专家名下的定时任务用这位专家设定的模型；没挂专家的用 DSH 默认模型。
+        const owner = expertState(this.ctx, agent.session);
+        return owner?.selected && owner.view.expertId ? this.get(owner.view.expertId) : null;
       }
       const role = this.get(input.expertId);
       if (this.ctx.agents.get(input.sessionId) !== agent || this.ctx.sessionProjections.stateOf(agent.session, 'whalewingExpert')?.view.expertId !== role.id || role.revision !== input.expectedRevision) throw expertError('EXPERT_CHANGED', '专家或会话已变化，请从原会话重新准备');
@@ -221,7 +252,25 @@ export class ExpertRegistry extends Service {
       const input = contract.input.parse(raw);
       signal?.throwIfAborted();
       // 管理界面另要“改过哪些、原版有没有更新”；模型工具读的 list() 不带这些。
-      if (input.action === 'list') return this.withSources(this.namedList(this.store.list(true)));
+      if (input.action === 'list') return { ...this.withSources(this.namedList(this.store.list(true))), roster: this.roster() };
+      if (input.action === 'roster_mark') {
+        this.get(input.id);
+        if (input.id === 'manager') throw expertError('EXPERT_INPUT', '小鲸常驻在右边，不用选用或放回');
+        await this.rosterMarks.put(input.id, { state: input.state, at: Date.now() });
+        this.ctx.emit('whalewing-experts/changed');
+        return { roster: this.roster() };
+      }
+      if (input.action === 'roster_settings') {
+        await this.rosterSettings.put('idleDays', { value: input.idleDays });
+        this.ctx.emit('whalewing-experts/changed');
+        return { roster: this.roster() };
+      }
+      if (input.action === 'memory') return { memory: await this.memory.read(this.get(input.id)) };
+      if (input.action === 'memory_save') {
+        await this.memory.save(this.get(input.id), { rules: input.rules, progress: input.progress }, signal);
+        return { memory: await this.memory.read(this.get(input.id)) };
+      }
+      if (input.action === 'memory_summary') return { memories: await this.memory.counts() };
       if (input.action === 'templates') return { templates: expertTemplates.map(item => ({ ...item, skills: [...item.skills] })) };
       if (input.action === 'catalog') return await this.catalog(input.sessionId, signal);
       if (input.action === 'prepare_model') return await this.prepareModel(input, signal);
@@ -254,6 +303,7 @@ export class ExpertRegistry extends Service {
 export async function apply(ctx, config) {
   registerBuiltin(ctx, 'experts');
   ctx.inject(['tools', 'whalewingExperts'], scope => registerTool(scope));
+  ctx.inject(['tools', 'whalewingExperts', 'sandboxPolicy', 'sessionProjections'], scope => registerMemoryTool(scope));
   const domain = await ctx.storageDomain.open(expertDomain);
   ctx.effect(() => () => domain.close(), 'whalewing expert storage');
   const changeDomain = await ctx.storageDomain.open(expertChangeDomain);
@@ -263,9 +313,21 @@ export async function apply(ctx, config) {
   await store.retireBuiltins(retiredBuiltinIds);
   await store.recordChanges();
   const registry = new ExpertRegistry(ctx, store, config);
+  const pins = await ctx.storageDomain.open(pinDomain);
+  ctx.effect(() => () => pins.close(), 'whalewing expert pins');
+  const roster = await ctx.storageDomain.open(rosterDomain);
+  ctx.effect(() => () => roster.close(), 'whalewing expert roster');
+  registry.rosterMarks = roster.table('marks');
+  registry.rosterSettings = roster.table('settings');
+  // 2026-11-08 置顶改成“在用”：只在第一次把置顶过的专家记成刚选用，之后照常按用没用算。
+  if (!registry.rosterSettings.get('pinsMigrated')) {
+    const at = Date.now();
+    for (const id of pins.table('pins').keys()) if (!registry.rosterMarks.get(id)) await registry.rosterMarks.put(id, { state: 'picked', at });
+    await registry.rosterSettings.put('pinsMigrated', { value: at });
+  }
   const selection = expertId => ({ expertId, name: expertId === null ? null : registry.get(expertId).name });
   ctx.sessionProjections.register(expertProjection);
-  const read = session => ctx.sessionProjections.stateOf(session, 'whalewingExpert');
+  const read = session => expertState(ctx, session);
   const pending = new Map();
   const lastTurn = new WeakMap();
   const policies = new Map();
@@ -437,6 +499,9 @@ export async function apply(ctx, config) {
           return { kind: 'success', text: JSON.stringify(selection(read(agent.session).view.expertId)) };
         }
         if (agent.status !== 'idle') throw new Error('会话正在运行，请等待空闲后切换专家');
+        // 知识整理、每日思考、新闻这几种内置定时任务按自己的说明跑，换成专家会把那份说明顶掉（2026-11-08 真模型验证时见到）。
+        const purpose = ctx.sessionProjections.stateOf(agent.session, 'whalewingAutomation')?.purpose;
+        if (input.expertId !== null && purpose && purpose !== 'custom') throw new Error('这是鲸翼内置的定时任务，按它自己的做法跑，不能交给专家；想让专家定时做一件事，在定时任务里新建一个自定义任务，选上这位专家');
         if (input.expertId !== null) registry.get(input.expertId);
         return { kind: 'success', text: JSON.stringify(selection(input.expertId)) };
       } catch (error) {
@@ -457,6 +522,24 @@ export async function apply(ctx, config) {
     if (!(await ctx.sessions.flush(agent.session))) throw new Error('子代理专家继承尚未确认保存');
     if (read(agent.session).view.expertId !== state.view.expertId) throw new Error('子代理专家继承回读不一致');
   });
+
+  /**
+   * 两层记忆随专家说明一起带上（2026-11-08 用户定）：关于员工（个人知识「关于我」的两节）和这位专家自己的记忆。
+   * 读不到（库还没建、文件坏了）就照常开工，只说明还没有。记忆改了，全文跟着变，下一轮就重发全文。
+   */
+  async function memoryBlocks(role, routine = false) {
+    const [global, own] = await Promise.all([
+      registry.memory.globalContext().catch(() => null),
+      registry.memory.context(role).catch(() => ({ path: '00-系统/专家记忆', text: '', empty: true })),
+    ]);
+    const about = global
+      ? `【关于员工】个人知识「关于我」（${global.path}）里员工自己写的：\n${global.text}`
+      : '【关于员工】个人知识「关于我」还没写“我是谁”“怎样和我协作”。';
+    const mine = `【你的记忆】（${own.path}）\n${own.empty ? '还没有记过。' : own.text}${own.over ? '\n（记忆超过 4000 字，上面只带了前面一部分；这次干完活先用 whalewing_memory 的 rewrite 把旧条目合并精简。）' : ''}`;
+    // 定时任务（2026-11-08）：员工建这个任务就是让专家一直跟下去，跑完直接更新进度，不用每次问。
+    const task = routine ? '\n\n【这是员工给你的定时任务】到点时按任务指令做，结果写清楚，员工会在这个任务的会话里看。做完用 whalewing_memory 把这次的进度记进你的记忆“进度”一节（条目多了用 rewrite 合并成最新状态），不用先问员工；下一次接着上次往下做，不重复已经报过的内容。' : '';
+    return `${about}\n\n${mine}${task}`;
+  }
 
   ctx.on('agent/pre-step', async ({ agent, turn, signal }, next) => {
     const decision = await next();
@@ -496,7 +579,8 @@ export async function apply(ctx, config) {
     const naming = !custom ? '' : role?.id === 'manager'
       ? `\n在这里你的名字是「${custom}」：下文和技能里说的“小鲸助手”“小鲸”都是你，对员工自称「${custom}」。`
       : `\n在这里助手叫「${custom}」：下文和技能里说的“小鲸助手”“小鲸”都指它，提到时用「${custom}」。`;
-    const full = role && frame(`本轮专家身份：${role.name}。此选择替代历史专家身份，原生模式和工具仍由宿主持有。${naming}\n${commonPrompt}\n\n${role.prompt}\n\n当前绑定技能（名称：用途。按上面“先加载再动手”的对照加载；宿主列出的其它技能贴合任务时也可加载）：\n${skills.map(skill => `${skill.name}：${skill.description}`).join('\n') || '未绑定额外技能'}\n当前绑定 MCP：${role.mcpServers.join('、') || '无'}。配置由员工管理，不自行增加绑定。`);
+    const remembered = role && await memoryBlocks(role, Boolean(ctx.sessionProjections.stateOf(agent.session, 'whalewingAutomation')?.purpose));
+    const full = role && frame(`本轮专家身份：${role.name}。此选择替代历史专家身份，原生模式和工具仍由宿主持有。${naming}\n${commonPrompt}\n\n${role.prompt}\n\n${remembered}\n\n当前绑定技能（名称：用途。按上面“先加载再动手”的对照加载；宿主列出的其它技能贴合任务时也可加载）：\n${skills.map(skill => `${skill.name}：${skill.description}`).join('\n') || '未绑定额外技能'}\n当前绑定 MCP：${role.mcpServers.join('、') || '无'}。配置由员工管理，不自行增加绑定。`);
     const reminder = role && frame(`本轮专家身份：${role.name}。本会话前面那条完整的鲸翼专家上下文继续有效，按其中的底线做事；遇到对应情况先加载技能再动手。当前绑定技能：${skills.map(skill => skill.name).join('、') || '无'}。`);
     // 原生 loop 把 pre-step 消息记成 user/message 并留在历史里，全文每轮重发会在长对话里堆积。
     // 模型可见历史里最近一条非提醒的专家上下文正是这份全文时，只发短提醒；首轮、换过专家、改了配置或技能，

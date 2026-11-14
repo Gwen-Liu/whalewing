@@ -92,6 +92,39 @@ export class SkillFiles {
     await visit(root, '', 0);
     return this.snapshotValue(found.isDirectory(), files, directories);
   }
+  /**
+   * 把一组外来文件（上传的压缩包、skills.sh 下载的技能）排成和 snapshot() 读盘时一样的顺序和限制，
+   * 这样 install() 写完回读时指纹对得上。路径一律是技能目录里的相对路径。
+   */
+  snapshotFromList(list) {
+    const tree = { dirs: new Map(), files: new Map() };
+    let bytes = 0;
+    for (const { path: name, bytes: data } of list) {
+      const parts = relativeName(name, true).split('/');
+      if (parts.length > 12) fail('SKILL_SIZE', '技能文件夹层级太深（最多 12 层）');
+      if (data.length > 16 * 1024 * 1024 || (bytes += data.length) > 32 * 1024 * 1024) fail('SKILL_SIZE', '技能文件太大：单个文件最多 16 MB，整个技能最多 32 MB');
+      let node = tree;
+      for (const part of parts.slice(0, -1)) {
+        if (node.files.has(part)) fail('PATH', `技能里“${part}”既是文件又是文件夹`);
+        if (!node.dirs.has(part)) node.dirs.set(part, { dirs: new Map(), files: new Map() });
+        node = node.dirs.get(part);
+      }
+      const last = parts.at(-1);
+      if (node.dirs.has(last) || node.files.has(last)) fail('PATH', `技能里有重复的文件：${name}`);
+      node.files.set(last, data);
+    }
+    const files = [], directories = [];
+    const visit = (node, local) => {
+      directories.push(local);
+      for (const name of [...node.dirs.keys(), ...node.files.keys()].sort()) {
+        const child = local ? `${local}/${name}` : name;
+        if (node.dirs.has(name)) visit(node.dirs.get(name), child); else files.push({ path: child, bytes: node.files.get(name) });
+        if (files.length + directories.length > 512) fail('SKILL_SIZE', '技能里的文件太多（最多 500 个左右）');
+      }
+    };
+    visit(tree, '');
+    return this.snapshotValue(true, files, directories);
+  }
   snapshotValue(directory, files, directories = directory ? [''] : []) {
     return { directory, files, directories, hash: directory ? digest(JSON.stringify({ directories, files: files.map(file => [file.path, digest(file.bytes)]) })) : digest(files[0].bytes) };
   }

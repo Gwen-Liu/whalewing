@@ -13,7 +13,7 @@ import { WhalewingSkillProvider } from '../src/skill-provider.js';
 import { roles } from '../content/roles.js';
 
 // 随包技能 = 鲸翼自写的 whalewing-* 加上来源清单里收录的开源技能。
-const bundledSkills = [...['whalewing-check', 'whalewing-clarify', 'whalewing-code-review', 'whalewing-coding', 'whalewing-data-analysis', 'whalewing-debugging', 'whalewing-frontend-design', 'whalewing-knowledge', 'whalewing-news', 'whalewing-plugin-management', 'whalewing-research', 'whalewing-skill-evolution', 'whalewing-slides', 'whalewing-ui-review', 'whalewing-visual', 'whalewing-web-testing', 'whalewing-writing'], ...JSON.parse(await fs.readFile(new URL('../scripts/skill-sources.json', import.meta.url), 'utf8')).map(item => item.name)].sort();
+const bundledSkills = [...['whalewing-check', 'whalewing-clarify', 'whalewing-code-review', 'whalewing-coding', 'whalewing-data-analysis', 'whalewing-debugging', 'whalewing-frontend-design', 'whalewing-knowledge', 'whalewing-news', 'whalewing-plugin-management', 'whalewing-research', 'whalewing-skill-evolution', 'whalewing-slides', 'whalewing-toolbox', 'whalewing-ui-review', 'whalewing-visual', 'whalewing-web-testing', 'whalewing-writing'], ...JSON.parse(await fs.readFile(new URL('../scripts/skill-sources.json', import.meta.url), 'utf8')).map(item => item.name)].sort();
 
 const bundledRoot = fileURLToPath(new URL('../content/skills/', import.meta.url));
 async function isolated(t) {

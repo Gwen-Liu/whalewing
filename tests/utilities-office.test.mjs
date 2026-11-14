@@ -13,7 +13,7 @@ import { inspectOffice, LIMITS } from '../src/utilities/core.js';
 const require = createRequire(new URL('../src/utilities/core.js', import.meta.url));
 const ExcelJS = require('exceljs');
 const { Document, Packer, Paragraph, Table, TableRow, TableCell, ImageRun } = require('docx');
-const { PDFDocument, PDFName, degrees } = require('pdf-lib');
+const { PDFDocument, PDFName, StandardFonts, degrees } = require('pdf-lib');
 const { unzipSync, zipSync, unzlibSync } = require('fflate');
 const file = (name, bytes) => ({ name, size: bytes.length, arrayBuffer: async () => Uint8Array.from(bytes).buffer });
 const word = async () => Packer.toBuffer(new Document({ sections: [{ children: [new Paragraph('实施交付说明 中文合同测试'), new Paragraph('验收范围：银行业务系统升级。'), new Table({ rows: [new TableRow({ children: [new TableCell({ children: [new Paragraph('科目编码')] }), new TableCell({ children: [new Paragraph('科目名称')] })] }), new TableRow({ children: [new TableCell({ children: [new Paragraph('001')] }), new TableCell({ children: [new Paragraph('现金')] })] })] })] }] }));
@@ -29,16 +29,16 @@ test('页码解析保留用户顺序并拒收重复、越界和超预算', () =>
   assert.deepEqual(pageSelection('3,1-2', 3), [2, 0, 1]);
   for (const value of ['1,1', '0', '4', '2-1', 'a']) assert.throws(() => pageSelection(value, 3));
 });
-test('中文Word正文和规则表格生成PDF，再回转可编辑DOCX', async () => {
-  const pdf = await runUtility({ tool: 'word-pdf', files: [file('验收.docx', await word())] });
-  assert.equal(pdf.files[0].mime, 'application/pdf');
-  assert.equal((await PDFDocument.load(pdf.files[0].bytes)).getPageCount(), 1);
-  assert.doesNotMatch(pdf.summary, /内置字库/);
-  const txt = await runUtility({ tool: 'pdf-text', files: [file('验收.pdf', pdf.files[0].bytes)] });
-  assert.match(new TextDecoder().decode(txt.files[0].bytes), /实施交付说明/);
-  const docx = await runUtility({ tool: 'pdf-word', files: [file('验收.pdf', pdf.files[0].bytes)] });
+// Word 转 PDF 改用 DSH 自带的转换（2026-11-12），这里只验文字型 PDF 提文字、转回可编辑 DOCX。
+test('文字型PDF提取文字，再转成可编辑DOCX', async () => {
+  const doc = await PDFDocument.create(), font = await doc.embedFont(StandardFonts.Helvetica);
+  doc.addPage().drawText('Delivery notes KEEP_CONTENT 001', { x: 50, y: 700, font, size: 14 });
+  const bytes = await doc.save();
+  const txt = await runUtility({ tool: 'pdf-text', files: [file('验收.pdf', bytes)] });
+  assert.match(new TextDecoder().decode(txt.files[0].bytes), /KEEP_CONTENT 001/);
+  const docx = await runUtility({ tool: 'pdf-word', files: [file('验收.pdf', bytes)] });
   const content = inspectOffice(docx.files[0].bytes, 'docx').documents.get('word/document.xml').documentElement.textContent;
-  for (const expected of ['实施交付说明', '中文合同测试', '验收范围', '银行业务系统升级', '科目编码', '科目名称', '001', '现金']) assert.ok(content.includes(expected), expected);
+  for (const expected of ['Delivery notes', 'KEEP_CONTENT', '001']) assert.ok(content.includes(expected), expected);
 });
 
 test('内置字体是固定字表与原字体的交集：常用简繁字和符号齐全，生僻字不在内', async () => {
@@ -52,13 +52,7 @@ test('内置字体是固定字表与原字体的交集：常用简繁字和符�
   for (const ch of '鲸翼实施交付們說這個資料①⑪㎡™€—“”《》ＡＢ１') assert.ok(bundled.has(ch.codePointAt(0)), ch);
   for (const ch of '喆堃硚') assert.ok(!bundled.has(ch.codePointAt(0)) && original.has(ch.codePointAt(0)), ch);
 });
-test('子集外的字照常出PDF并在结果里列出，不可见格式符不画方框；水印含缺字先拒收', async () => {
-  const bytes = await Packer.toBuffer(new Document({ sections: [{ children: [new Paragraph('张喆在硚口签约​，繁體資料照常'), new Paragraph('堃')] }] }));
-  const result = await runUtility({ tool: 'word-pdf', files: [file('缺字.docx', bytes)] });
-  assert.equal((await PDFDocument.load(result.files[0].bytes)).getPageCount(), 1);
-  assert.match(result.summary, /有 3 个字不在内置字库（常用简繁体字）里，PDF 中显示为带叉方框：喆、硚、堃；需要原样显示请用 Word 自带的“另存为 PDF”/);
-  const text = await runUtility({ tool: 'pdf-text', files: [file('缺字.pdf', result.files[0].bytes)] });
-  assert.match(new TextDecoder().decode(text.files[0].bytes), /签约，繁體資料照常/);
+test('水印含子集外的字先拒收，不可见格式符不算水印', async () => {
   const p = await PDFDocument.create(); p.addPage(); const pdf = await p.save();
   await assert.rejects(runUtility({ tool: 'pdf-watermark', files: [file('a.pdf', pdf)], options: { watermark: '王喆 内部资料' } }), /水印里的“喆”不在内置字库（常用简繁体字）里/);
   await assert.rejects(runUtility({ tool: 'pdf-watermark', files: [file('a.pdf', pdf)], options: { watermark: '​' } }), /请输入 1–60 字水印/);
@@ -117,7 +111,6 @@ test('Office新增入口在读取前拒收数量、类型、体积，并拒收�
   let reads = 0; const oversized = { name: 'a.pdf', size: 26 * 1024 ** 2, arrayBuffer() { reads++; throw Error('不应读取'); } };
   await assert.rejects(runUtility({ tool: 'pdf-text', files: [oversized] }), /25 MiB/); assert.equal(reads, 0);
   await assert.rejects(runUtility({ tool: 'pdf-merge', files: Array(21).fill(oversized) }), /1–20/);
-  await assert.rejects(runUtility({ tool: 'word-pdf', files: [file('a.doc', new Uint8Array([1]))] }), /格式/);
   const a = await excel(), b = await excel('数据', [['错误表头'], ['x']]);
   await assert.rejects(runUtility({ tool: 'excel-merge', files: [file('a.xlsx', a), file('b.xlsx', b)] }), /表头/);
   await assert.rejects(runUtility({ tool: 'excel-filter', files: [file('a.xlsx', a)], options: { sheetName: '数据', columns: '不存在', match: 'equals' } }), /有效列名/);
@@ -129,32 +122,8 @@ test('PDF密码、交互表单和损坏内容不产生貌似成功的下载', as
   await assert.rejects(runUtility({ tool: 'pdf-pages', files: [file('form.pdf', await form.save())] }), /交互表单/);
   await assert.rejects(runUtility({ tool: 'pdf-text', files: [file('a.pdf', new TextEncoder().encode('not a pdf'))] }), /不是 PDF/);
 });
-test('Word公式、图表、绘图与未知正文容器明确拒收，不以空白成功替代', async () => {
-  const bytes = await Packer.toBuffer(new Document({ sections: [{ children: [new Paragraph('KEEP_CONTENT')] }] }));
-  const entries = unzipSync(bytes), xml = new TextDecoder().decode(entries['word/document.xml']);
-  const cases = [
-    '<m:oMath xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"><m:r><m:t>FORMULA_MUST_NOT_DISAPPEAR</m:t></m:r></m:oMath>',
-    '<w:r><w:drawing><wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"/></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>',
-    '<w:r><w:drawing><wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:wsp xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"/></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>',
-    '<w:r><w:sym w:font="Wingdings" w:char="F041"/></w:r>',
-    '<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"><mc:Fallback><w:r><w:t>DO_NOT_DROP</w:t></w:r></mc:Fallback></mc:AlternateContent>',
-  ];
-  for (const content of cases) {
-    const fixture = zipSync({ ...entries, 'word/document.xml': new TextEncoder().encode(xml.replace('</w:p>', content + '</w:p>')) });
-    await assert.rejects(runUtility({ tool: 'word-pdf', files: [file('语义.docx', fixture)] }), /尚未支持/);
-  }
-});
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACklEQVR4nGMAAQAABQABDQottAAAAABJRU5ErkJggg==', 'base64');
-const imageWord = count => Packer.toBuffer(new Document({ sections: [{ children: [new Paragraph('中文图片验收 KEEP_CONTENT'), ...Array.from({ length: count }, () => new Paragraph({ children: [new ImageRun({ type: 'png', data: png, transformation: { width: 1, height: 1 } })] }))] }] }));
-test('中文Word普通图片仍生成含图PDF，401图片反例在实际输出页数门拒收', async () => {
-  const normal = await runUtility({ tool: 'word-pdf', files: [file('图文.docx', await imageWord(1))] });
-  const pdf = await PDFDocument.load(normal.files[0].bytes);
-  assert.ok(pdf.getPages().some(page => page.node.Resources()?.lookup(PDFName.of('XObject'))?.keys().length > 0));
-  const text = await runUtility({ tool: 'pdf-text', files: [file('图文.pdf', normal.files[0].bytes)] });
-  assert.match(new TextDecoder().decode(text.files[0].bytes), /中文图片验收/);
-  const many = await imageWord(401);
-  assert.ok(many.length < 25000, '小输入也要检查真实分页结果');
-  await assert.rejects(runUtility({ tool: 'word-pdf', files: [file('超页数.docx', many)] }), /PDF 页数应为 1–200/);
+test('一张图片转成一页 PDF', async () => {
   const fromImage = await runUtility({ tool: 'images-pdf', files: [file('图.png', png)] });
   assert.equal((await PDFDocument.load(fromImage.files[0].bytes)).getPageCount(), 1);
 });
@@ -184,6 +153,8 @@ test('按关键列关联：读表头、左关联与内关联、重复关键值�
   const files = [file('员工.xlsx', main), file('通讯录.xlsx', lookup)];
   const { tables } = await runUtility({ tool: 'excel-headers', files });
   assert.deepEqual(tables.map(table => [table.id, table.label, table.headers]), [['0/0', '员工.xlsx · 员工', ['工号', '姓名', '部门']], ['1/0', '通讯录.xlsx · 通讯录', ['编号', '部门', '电话']]]);
+  // 数据行数（不含表头），给小鲸的文件描述用：员工 4 行，通讯录 4 行（2026-11-14）。
+  assert.deepEqual(tables.map(table => table.rows), [4, 4]);
   const base = { leftTable: '0/0', rightTable: '1/0', leftKey: '工号', rightKey: '编号', joinColumns: ['部门', '电话'], joinType: 'left', numericKey: true, ignoreCase: true };
   const left = await runUtility({ tool: 'excel-join', files, options: base });
   assert.match(left.summary, /主表 4 行，匹配 3 行，未匹配 1 行；查找表有 1 行关键值重复，按第一条匹配/);

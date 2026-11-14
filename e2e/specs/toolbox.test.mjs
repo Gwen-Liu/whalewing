@@ -5,7 +5,8 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { startDsh, removeTree, pluginRoot } from '../support/dsh.mjs';
-import { launchBrowser, withPage, openWhaleWing, openTab, scratchFiles, textOf } from '../support/browser.mjs';
+import { recentKey } from '../../src/utilities/recipes.js';
+import { launchBrowser, withPage, openWhaleWing, openTab, scratchFiles, textOf, toast } from '../support/browser.mjs';
 
 // 造文件、回读结果用插件自己的依赖：sharp 读写图片，jsQR 识别二维码，qrcode-generator 生成二维码，pdf-lib 读写 PDF，exceljs 读写表格，fflate 解 ZIP。
 const require = createRequire(path.join(pluginRoot, 'package.json'));
@@ -68,10 +69,25 @@ const sha256 = file => createHash('sha256').update(fs.readFileSync(file)).digest
 const countFiles = dir =>fs.readdirSync(dir, { withFileTypes: true }).reduce((sum, entry) => sum + (entry.isDirectory() ? countFiles(path.join(dir, entry.name)) : 1), 0);
 
 // —— 界面 ——
-/** 打开办公工坊，点某个分类卡里的功能项，等办公工坊窗口打开并切到该功能项。 */
-async function openTool(page, tool, fn) {
+// 2026-11-12 改版：办公工坊页是“文件交给小鲸”，原来的分类卡片和功能项窗口收进页面右上角的“全部功能项”，
+// 从右侧拉出抽屉，每个分类一行、默认收起；点一个功能项标签就关掉抽屉、打开那个功能项的窗口，不经过小鲸。
+// 这个文件测的都是员工自己点开功能项用的这条路，不调模型；交给小鲸的那条路要真模型，不在这里。
+const shelfOf = page => page.getByRole('dialog', { name: '全部功能项', exact: true });
+const shelfButton = page => page.locator('.ww-ws-head').getByRole('button', { name: '全部功能项', exact: true });
+/** 打开办公工坊，点“全部功能项”，等右侧抽屉里的分类出来。 */
+async function openShelf(page) {
   await openTab(page, '办公工坊');
-  await page.getByRole('button', { name: `${tool}：${fn}`, exact: true }).click();
+  await shelfButton(page).click();
+  const shelf = shelfOf(page);
+  await shelf.locator('.ww-tool-card').first().waitFor();
+  return shelf;
+}
+/** 打开“全部功能项”，点开某个分类、点里面的功能项标签，等抽屉关上、办公工坊窗口打开并切到该功能项。 */
+async function openTool(page, tool, fn) {
+  const shelf = await openShelf(page);
+  await shelf.getByRole('button', { name: new RegExp(`^${tool}，\\d+ 个功能项$`) }).click();
+  await shelf.getByRole('button', { name: `${tool}：${fn}`, exact: true }).click();
+  await shelf.waitFor({ state: 'detached' });
   const dialog = page.getByRole('dialog', { name: tool, exact: true });
   await dialog.locator('.ww-tool-body h3', { hasText: fn }).waitFor();
   return dialog;
@@ -98,7 +114,7 @@ async function save(page, dialog, name) {
 
 // 需求§办公工坊的功能项表：每个分类的功能项，按需求原文写（括号里的补充说明去掉）。
 const requiredTools = [
-  ['格式转换', ['Word 转 PDF', 'PDF 转 Word', '图片转 PDF', 'PDF 转图片', '图片转格式', 'Excel／CSV 互转', 'Excel 转 JSON', 'Word 转 TXT', '提取文档图片']],
+  ['格式转换', ['Office 转 PDF', 'PDF 转 Word', '图片转 PDF', 'PDF 转图片', '图片转格式', 'Excel／CSV 互转', 'Excel 转 JSON', 'Word 转 TXT', '提取文档图片']],
   ['PDF 处理', ['合并', '拆分', '压缩', '页面整理', '旋转', '添加页码', '添加水印', '提取文字']],
   ['表格处理', ['合并表格', '拆分工作表', '按字段拆分', '按关键列关联', '数据去重', '两表核对', '条件筛选', '数据排序', '清理空白']],
   ['图片处理', ['压缩与转格式', '旋转翻转', '裁剪', '拼接长图', '宫格切图', '添加水印', '隐私打码', '去除水印']],
@@ -108,24 +124,56 @@ const requiredTools = [
 ];
 const squash = value => value.replace(/\s+/g, '').replace(/／/g, '/');
 
-// 需求§办公工坊（7 个分类、功能项表）
-test('办公工坊页面：7 个分类共 44 项，每个分类的功能项和需求的功能项表一致', async t => {
+// 需求§办公工坊（7 个分类、功能项表）；需求§办公工坊·怎么用（开始页放文件、说要求；“全部功能项”从右侧拉出抽屉，每个分类一行、默认收起，点一下展开功能项标签、再点收起）
+test('办公工坊开始页和“全部功能项”抽屉：7 个分类共 44 项，默认收起，点开后每个分类的功能项和需求的功能项表一致', async t => {
   await withPage(browser, t, async ({ page, errors, external }) => {
     await openWhaleWing(page, dsh.url);
     await openTab(page, '办公工坊');
-    const section = page.locator('section[aria-label=办公工坊]');
-    await section.locator('.ww-tool-card').first().waitFor();
-    assert.equal(await textOf(section.locator('.ww-pagehead p')), '44 项本机处理 · 文件不离开这台电脑');
-    const cards = section.locator('.ww-tool-card');
+    const section = page.locator('section.ww-ws[aria-label=办公工坊]');
+    assert.equal(await textOf(section.locator('.ww-ws-head h2')), '办公工坊');
+    assert.match(await textOf(section.locator('.ww-ws-head p')), /小鲸.*这台电脑/, '页头摘要说明交给小鲸、在这台电脑上处理');
+    // 开始页：放文件、说要求的输入框，“选文件”和“交给小鲸”；功能项不铺在页面上，抽屉要点了才出来。
+    await section.getByRole('textbox', { name: '要求' }).waitFor();
+    await section.getByRole('button', { name: '选文件', exact: true }).waitFor();
+    await section.getByRole('button', { name: '交给小鲸', exact: true }).waitFor();
+    assert.equal(await shelfOf(page).count(), 0, '没点“全部功能项”时抽屉不在');
+    assert.equal(await page.locator('.ww-tool-chip:visible').count(), 0, '功能项不铺在页面上');
+
+    const shelf = await openShelf(page);
+    assert.equal(await textOf(shelf.locator('.ww-tool-shelf-head h2')), '全部功能项');
+    const total = requiredTools.reduce((sum, [, functions]) => sum + functions.length, 0);
+    assert.equal(total, 44, '需求的功能项表合计 44 项');
+    assert.match(await textOf(shelf.locator('.ww-tool-shelf-head p')), new RegExp(`^${total} 项 · `));
+    // 抽屉贴着窗口右边，从上到下，不占满整页。
+    const box = await shelf.boundingBox(), { width, height } = page.viewportSize();
+    assert.ok(box.x >= width / 2 && width - (box.x + box.width) <= 1 && height - (box.y + box.height) <= 1 && box.height >= height * 0.9, `抽屉在右侧：${JSON.stringify(box)}（窗口 ${width}×${height}）`);
+    const cards = shelf.locator('.ww-tool-card');
     assert.equal(await cards.count(), requiredTools.length);
+    assert.equal(await shelf.locator('.ww-tool-chip').count(), 0, '分类默认都收起');
     for (const [index, [tool, functions]] of requiredTools.entries()) {
-      const card = cards.nth(index);
-      assert.equal(await card.locator('.ww-tool-card-head strong').innerText(), tool);
-      assert.match(await card.locator('.ww-tool-card-head small').innerText(), new RegExp(`· ${functions.length} 个功能项$`), tool);
+      const card = cards.nth(index), head = card.locator('.ww-tool-card-head');
+      assert.equal(await head.locator('strong').innerText(), tool);
+      assert.equal(await textOf(head.locator('.ww-tool-count')), `${functions.length} 个`, tool);
+      assert.equal(await head.getAttribute('aria-expanded'), 'false', `${tool}默认收起`);
+      await head.click();
+      assert.equal(await head.getAttribute('aria-expanded'), 'true', `${tool}点一下展开`);
       const chips = await card.locator('.ww-tool-chip').allInnerTexts();
       assert.equal(chips.length, functions.length, `${tool}的功能项数`);
       functions.forEach((name, i) => assert.ok(squash(chips[i]).includes(squash(name)), `${tool}第 ${i + 1} 项应是“${name}”，界面是“${chips[i]}”`));
     }
+    assert.equal(await shelf.locator('.ww-tool-chip').count(), total, '可以同时展开几个分类');
+    // 再点一下收起，别的分类不受影响。
+    const first = cards.first().locator('.ww-tool-card-head');
+    await first.click();
+    assert.equal(await first.getAttribute('aria-expanded'), 'false');
+    assert.equal(await cards.first().locator('.ww-tool-chip').count(), 0, '再点一下收起');
+    assert.equal(await shelf.locator('.ww-tool-chip').count(), total - requiredTools[0][1].length);
+    // 关上再打开，还是上次展开的样子。
+    await shelf.getByRole('button', { name: '关闭', exact: true }).click();
+    await shelf.waitFor({ state: 'detached' });
+    await shelfButton(page).click();
+    await shelf.locator('.ww-tool-card').first().waitFor();
+    assert.equal(await shelf.locator('.ww-tool-chip').count(), total - requiredTools[0][1].length, '抽屉关上再打开，展开的分类还展开着');
     assert.deepEqual(external, []); assert.deepEqual(errors, []);
   });
 });
@@ -134,12 +182,12 @@ test('办公工坊页面：7 个分类共 44 项，每个分类的功能项和�
 test('搜索：词序、大小写、中英文连写都能搜到；能搜格式名和常用说法', async t => {
   await withPage(browser, t, async ({ page, errors }) => {
     await openWhaleWing(page, dsh.url);
-    await openTab(page, '办公工坊');
-    const search = page.getByRole('searchbox', { name: '搜索功能项' });
+    const shelf = await openShelf(page);
+    const search = shelf.getByRole('searchbox', { name: '搜索功能项' });
     const hits = async query => {
       await search.fill(query);
-      await page.locator('.ww-tool-results, section[aria-label=办公工坊] p[role=status]').first().waitFor();
-      return page.locator('.ww-tool-hit').evaluateAll(buttons => buttons.map(button => button.children[1].textContent));
+      await shelf.locator('.ww-tool-results, p[role=status]').first().waitFor();
+      return shelf.locator('.ww-tool-hit').evaluateAll(buttons => buttons.map(button => button.children[1].textContent));
     };
     for (const query of ['合并 PDF', 'pdf 合并', 'PDF合并']) assert.deepEqual(await hits(query), ['合并 PDF'], query);
     const avif = await hits('AVIF');
@@ -149,9 +197,19 @@ test('搜索：词序、大小写、中英文连写都能搜到；能搜格式�
     assert.ok((await hits('照片压缩')).includes('压缩与转格式'));
     assert.ok((await hits('视频转音频')).includes('视频提取音频'));
     assert.ok((await hits('PDF 压缩')).includes('压缩 PDF'));
+    // 点搜到的功能项：抽屉关上，直接打开那个功能项的窗口。
+    await search.fill('pdf 合并');
+    await shelf.locator('.ww-tool-hit').first().click();
+    await shelf.waitFor({ state: 'detached' });
+    const dialog = page.getByRole('dialog', { name: 'PDF 处理', exact: true });
+    await dialog.locator('.ww-tool-body h3', { hasText: '合并 PDF' }).waitFor();
+    await dialog.getByRole('button', { name: '关闭窗口', exact: true }).click();
+    await dialog.waitFor({ state: 'detached' });
+    // 再打开抽屉，清空搜索回到 7 个分类。
+    await shelfButton(page).click();
     await search.fill('');
-    await page.locator('.ww-tool-card').first().waitFor();
-    assert.equal(await page.locator('.ww-tool-card').count(), 7, '清空搜索回到 7 个分类');
+    await shelf.locator('.ww-tool-card').first().waitFor();
+    assert.equal(await shelf.locator('.ww-tool-card').count(), 7, '清空搜索回到 7 个分类');
     assert.deepEqual(errors, []);
   });
 });
@@ -160,19 +218,18 @@ test('搜索：词序、大小写、中英文连写都能搜到；能搜格式�
 test('反例：搜到尚未内置的能力时说明“没有匹配的功能项”和原因，不列出功能项', async t => {
   await withPage(browser, t, async ({ page, errors }) => {
     await openWhaleWing(page, dsh.url);
-    await openTab(page, '办公工坊');
-    const section = page.locator('section[aria-label=办公工坊]'), search = page.getByRole('searchbox', { name: '搜索功能项' });
-    const gaps = section.getByRole('list', { name: '尚未内置' });
+    const shelf = await openShelf(page), search = shelf.getByRole('searchbox', { name: '搜索功能项' });
+    const gaps = shelf.getByRole('list', { name: '尚未内置' });
     for (const [query, pattern] of [['HEIC', /HEIC/], ['OCR', /OCR.*尚未内置/]]) {
       await search.fill(query);
-      await section.getByRole('status').filter({ hasText: '没有匹配的功能项' }).waitFor();
-      assert.equal(await page.locator('.ww-tool-hit').count(), 0, `${query} 不列出功能项`);
+      await shelf.getByRole('status').filter({ hasText: '没有匹配的功能项' }).waitFor();
+      assert.equal(await shelf.locator('.ww-tool-hit').count(), 0, `${query} 不列出功能项`);
       assert.match(await textOf(gaps), pattern, query);
     }
     await search.fill('xyz不存在');
-    await section.getByRole('status').filter({ hasText: '没有匹配的功能项' }).waitFor();
+    await shelf.getByRole('status').filter({ hasText: '没有匹配的功能项' }).waitFor();
     assert.equal(await gaps.count(), 0, '无关的词只说没有匹配');
-    assert.equal(await page.locator('.ww-tool-hit').count(), 0);
+    assert.equal(await shelf.locator('.ww-tool-hit').count(), 0);
     assert.deepEqual(errors, []);
   });
 });
@@ -332,8 +389,21 @@ test('反例：选到 HEIC 照片时就提示先导出为 JPEG 或 PNG，不生�
   });
 });
 
+/** 多文件列表里某个文件那一行、它前面的拖动手柄。 */
+const fileRow = (dialog, name) => dialog.locator('.ww-tool-files li', { has: dialog.page().locator('span', { hasText: name }) });
+const fileGrip = (dialog, name) => fileRow(dialog, name).locator('.ww-grip');
+/** 按住 from 的中心，拖到 to 的某个位置（fx、fy 是在 to 里面的比例）再松开。 */
+async function dragOnto(page, from, to, fx = 0.5, fy = 0.5) {
+  const start = await from.boundingBox(), end = await to.boundingBox();
+  await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(end.x + end.width * fx, end.y + end.height * fy, { steps: 14 });
+  await page.mouse.up();
+}
+
 // 需求§办公工坊·批量（多选可调整顺序、单独移除、继续添加；处理时显示第几个；单个失败只记入明细，成功的照常下载，可只重试失败的；可打包 ZIP）
-test('批量处理：可调顺序和移除，显示第几个；坏文件只记入明细，其余照常下载并能打包', async t => {
+// 决策 2026-11-13：调顺序不用“上移 / 下移”，按住每行前面的小点拖到哪放到哪。
+test('批量处理：按住小点拖动调顺序、能移除，显示第几个；坏文件只记入明细，其余照常下载并能打包', async t => {
   const a = await image('a.png', { width: 1200, height: 900 }), b = await image('b.jpg', { width: 1200, height: 900, format: 'jpeg', color: { r: 200, g: 160, b: 40 } });
   const good = fs.readFileSync(await image('broken-source.png', { width: 1200, height: 900, color: { r: 90, g: 90, b: 90 } }));
   const broken = files.file('broken.png', good.subarray(0, Math.floor(good.length / 2)));
@@ -343,9 +413,24 @@ test('批量处理：可调顺序和移除，显示第几个；坏文件只记�
     const dialog = await openTool(page, '图片处理', '压缩与转格式');
     await fileInput(dialog).setInputFiles([a, b, broken]);
     assert.deepEqual(await fileList(dialog), ['a.png', 'b.jpg', 'broken.png']);
-    await dialog.getByRole('button', { name: '下移 a.png' }).click();
+    assert.equal(await dialog.getByRole('button', { name: /上移|下移/ }).count(), 0, '没有一格一格挪的按钮');
+    assert.equal(await dialog.locator('.ww-tool-files .ww-grip').count(), 3, '每行前面一个小点');
+    // 按住文件名拖：拖不动。
+    await dragOnto(page, fileRow(dialog, 'a.png').locator('span'), fileRow(dialog, 'broken.png'), 0.5, 0.8);
+    assert.deepEqual(await fileList(dialog), ['a.png', 'b.jpg', 'broken.png'], '只有按住小点才拖得动');
+    // 按住 a.png 前面的小点，一口气拖到最后一行的下半边：排到最后。
+    await dragOnto(page, fileGrip(dialog, 'a.png'), fileRow(dialog, 'broken.png'), 0.3, 0.8);
+    assert.deepEqual(await fileList(dialog), ['b.jpg', 'broken.png', 'a.png']);
+    assert.equal(await fileRow(dialog, 'a.png').evaluate(element => element.style.transform + '|' + element.hasAttribute('data-dragging')), '|false', '放下后回到格子里');
+    // 再拖回第一行的上半边：排到最前。
+    await dragOnto(page, fileGrip(dialog, 'a.png'), fileRow(dialog, 'b.jpg'), 0.3, 0.2);
+    assert.deepEqual(await fileList(dialog), ['a.png', 'b.jpg', 'broken.png']);
+    // 不用鼠标：焦点在小点上按上下方向键，一次挪一位，焦点跟着走。
+    await fileGrip(dialog, 'a.png').focus();
+    await page.keyboard.press('ArrowDown');
     assert.deepEqual(await fileList(dialog), ['b.jpg', 'a.png', 'broken.png']);
-    await dialog.getByRole('button', { name: '上移 a.png' }).click();
+    assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), '拖动 a.png 调整顺序，也可以按上下方向键');
+    await page.keyboard.press('ArrowUp');
     await dialog.getByRole('button', { name: '移除 b.jpg' }).click();
     assert.deepEqual(await fileList(dialog), ['a.png', 'broken.png']);
     await dialog.locator('.ww-tool-files input[type=file]').setInputFiles([b, alpha]);
@@ -484,7 +569,7 @@ test('合并 PDF：按调整后的顺序合并，页数和每页来源都对', a
     await openWhaleWing(page, dsh.url);
     const dialog = await openTool(page, 'PDF 处理', '合并 PDF');
     await fileInput(dialog).setInputFiles([two, one]);
-    await dialog.getByRole('button', { name: '上移 one.pdf' }).click();
+    await dragOnto(page, fileGrip(dialog, 'one.pdf'), fileRow(dialog, 'two.pdf'), 0.3, 0.2);
     assert.deepEqual(await fileList(dialog), ['one.pdf', 'two.pdf']);
     await startButton(dialog).click();
     await finished(dialog);
@@ -494,6 +579,45 @@ test('合并 PDF：按调整后的顺序合并，页数和每页来源都对', a
     assert.deepEqual(external, []); assert.deepEqual(errors, []);
   });
   assert.deepEqual([await sha256(two), await sha256(one)], hashes, '原件没被改');
+});
+
+// 需求§办公工坊（PDF：页面整理，缩略图里调整页面顺序）；决策 2026-11-13（调顺序按住缩略图或页码前面的小点拖，不用“←”“→”）
+test('页面整理：按住缩略图或页码前面的小点拖动换页序，输出按新的顺序', async t => {
+  const three = await pdf('three.pdf', [[300, 300], [400, 500], [500, 400]], 'THREE');
+  const hash = await sha256(three);
+  await withPage(browser, t, { acceptDownloads: true }, async ({ page, errors, external }) => {
+    await openWhaleWing(page, dsh.url);
+    const dialog = await openTool(page, 'PDF 处理', '页面整理');
+    await fileInput(dialog).setInputFiles(three);
+    const items = dialog.locator('.ww-pdf-grid > li');
+    await items.nth(2).locator('img').waitFor({ timeout: 60_000 });
+    const captions = () => dialog.locator('.ww-pdf-grid .ww-pdf-caption').allInnerTexts().then(list => list.map(text => text.trim()));
+    assert.deepEqual(await captions(), ['1. 原第 1 页', '2. 原第 2 页', '3. 原第 3 页']);
+    assert.equal(await dialog.getByRole('button', { name: /前移|后移/ }).count(), 0, '没有一格一格挪的箭头');
+    assert.equal(await dialog.locator('.ww-pdf-grid .ww-grip').count(), 3, '每页页码前面一个小点');
+    // 按住第 3 页的缩略图，一口气拖到第 1 页的左半边：排到最前。
+    await dragOnto(page, items.nth(2).locator('.ww-pdf-thumb'), items.nth(0), 0.25, 0.5);
+    assert.deepEqual(await captions(), ['1. 原第 3 页', '2. 原第 1 页', '3. 原第 2 页']);
+    // 按住“原第 1 页”前面的小点，拖到最后一页的右半边：排到最后。
+    await dragOnto(page, items.nth(1).locator('.ww-grip'), items.nth(2), 0.8, 0.5);
+    assert.deepEqual(await captions(), ['1. 原第 3 页', '2. 原第 2 页', '3. 原第 1 页']);
+    assert.equal(await items.nth(2).evaluate(element => element.style.transform + '|' + element.hasAttribute('data-dragging')), '|false', '放下后回到格子里');
+    // 按住“旋转”“删除”这些按钮拖：拖不动。
+    await dragOnto(page, items.nth(0).getByRole('button', { name: '原第 3 页顺时针旋转' }), items.nth(2), 0.8, 0.5);
+    assert.deepEqual(await captions(), ['1. 原第 3 页', '2. 原第 2 页', '3. 原第 1 页'], '按住按钮拖不走这一页');
+    // 不用鼠标：焦点在小点上按左右方向键，一次挪一位。
+    await items.nth(2).locator('.ww-grip').focus();
+    await page.keyboard.press('ArrowLeft');
+    assert.deepEqual(await captions(), ['1. 原第 3 页', '2. 原第 1 页', '3. 原第 2 页']);
+    assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), '拖动原第 1 页调整顺序，也可以按左右方向键');
+    await startButton(dialog).click();
+    await finished(dialog);
+    const name = (await dialog.locator('.ww-tool-result a').first().innerText()).trim().replace(/^下载\s*/, '');
+    const arranged = await PDFDocument.load(fs.readFileSync(await save(page, dialog, name)));
+    assert.deepEqual(arranged.getPages().map(p => [Math.round(p.getWidth()), Math.round(p.getHeight())]), [[500, 400], [300, 300], [400, 500]], '输出按拖好的顺序');
+    assert.deepEqual(external, []); assert.deepEqual(errors, []);
+  });
+  assert.equal(await sha256(three), hash, '原件没被改');
 });
 
 // 需求§办公工坊（不支持的内容明确拒收，不静默丢弃）
@@ -552,6 +676,172 @@ test('反例：往图片处理里拖进 Word 旧版 .doc 文件，处理时说�
     await finished(dialog);
     assert.match(await textOf(alertOf(dialog)), /扩展名与功能项要求不符/);
     assert.equal(await resultBox(dialog).count(), 0);
+    assert.deepEqual(errors, []);
+  });
+});
+
+// 需求§办公工坊·放文件（2026-11-14 用户定：员工一般复制文件夹路径，不会拖文件夹，输入框要认贴进来的文件夹路径）
+test('在输入框贴文件夹路径：读取后列出这一层的文件（不列隐藏文件、不进子文件夹），勾好放进来，和拖进来的文件一样出现在输入框上', async t => {
+  await withPage(browser, t, async ({ page, errors }) => {
+    const folder = path.join(files.dir, '报名材料');
+    files.file('报名材料/报名表.csv', '姓名,电话\n张三,13800000000\n');
+    files.file('报名材料/说明.txt', '示例说明');
+    files.file('报名材料/.备份.txt', '隐藏文件');
+    files.file('报名材料/往年/2025.csv', '姓名\n李四\n');
+    await openWhaleWing(page, dsh.url);
+    await openTab(page, '办公工坊');
+    const section = page.locator('section.ww-ws[aria-label=办公工坊]');
+    // 资源管理器“复制文件地址”带引号，原样贴进来也认。
+    await section.getByRole('textbox', { name: '要求' }).fill(`核对一下这个文件夹里的报名表 "${folder}"`);
+    const picker = section.locator('.ww-ws-pathbox');
+    assert.match(await textOf(picker), /认出了路径/);
+    await picker.getByRole('button', { name: '读取', exact: true }).click();
+    await picker.locator('.ww-ws-pathlist').waitFor();
+    assert.match(await textOf(picker), /里有 2 个文件.*1 个子文件夹（不进去读/, '说清这一层几个文件、子文件夹不进去读');
+    const names = await picker.locator('.ww-ws-pathlist label > span').evaluateAll(spans => spans.map(span => span.firstChild.textContent.trim()));
+    assert.deepEqual(names, ['报名表.csv', '说明.txt'], '只列这一层的文件，隐藏文件不列');
+    // 默认都勾上；去掉“说明.txt”，只放报名表。
+    await picker.getByRole('checkbox', { name: /说明\.txt/ }).uncheck();
+    await picker.getByRole('button', { name: '放进来（1 个）', exact: true }).click();
+    const tray = section.locator('.ww-ws-tray');
+    await tray.waitFor();
+    assert.deepEqual(await tray.locator('.ww-ws-file > span').allInnerTexts(), ['报名表.csv'], '放进来的就是勾的那个');
+    assert.equal(await tray.getByRole('button', { name: '拿掉 报名表.csv' }).count(), 1, '和拖进来的一样能拿掉');
+    // 路径还在输入框里，认路径那一栏还会再出现（员工可以接着从同一个文件夹放别的）；路径不对时说清楚。
+    await section.getByRole('textbox', { name: '要求' }).fill(`看看 "${path.join(folder, '没有这个')}"`);
+    await section.locator('.ww-ws-pathbox').getByRole('button', { name: '读取', exact: true }).click();
+    await section.locator('.ww-ws-pathbox [role=alert]').waitFor();
+    assert.match(await textOf(section.locator('.ww-ws-pathbox [role=alert]')), /没有|找不到|不存在/);
+    assert.deepEqual(errors, []);
+  });
+});
+
+// 需求§办公工坊·窗口收起和恢复（2026-11-14 用户看了原型定方案 A）
+test('功能项窗口收起和恢复：最小化后页头出胶囊、页面不往下挤；点胶囊恢复；Esc 和点窗口外面只收起；结果没下载时关闭先问', async t => {
+  await withPage(browser, t, { acceptDownloads: true }, async ({ page, errors }) => {
+    await openWhaleWing(page, dsh.url);
+    await openTab(page, '办公工坊');
+    const section = page.locator('section.ww-ws[aria-label=办公工坊]');
+    const headTop = async () => Math.round((await section.locator('.ww-ws-head').boundingBox()).y);
+    const before = await headTop();
+    const dialog = await openTool(page, '二维码', '生成二维码');
+    await dialog.getByRole('textbox', { name: '网址或文字' }).fill('https://example.com/dock');
+    await startButton(dialog).click();
+    await finished(dialog);
+    await dialog.getByRole('button', { name: '最小化窗口' }).click();
+    await dialog.waitFor({ state: 'hidden' });
+    const dock = section.locator('.ww-ws-head .ww-ws-dock');
+    await dock.waitFor();
+    assert.match(await textOf(dock), /^生成二维码\s*· 做好了，没下载$/, '胶囊写功能项名字和进度');
+    assert.equal(await headTop(), before, '页头没被挤下去（原来插一整行“恢复 / 关闭窗口”，下移 88px）');
+    assert.equal(await section.getByRole('button', { name: '恢复', exact: true }).count(), 0, '页面里不再插“恢复”一行');
+    // 点胶囊恢复，结果还在。
+    await dock.getByRole('button', { name: /^恢复二维码：生成二维码/ }).click();
+    await dialog.waitFor();
+    // 恢复后胶囊收走：窗口先打开，胶囊在下一次渲染时收走，等它，不在同一刻数。
+    await dock.waitFor({ state: 'detached', timeout: 5000 });
+    assert.deepEqual(await resultBox(dialog).locator('a').allInnerTexts(), ['下载 二维码.png', '下载 二维码.svg']);
+    // Esc 只收起。
+    await page.keyboard.press('Escape');
+    await dialog.waitFor({ state: 'hidden' });
+    await dock.waitFor();
+    await dock.getByRole('button', { name: /^恢复/ }).click();
+    await dialog.waitFor();
+    // 点窗口外面也只收起。
+    const box = await dialog.boundingBox();
+    await page.mouse.click(Math.max(4, box.x - 12), box.y + 40);
+    await dialog.waitFor({ state: 'hidden' });
+    await dock.waitFor();
+    // 胶囊上点 ×：结果没下载，先把窗口打开问一句；“先不关”什么都不动。
+    await dock.getByRole('button', { name: '关闭生成二维码窗口' }).click();
+    await dialog.waitFor();
+    const ask = dialog.getByRole('alertdialog', { name: '关闭窗口' });
+    assert.match(await textOf(ask), /做好的结果还没下载，关掉窗口就没了/);
+    await ask.getByRole('button', { name: '先不关', exact: true }).click();
+    assert.equal(await ask.count(), 0);
+    assert.equal(await resultBox(dialog).count(), 1);
+    // 下载过以后关闭不再问。
+    await save(page, dialog, '二维码.png');
+    await dialog.getByRole('button', { name: '关闭窗口' }).click();
+    await dialog.waitFor({ state: 'detached' });
+    assert.equal(await dock.count(), 0);
+    assert.deepEqual(errors, []);
+  });
+});
+
+// 需求§办公工坊·窗口收起和恢复：员工切到别的页签时处理照常做完，页头的办公工坊页签上标点，做好了右上角提示（2026-11-14 方案 A）
+test('收起后切到别的页签，处理照常做完：办公工坊页签上标点，做好了右上角提示“去看看”，点了回到办公工坊、窗口打开、点消失', async t => {
+  const many = [];
+  for (let i = 0; i < 8; i++) many.push(await noisyImage(`噪点-${i}.png`, 1600, 1200));
+  await withPage(browser, t, async ({ page, errors }) => {
+    await openWhaleWing(page, dsh.url);
+    const dialog = await openTool(page, '图片处理', '压缩与转格式');
+    await fileInput(dialog).setInputFiles(many);
+    await startButton(dialog).click();
+    await dialog.getByRole('button', { name: '最小化窗口' }).click();
+    await dialog.waitFor({ state: 'hidden' });
+    await openTab(page, '专家团队');
+    const dot = page.locator('.ww-tabs [data-nav-item="toolbox"] .ww-tab-dot');
+    await page.locator('.ww-tabs [data-nav-item="toolbox"] .ww-tab-dot[data-tone="done"]').waitFor({ timeout: 90_000 });
+    assert.equal(await dot.getAttribute('aria-label'), '办公工坊：做好了，结果还没下载');
+    const note = toast(page, '「压缩与转格式」做好了，结果还没下载');
+    await note.waitFor();
+    await note.getByRole('button', { name: '去看看' }).click();
+    await dialog.waitFor();
+    await resultBox(dialog).waitFor();
+    assert.match(await textOf(resultBox(dialog)), /8/, '8 张都处理了');
+    assert.equal(await dot.count(), 0, '回到办公工坊点就消失');
+    assert.deepEqual(errors, []);
+  });
+});
+
+// 需求§办公工坊·最近做过（2026-11-14 用户定做：做好的一单换个文件照原样再做一遍，直接交给功能项，不经过小鲸、不花 token）
+test('最近做过：开始页列出记下的做法；换文件再做一遍直接交给功能项，上次一个文件、这次两个就各做一遍；类型不对说清楚；能从列表里去掉', async t => {
+  const one = await pdf('新合同-1.pdf', [[300, 400], [300, 400]], 'one'), two = await pdf('新合同-2.pdf', [[300, 400]], 'two');
+  const wrong = files.file('说明.txt', '不是 PDF');
+  const recipe = { id: 'r-e2e', title: '给这份合同加页码', chain: '添加页码', at: Date.now() - 3600_000, slots: [{ name: '合同.pdf', type: 'pdf' }], steps: [{ tool: 'pdf-number', note: '每页底下中间加“1 / 3”', options: {}, inputs: [{ slot: 0 }] }] };
+  await withPage(browser, t, async ({ page, errors }) => {
+    await openWhaleWing(page, dsh.url);
+    await page.evaluate(([key, value]) => localStorage.setItem(key, value), [recentKey, JSON.stringify([recipe])]);
+    await openTab(page, '办公工坊');
+    const section = page.locator('section.ww-ws[aria-label=办公工坊]');
+    const recent = section.getByRole('region', { name: '最近做过' });
+    await recent.waitFor();
+    assert.match(await textOf(recent), /给这份合同加页码\s*添加页码 · (今天|昨天) \d\d:\d\d/);
+    await recent.getByRole('button', { name: '换文件再做一遍', exact: true }).click();
+    const drawer = page.getByRole('dialog', { name: '换文件再做一遍' });
+    await drawer.waitFor();
+    assert.match(await textOf(drawer), /上次用的文件：合同\.pdf/);
+    assert.match(await textOf(drawer), /每个文件照上次的做法各做一遍/);
+    assert.match(await textOf(drawer), /不经过小鲸，不花 token/);
+    // 类型不对：说清楚，不开始。
+    await drawer.getByLabel('这次要处理的文件').setInputFiles(wrong);
+    await drawer.getByRole('button', { name: /^开始/ }).click();
+    assert.equal(await textOf(drawer.getByRole('alert')), '上次处理的是PDF，「说明.txt」不是，换一个再试。');
+    await drawer.getByRole('button', { name: '拿掉 说明.txt' }).click();
+    // 两个 PDF：照“加页码”各做一遍，成两单。
+    await drawer.getByLabel('这次要处理的文件').setInputFiles([one, two]);
+    await drawer.getByRole('button', { name: '开始（2 个文件）', exact: true }).click();
+    await drawer.waitFor({ state: 'detached' });
+    const jobs = section.locator('.ww-ws-job');
+    await jobs.nth(1).locator('.ww-ws-result').first().waitFor({ timeout: 60_000 });
+    assert.equal(await jobs.count(), 2, '每个文件各做一遍');
+    for (const index of [0, 1]) {
+      const job = jobs.nth(index);
+      assert.match(await textOf(job), /照上次的做法/);
+      assert.match(await textOf(job), /这一单没经过小鲸：照上次的做法直接交给功能项/);
+      assert.match(await textOf(job), /做完了 · 原文件没动/);
+      await job.getByRole('button', { name: '保存…' }).waitFor();
+      await job.getByRole('button', { name: '换文件再做一遍', exact: true }).waitFor();
+    }
+    // 重新打开：一单一单的记录不留，“最近做过”还是这一件（同一件做法只留一条），能去掉。
+    await openWhaleWing(page, dsh.url);
+    await openTab(page, '办公工坊');
+    await recent.waitFor();
+    assert.equal(await recent.locator('.ww-ws-recent-row').count(), 1);
+    await recent.getByRole('button', { name: '从最近做过里去掉「给这份合同加页码」' }).click();
+    await recent.waitFor({ state: 'detached' });
+    assert.equal(await page.evaluate(key => localStorage.getItem(key), recentKey), '[]');
     assert.deepEqual(errors, []);
   });
 });

@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "amap": {
+      "type": "http",
+      "url": "https://mcp.amap.com/mcp?key=${user_config.amapKey}"
+    },
+    "12306": {
+      "command": "npx",
+      "args": ["-y", "12306-mcp"]
+    },
+    "variflight": {
+      "type": "http",
+      "url": "https://ai.variflight.com/servers/aviation/mcp",
+      "headers": { "X-API-Key": "${user_config.variflightKey}" }
+    }
+  }
+}

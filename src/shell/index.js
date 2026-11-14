@@ -8,6 +8,9 @@ import { startFeatures } from './features.js';
 import { workbenchContract } from '../workbench-contract.js';
 import { createSharedUi } from './ui.js';
 import { assistantTextArgs } from '../assistant-name.js';
+import { internalCommands } from '../internal-commands.js';
+
+const Silent = () => null;
 
 /** DSH工厂只接实际使用的宿主资源；组合只接线，领域通过实际模块形成依赖闭包。 */
 export function createShell(require, validator, avatars) {
@@ -20,7 +23,7 @@ export function createShell(require, validator, avatars) {
   const NS = 'whalewing';
   const { Glyph, Avatar, ActionMenu, useClosedPopover, Modal, ConfirmDialog, Drawer, useDiscard, Logo, PageHead, avatarArt, presetAvatars } = createSharedUi(React, avatars);
   const kit = { React, loadChunk: path => require.async(path), Glyph, Avatar, ActionMenu, useClosedPopover, Modal, ConfirmDialog, Drawer, useDiscard, Logo, PageHead, z, avatarArt, presetAvatars, css, formatFileMention };
-  const Workbench = createWorkbenchView({ React, css, Logo, Modal, ActionMenu });
+  const Workbench = createWorkbenchView({ React, css, Logo, Modal, ActionMenu, Glyph, useClosedPopover });
   const UpdateDialog = createUpdateDialog({ React, Modal });
 
   function registerUi(ctx) {
@@ -83,7 +86,10 @@ export function createShell(require, validator, avatars) {
           try { if (node?.matches(':popover-open')) node.hidePopover(); node?.showPopover?.(); } catch { /* 不支持顶层时按普通浮层显示。 */ }
         }, [value?.id, host]);
         if (!value) return null;
-        const notice = h(React.Fragment, null, h('style', null, css), h('div', { ref: element, key: value.id, popover: 'manual', className: `ww-toast ww-toast-${value.kind}`, onMouseEnter: holdToast, onMouseLeave: releaseToast, onFocus: holdToast, onBlur: releaseToast },
+        // 鲸翼页面开着时这份样式已经在页面里了。再带一份会排到按需加载的办公工坊、模型世界样式后面，把它们同样分量的规则盖掉
+        // （2026-11-14 实测：办公工坊开始页弹提示后标题变小、输入框变成等宽字），所以只在页面没开着时带上。
+        const pageCss = typeof document !== 'undefined' && document.querySelector?.('style[data-ww-page-css]');
+        const notice = h(React.Fragment, null, !pageCss && h('style', null, css), h('div', { ref: element, key: value.id, popover: 'manual', className: `ww-toast ww-toast-${value.kind}`, onMouseEnter: holdToast, onMouseLeave: releaseToast, onFocus: holdToast, onBlur: releaseToast },
           h('span', { className: 'ww-toast-mark', 'aria-hidden': true }, toastMarks[value.kind] || toastMarks.info),
           h('span', { className: 'ww-toast-text', role: value.kind === 'error' ? 'alert' : 'status' }, value.text),
           value.action && h('button', { type: 'button', className: 'ww-toast-action', onClick: () => { publish(null); return value.action.run(); } }, value.action.label),
@@ -101,10 +107,13 @@ export function createShell(require, validator, avatars) {
       workbench.internal.updater = updater;
       workbench.internal.UpdateDialog = UpdateDialog;
       ctx.provide('whalewingWorkbench', workbench);
-      ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: 'whalewing', locale: NS, children: { 'whalewing.workbench.tab': { kind: 'list', scope: 'root' }, 'whalewing.workbench.dock': { kind: 'single', scope: 'root' }, 'whalewing.assistant.conversation': { kind: 'single', scope: 'session' } }, inject: () => ({ bridge, clients, workbenchSession, notify: publish, workbench }) }, Workbench));
+      ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: 'whalewing', locale: NS, children: { 'whalewing.workbench.tab': { kind: 'list', scope: 'root' }, 'whalewing.workbench.dock': { kind: 'single', scope: 'root' }, 'whalewing.assistant.conversation': { kind: 'single', scope: 'session' }, 'whalewing.experts.conversation': { kind: 'single', scope: 'session' } }, inject: () => ({ bridge, clients, workbenchSession, notify: publish, workbench }) }, Workbench));
       startFeatures(ctx, workbench);
       registerPluginPage(ctx, workbench, React);
       ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: 'whalewing-notice', locale: NS }, Toast));
+      // 鲸翼给会话记专家、记派工、挂工作区、记办公工坊单子用的是 DSH 命令，DSH 会把它当成“运行了命令”画在对话里，
+      // 露出一行 JSON（2026-11-14 真模型手测时看到）。这几条只给程序用，对话里不画；DSH 没有不显示的命令选项，按命令名登记空视图。
+      for (const key of internalCommands) ctx.slots.inject('conversation.chat.commandview', () => ctx.slots.register({ name: 'conversation.chat.commandview', key }, Silent));
       ctx.effect(() => () => { clearTimeout(toastTimer); listeners.clear(); toast = null; }, '鲸翼提示释放');
   }
   return {

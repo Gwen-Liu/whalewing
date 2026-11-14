@@ -4,6 +4,9 @@ import { createTipsView } from './tips.js';
 import { registerFeature } from '../../src/shell/feature.js';
 import { createMarkdown } from '../../src/shell/markdown.js';
 import { useFeature } from '../../src/shell/feature.js';
+import { readingLimits } from './contract.js';
+import { createHomeBoard, newsKey } from './home.js';
+import { flowOf, locateAll, selectionIn, paint, unpaint, hitAt, canPaint } from './highlights.js';
 
 const monoColors = ['#2563eb', '#0d9488', '#d97706', '#db2777', '#7c3aed', '#0284c7', '#65a30d', '#e11d48'];
 const monoColor = name => monoColors[[...(name || '')].reduce((sum, char) => (sum * 31 + char.codePointAt(0)) >>> 0, 7) % monoColors.length];
@@ -99,9 +102,12 @@ export function createView(kit) {
     },
   };
   const sizes = ['15px', '16.5px', '18px', '20px'];
-  function BookReader({ bookId, title, accent, onClose, t, children, chapters, current = 0, anchor = 'start', onChapter, onEnd, initialToc = false }) {
+  function BookReader({ bookId, title, accent, onClose, t, children, chapters, current = 0, anchor = 'start', onChapter, onEnd, initialToc = false, marks = [], focusMark = null, onMark, onNote, onUnmark, onBookNote, info }) {
     const dialog = useRef(null), scroller = useRef(null), flow = useRef(null);
-    const wide = () => (globalThis.innerWidth ?? 1200) >= 900;
+    // 目录并排还是浮出看阅读器自己有多宽，和样式里 @container ww-book (max-width:52rem) 是同一条线；
+    // 刚打开时弹窗还量不到，按样式给它的宽度 min(100vw - 48px, 105rem) 估算。
+    const rem = () => { try { return parseFloat(globalThis.getComputedStyle(globalThis.document.documentElement).fontSize) || 16; } catch { return 16; } };
+    const wide = () => { const unit = rem(), width = dialog.current?.clientWidth || Math.min((globalThis.innerWidth ?? 1200) - 48, 105 * unit); return width > 52 * unit; };
     const [toc, setToc] = useState(() => initialToc || wide());
     const [size, setSize] = useState(() => { const saved = readerStore.read().size; return Number.isInteger(saved) && saved >= 0 && saved < sizes.length ? saved : 1; });
     const [view, setView] = useState({ ratio: 0, sections: [], section: -1 });
@@ -110,7 +116,64 @@ export function createView(kit) {
     // 最近一次读到的位置；关掉时页面已经量不到了，按它记。
     const position = useRef({ chapter: current, ratio: 0 });
     const latest = useRef(null);
-    latest.current = { current, onEnd, onChapter };
+    // 划线（2026-11-14）：选中一句话浮出小条；划过的地方由浏览器的自定义高亮画底色，不改正文。
+    // bar 是浮在正文上的小条：pick 刚选中、menu 点在已有划线上、note 正在写那句话；panel 是右边的本章划线列表。
+    const chapterMarks = marks.filter(mark => mark.chapter === current);
+    const [bar, setBar] = useState(null), [panel, setPanel] = useState(false);
+    const painted = useRef({ flow: null, entries: [] }), barRef = useRef(null), focused = useRef(null), noteInput = useRef(null);
+    barRef.current = bar;
+    latest.current = { current, onEnd, onChapter, marks: chapterMarks };
+    const rendered = () => flow.current?.querySelector?.('.ww-rendered') ?? null;
+    const repaint = () => {
+      const content = rendered();
+      if (!content) return;
+      const text = flowOf(content), entries = locateAll(text, latest.current.marks);
+      painted.current = { flow: text, entries };
+      paint(globalThis, entries);
+    };
+    const barAt = rect => ({ x: Math.max(120, Math.min((globalThis.innerWidth ?? 1200) - 120, rect.left + rect.width / 2)), y: rect.top });
+    const hideBar = () => setBar(value => value && value.kind !== 'note' ? null : value);
+    // 选中的那一段两头都在正文里才出小条；选区没了小条跟着收起。正在写那句话时不打断。
+    const pick = () => {
+      if (barRef.current?.kind === 'note') return;
+      const content = rendered(), selection = content ? selectionIn(content, globalThis.getSelection?.(), flowOf(content), readingLimits.before) : null;
+      if (!selection) { setBar(value => value?.kind === 'pick' ? null : value); return; }
+      setBar({ kind: 'pick', ...barAt(globalThis.getSelection().getRangeAt(0).getBoundingClientRect()), selection });
+    };
+    const addMark = async withNote => {
+      const selection = barRef.current?.selection;
+      if (!selection) return;
+      if ([...selection.text].length > readingLimits.text) { info(t('markTooLong', { count: readingLimits.text })); return; }
+      repaint();
+      if (painted.current.entries.some(entry => entry.start < selection.end && entry.end > selection.start)) { info(t('markOverlap')); return; }
+      const at = { x: barRef.current.x, y: barRef.current.y };
+      globalThis.getSelection?.()?.removeAllRanges();
+      setBar(null);
+      const created = await onMark({ chapter: current, chapterTitle: chapters[current]?.title ?? '', text: selection.text, before: selection.before });
+      if (created && withNote) setBar({ kind: 'note', ...at, id: created.id, text: '' });
+    };
+    const writeNote = (mark, at) => setBar({ kind: 'note', ...(at ?? { x: (globalThis.innerWidth ?? 1200) / 2, y: 140 }), id: mark.id, text: mark.note });
+    const saveNote = async () => { const value = barRef.current; if (value?.kind !== 'note') return; setBar(null); await onNote(value.id, value.text.trim()); };
+    const showMark = id => {
+      const entry = painted.current.entries.find(item => item.id === id), box = scroller.current;
+      if (!entry || !box) return;
+      stopRestoring();
+      box.scrollTop += entry.range.getBoundingClientRect().top - box.getBoundingClientRect().top - box.clientHeight * 0.3;
+    };
+    useLayoutEffect(repaint, [current, marks]);
+    useEffect(() => { if (bar?.kind === 'note') noteInput.current?.focus?.(); }, [bar?.kind, bar?.id]);
+    // 从首页“去原文”进来：这一章的划线画好后滚到那一句，只滚一次。
+    useEffect(() => {
+      if (!focusMark || focused.current === focusMark || !chapterMarks.some(mark => mark.id === focusMark)) return;
+      const timer = setTimeout(() => { repaint(); showMark(focusMark); focused.current = focusMark; }, 120);
+      return () => clearTimeout(timer);
+    }, [focusMark, current, marks]);
+    useEffect(() => {
+      let timer = 0;
+      const changed = () => { clearTimeout(timer); timer = setTimeout(pick, 160); };
+      globalThis.document?.addEventListener?.('selectionchange', changed);
+      return () => { clearTimeout(timer); globalThis.document?.removeEventListener?.('selectionchange', changed); unpaint(globalThis); };
+    }, []);
     const last = chapters.length - 1;
     const metrics = () => { const box = scroller.current; return box ? { top: box.scrollTop, room: Math.max(0, box.scrollHeight - box.clientHeight) } : { top: 0, room: 0 }; };
     const remember = () => { const { chapter, ratio } = position.current; readerStore.write(value => ({ ...value, books: { ...value.books, [bookId]: { chapter, ratio, at: Date.now() } } })); };
@@ -195,30 +258,61 @@ export function createView(kit) {
     const pickChapter = index => { goChapter(index); if (!wide()) setToc(false); };
     const percent = Math.round((current + view.ratio) / chapters.length * 100);
     return h('dialog', { ref: dialog, className: 'ww-modal ww-page ww-book', 'aria-label': title, style: { '--ww-accent': accent, '--ww-book-size': sizes[size] }, onKeyDown,
-      onCancel: event => { event.preventDefault(); if (zoom) setZoom(null); else onClose(); }, onClick: event => { if (event.target === event.currentTarget) onClose(); } },
+      onCancel: event => { event.preventDefault(); if (bar) setBar(null); else if (zoom) setZoom(null); else onClose(); }, onClick: event => { if (event.target === event.currentTarget) onClose(); } },
       h('header', { className: 'ww-book-bar' },
         h('button', { type: 'button', className: 'ww-book-toggle', 'aria-expanded': toc, 'aria-controls': 'ww-book-toc', title: t('bookToc'), onClick: () => setToc(value => !value) }, h(Glyph, { name: 'list' }), h('span', null, t('bookToc'))),
         h('p', { className: 'ww-book-title' }, title),
         h('div', { className: 'ww-book-tools' },
+          onMark && h('button', { type: 'button', className: 'ww-book-markbtn', 'aria-expanded': panel, 'aria-controls': 'ww-book-marks', onClick: () => setPanel(value => !value) }, t('markPanel', { count: chapterMarks.length })),
           h('button', { type: 'button', className: 'ww-icon-button', title: t('bookSmaller'), 'aria-label': t('bookSmaller'), disabled: size === 0, onClick: () => setSize(value => Math.max(0, value - 1)) }, 'A−'),
           h('button', { type: 'button', className: 'ww-icon-button', title: t('bookLarger'), 'aria-label': t('bookLarger'), disabled: size === sizes.length - 1, onClick: () => setSize(value => Math.min(sizes.length - 1, value + 1)) }, 'A+'),
           h('button', { type: 'button', className: 'ww-icon-button', title: t('closePanel'), 'aria-label': t('closePanel'), onClick: onClose }, h(Glyph, { name: 'close' })))),
-      h('div', { className: 'ww-book-body', 'data-toc': toc ? 'open' : 'closed' },
+      h('div', { className: 'ww-book-body', 'data-toc': toc ? 'open' : 'closed', 'data-marks': panel ? 'open' : 'closed' },
         toc && h('nav', { id: 'ww-book-toc', className: 'ww-book-toc', 'aria-label': t('bookToc') },
           h('ol', null, ...chapters.map((entry, index) => h('li', { key: index },
             h('button', { type: 'button', 'aria-current': index === current ? 'true' : undefined, onClick: () => index === current ? jump(null) : pickChapter(index) }, h('span', { className: 'ww-book-toc-num' }, index + 1), h('span', null, entry.title)),
             index === current && view.sections.length > 0 && h('ol', { className: 'ww-book-sections', 'aria-label': t('bookSections') }, ...view.sections.map((section, at) => h('li', { key: at },
               h('button', { type: 'button', 'data-level': section.level, 'aria-current': at === view.section ? 'location' : undefined, onClick: () => jump(at) }, section.label)))))))),
-        h('div', { ref: scroller, className: 'ww-book-scroll', tabIndex: 0, 'aria-label': t('bookText'), onScroll: sync, onWheel, onPointerDown: stopRestoring },
-          h('article', { ref: flow, className: 'ww-book-flow', onClick: event => { const image = event.target.closest?.('[data-zoom]'); if (image) setZoom({ src: image.dataset.zoom, alt: image.dataset.alt || '' }); } }, children))),
+        h('div', { ref: scroller, className: 'ww-book-scroll', tabIndex: 0, 'aria-label': t('bookText'), onScroll: () => { sync(); hideBar(); }, onWheel, onPointerDown: stopRestoring },
+          h('article', { ref: flow, className: 'ww-book-flow', onMouseUp: () => setTimeout(pick, 0), onKeyUp: () => setTimeout(pick, 0),
+            onClick: event => {
+              const image = event.target.closest?.('[data-zoom]');
+              if (image) { setZoom({ src: image.dataset.zoom, alt: image.dataset.alt || '' }); return; }
+              // 点在已有的划线上（不是拖选）：浮出“写一句 / 取消划线”。
+              const content = rendered(), selection = globalThis.getSelection?.();
+              if (!onMark || !content || selection && !selection.isCollapsed) return;
+              repaint();
+              const hit = hitAt(content, painted.current.flow, painted.current.entries, event.clientX, event.clientY);
+              if (hit) setBar({ kind: 'menu', x: Math.max(120, Math.min((globalThis.innerWidth ?? 1200) - 120, event.clientX)), y: event.clientY - 6, id: hit.id });
+            } }, children)),
+        panel && h('aside', { id: 'ww-book-marks', className: 'ww-book-marks', 'aria-label': t('markPanelTitle') },
+          h('div', { className: 'ww-read-row' }, h('h3', null, t('markPanelTitle')), h('span', { className: 'ww-read-hint' }, t('homeCount', { count: chapterMarks.length })), h('span', { className: 'ww-read-grow' }),
+            h('button', { type: 'button', className: 'ww-text-button', onClick: onBookNote }, t('markPanelNote'))),
+          !canPaint(globalThis) && h('p', { className: 'ww-book-marks-help' }, t('markUnsupported')),
+          chapterMarks.length ? chapterMarks.map(mark => h('article', { className: 'ww-read-quote', key: mark.id },
+            h('blockquote', { onClick: () => showMark(mark.id) }, mark.text), mark.note && h('p', { className: 'ww-read-mine' }, t('markMine', { note: mark.note })),
+            h('div', { className: 'ww-read-row' }, h('button', { type: 'button', className: 'ww-text-button', onClick: () => writeNote(mark) }, t(mark.note ? 'markNoteEdit' : 'markNoteWrite')), h('button', { type: 'button', className: 'ww-text-button', onClick: () => onUnmark(mark.id) }, t('markRemove')))))
+            : h('p', { className: 'ww-book-marks-help' }, t('markPanelEmpty')),
+          h('p', { className: 'ww-book-marks-help' }, t('markPanelHelp')))),
       h('footer', { className: 'ww-book-foot' },
         h('div', { className: 'ww-book-progress' }, h('span', null, `${t('learningChapter', { index: current + 1, count: chapters.length })} · ${chapters[current]?.title ?? title}`)),
         h('div', { className: 'ww-book-track', role: 'progressbar', 'aria-label': t('bookProgress'), 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': percent }, h('i', { style: { width: `${percent}%` } })),
         h('span', { className: 'ww-book-percent' }, `${percent}%`)),
+      // 小条里的按钮按下时不让选区丢掉；写那句话时回车记下、Esc 不写了。
+      bar && h('div', { className: 'ww-book-selbar', role: 'group', 'aria-label': t('markMenu'), style: { left: `${bar.x}px`, top: `${Math.max(8, bar.y - 44)}px` }, onMouseDown: event => { if (event.target.tagName !== 'INPUT') event.preventDefault(); } },
+        bar.kind === 'pick' && h(React.Fragment, null, h('button', { type: 'button', onClick: () => addMark(false) }, t('markAdd')), h('button', { type: 'button', onClick: () => addMark(true) }, t('markAddNote'))),
+        bar.kind === 'menu' && (() => { const mark = chapterMarks.find(item => item.id === bar.id); return mark && h(React.Fragment, null,
+          h('button', { type: 'button', onClick: () => writeNote(mark, { x: bar.x, y: bar.y }) }, t(mark.note ? 'markNoteEdit' : 'markNoteWrite')), h('button', { type: 'button', onClick: () => { setBar(null); onUnmark(mark.id); } }, t('markRemove'))); })(),
+        bar.kind === 'note' && h(React.Fragment, null,
+          h('input', { ref: noteInput, type: 'text', value: bar.text, maxLength: readingLimits.note, placeholder: t('markNotePlaceholder'), 'aria-label': t('markNotePlaceholder'), onChange: event => setBar(value => value && { ...value, text: event.target.value }),
+            onKeyDown: event => { event.stopPropagation(); if (event.key === 'Enter') { event.preventDefault(); saveNote(); } else if (event.key === 'Escape') { event.preventDefault(); setBar(null); } } }),
+          h('button', { type: 'button', onClick: saveNote }, t('markNoteSave')), h('button', { type: 'button', 'aria-label': t('markNoteCancel'), title: t('markNoteCancel'), onClick: () => setBar(null) }, '×'))),
       zoom && h('div', { className: 'ww-book-zoom', role: 'dialog', 'aria-label': t('bookImageView'), onClick: () => setZoom(null) },
         h('img', { src: zoom.src, alt: zoom.alt }),
         h('button', { type: 'button', className: 'ww-icon-button', 'aria-label': t('closePanel'), title: t('closePanel'), onClick: () => setZoom(null) }, h(Glyph, { name: 'close' }))));
   }
+
+  const HomeBoard = createHomeBoard(kit, { BookCover });
 
   return function CardsView({ active, workbench }) {
     const { api, t, notify, busy, run, operation, setError: reportError, button, field, row, help, bind, dirty, openAssistant } = useFeature(React, workbench, 'cards');
@@ -255,6 +349,13 @@ export function createView(kit) {
     // 技巧历史：从首页技巧卡进入时要滚到并描边的那条；外壳“刷新”时改 reloadKey 让历史页重读。
     const [tipFocus, setTipFocus] = useState(null);
     const [tipsKey, setTipsKey] = useState(0);
+    // 2026-11-14 改版：阅读设置的开关、回顾、存过哪些（reading）；正在读的这本书的划线（marks）；存一条和“告诉它”的小弹窗。
+    // readingHome：还没读回来是 undefined，读失败是 null。
+    const [readingHome, setReadingHome] = useState(undefined);
+    const [marks, setMarks] = useState({ book: null, list: [] });
+    const [captureDraft, setCaptureDraft] = useState(null);
+    const [meDraft, setMeDraft] = useState(null);
+    const marksBook = useRef(null);
     const [serifOff] = useState(() => !hasSerif());
     const fileInput = useRef(null), root = useRef(null), search = useRef(null), pinFocus = useRef(null), replaceFocus = useRef(null);
     // 提示里的“撤销”“不放首页”可能在换了子页之后才点，所以动作里读 ref 拿当前子页，不用发起时那一轮的值。
@@ -337,6 +438,55 @@ export function createView(kit) {
       setNewsHome(value);
       if (value.learning.issue) setError(t('learningIssue', { reason: value.learning.issue }));
       else showNotice(value.learning.notice, false);
+    };
+    // 划线和阅读设置读不出来时首页照常能看，页头写明没读出来；存一条、回顾这几样先不能用。
+    const loadReading = () => api.readingRequest({ action: 'home' }).then(value => { setReadingHome(value.home); return value.home; }, () => { setReadingHome(null); return null; });
+    const loadMarks = book => { marksBook.current = book; return api.readingRequest({ action: 'highlights', book }).then(value => { if (marksBook.current === book) setMarks({ book, list: value.highlights }); }, () => { if (marksBook.current === book) setMarks({ book, list: [] }); }); };
+    const toKnowledge = { label: t('homeToKnowledge'), run: () => api.showKnowledge() };
+    const failed = reason => notify(reason?.message || t('requestFailed'), { kind: 'error' });
+    const addMark = async input => {
+      try { const value = await api.readingRequest({ action: 'highlight', book: reading.book.id, bookTitle: reading.book.title, ...input }); setMarks(current => ({ ...current, list: [...current.list, value.highlight] })); notify(t('markDone')); return value.highlight; }
+      catch (reason) { failed(reason); return null; }
+    };
+    const saveMarkNote = async (id, note) => {
+      try {
+        const value = await api.readingRequest({ action: 'note', id, note });
+        setMarks(current => ({ ...current, list: current.list.map(item => item.id === id ? value.highlight : item) }));
+        if (value.note) notify(t(value.note.created ? 'markNotedNew' : 'markNoted', { name: value.note.path.split('/').pop().replace(/\.md$/, '') }), { action: toKnowledge });
+      } catch (reason) { failed(reason); if (reading) loadMarks(reading.book.id); }
+    };
+    const removeMark = async id => {
+      try {
+        const { removed } = await api.readingRequest({ action: 'unhighlight', id });
+        setMarks(current => ({ ...current, list: current.list.filter(item => item.id !== id) }));
+        notify(t('markRemoved'), { duration: 8000, action: { label: t('libraryUndo'), run: () => api.readingRequest({ action: 'restore', highlight: removed }).then(() => loadMarks(removed.book), failed) } });
+      } catch (reason) { failed(reason); }
+    };
+    const bookNoteWhere = () => notify(t('markPanelNoteWhere', { name: `书籍 - ${reading.book.title}` }), { kind: 'info', action: toKnowledge });
+    // 存一条：小弹窗里写一句为什么存，可以不写。
+    const saveCapture = () => run(async () => {
+      const signal = operation.current?.controller.signal, { why, ...item } = captureDraft;
+      const value = await api.readingRequest({ action: 'capture', ...item, why: why.trim() }, signal);
+      const home = await api.readingRequest({ action: 'home' }, signal);
+      return () => { setReadingHome(home.home); setCaptureDraft(null); notify(t('homeSaveDone', { name: value.capture.name }), { action: toKnowledge }); };
+    });
+    // 告诉它想看什么、多来点、少来点：都是往这个领域的关注描述末尾追加一句，下一期开始用。
+    const appendFocus = (fieldId, line, done) => run(async () => {
+      const signal = operation.current?.controller.signal, value = await api.newsRequest({ action: 'list' }, signal), field = value.fields.find(item => item.id === fieldId);
+      if (!field) throw new Error(t('newsReadback'));
+      const focus = `${field.focus}\n${line}`;
+      if (focus.length > 2000) return () => notify(t('homeTellFull', { name: field.name }), { kind: 'info', action: { label: t('newsSettings'), run: () => { setMeDraft(null); setNewsItem(null); openNewsSettings(); } } });
+      await api.newsRequest({ action: 'save', id: field.id, expectedRevision: field.revision, field: { name: field.name, focus, enabled: field.enabled, sources: field.sources } }, signal);
+      return () => { done?.(); notify(t('homeTellDone', { name: field.name })); };
+    });
+    const saveReading = settings => run(async () => {
+      const value = await api.readingRequest({ action: 'settings', settings }, operation.current?.controller.signal);
+      return () => { setReadingHome(home => home && { ...home, settings: value.settings }); notify(t('readingSaved')); };
+    });
+    const usageGo = entry => {
+      if (entry.feature === 'launcher') return workbench.internal?.openLauncher?.();
+      if (workbench.internal?.featureEnabled && !workbench.internal.featureEnabled(entry.feature)) return notify(t('homeUsageClosed', { name: entry.where }), { kind: 'info' });
+      return workbench.openTab(entry.feature);
     };
     const openTips = focus => { leave(); setTipFocus(focus ?? null); setNewsSettings(false); setPage('tips'); };
     const backFromTips = () => { leave(); setPage('home'); };
@@ -513,14 +663,14 @@ export function createView(kit) {
       return () => { setLibrary(value.library); if (home) setNewsHome(home); setConfirm(null); notify(t('libraryRemoved')); };
     });
     // 打开失败在右上角说明是哪本书，并给原样重试；toc 为真时打开即展开目录。
-    const openChapter = (id, chapter, anchor = 'start', { title = '', toc = false } = {}) => run(async () => {
+    const openChapter = (id, chapter, anchor = 'start', { title = '', toc = false, mark = null } = {}) => run(async () => {
       setOpening(id);
       try {
         const value = await libraryCall({ action: 'open', id, chapter });
-        return () => setReading({ ...value.reading, anchor, showToc: toc });
+        return () => { if (marksBook.current !== id) { setMarks({ book: id, list: [] }); loadMarks(id); } setReading({ ...value.reading, anchor, showToc: toc, focusMark: mark }); };
       } catch (reason) {
         if (operation.current?.controller.signal.aborted) throw reason;
-        return () => setError(t('libraryOpenFailed', { title, reason: reason.message }), { label: t('retry'), run: () => openChapter(id, chapter, anchor, { title, toc }) });
+        return () => setError(t('libraryOpenFailed', { title, reason: reason.message }), { label: t('retry'), run: () => openChapter(id, chapter, anchor, { title, toc, mark }) });
       } finally { setOpening(null); }
     });
     // 读到本章最后一页记为读完，首页常看书推进到下一章；失败不打断阅读。
@@ -543,6 +693,8 @@ export function createView(kit) {
         return () => newsSettings ? setNewsData(value) : applyHome(value);
       });
     };
+    // 首页数据每换一次（刷新、关掉阅读器、改了常看），划线和设置跟着重读一次。
+    useEffect(() => { if (newsHome) loadReading(); }, [newsHome]);
     bind({ refresh: refreshTab, onError: reason => { if (reason.sessionId) return false; setError(reason.message || t('requestFailed')); return true; } });
     // 任何前台操作开始时，作废还在路上的后台重读（关闭阅读器后的那次）。
     useEffect(() => { if (busy) stamp.current++; }, [busy]);
@@ -596,7 +748,7 @@ export function createView(kit) {
       const choices = [...new Map([...(newsData?.defaults.sources || []), ...(newsData?.fields || []).flatMap(field => field.sources), ...(newsEditor?.field.sources || [])].map(source => [source.url, source])).values()];
       const patchNews = (key, value) => setNewsEditor(editor => ({ ...editor, field: { ...editor.field, [key]: value } }));
       const toggleSource = source => patchNews('sources', newsEditor.field.sources.some(item => item.url === source.url) ? newsEditor.field.sources.filter(item => item.url !== source.url) : [...newsEditor.field.sources, { ...source }]);
-      // 知识卡片首页：上面是书桌（常看书卡）和 AI 使用技巧卡，下面是每日资讯。和书有关的卡片用纸面、封面和衬线书名；技巧卡和资讯卡沿用 DSH 原色卡片，只放标题，点开在弹框或子页里看。
+      // 每日阅读首页：上面是书桌（常看书卡）和 AI 使用技巧卡，下面是每日资讯。和书有关的卡片用纸面、封面和衬线书名；技巧卡和资讯卡沿用 DSH 原色卡片，只放标题，点开在弹框或子页里看。
       const newsAccents = { model: '#6366f1', agent: '#0d9488', opensource: '#d97706', media: '#db2777', research: '#0284c7' };
       const newsIcons = { model: 'chip', agent: 'bot', opensource: 'code', media: 'image', research: 'flask' }, brand = 'var(--dsw-alias-brand-primary)';
       const accent = item => newsAccents[item.category] ?? brand;
@@ -639,81 +791,6 @@ export function createView(kit) {
       const shortDate = date => date.slice(5).replace('-', '/');
       const accentOf = title => ({ '--ww-accent': monoColor(title) });
       const bookMenu = (book, ...items) => h('div', { className: 'ww-book-menu' }, h(ActionMenu, { label: `${book.title} · ${t('libraryActions')}`, iconOnly: true }, ...items));
-      // 首页书卡：封面加文字列是一个按钮，直接打开下一章；“…”常显，和它并列不嵌套。一本时是加宽卡，右侧“接下来”三章各是独立按钮。
-      const deskMenu = (book, single) => bookMenu(book, ...(book.missing
-        ? [button('libraryUnpin', () => setPinned(book, false)), button('libraryRemove', () => setConfirm({ kind: 'bookRemove', book: { ...book, daily: true } }))]
-        : [button('librarySwap', () => openPins(book.id)), single && button('libraryPinAdd', () => openPins(null)), button('libraryUnpin', () => setPinned(book, false)), button('libraryShowInShelf', () => openLibrary({ id: book.id }))]));
-      const deskCard = (book, single) => {
-        const wide = single ? ' ww-desk-wide' : '';
-        // 阅读副本丢失：去饱和、不可点，“…”里只留取消常看和从书架删除。
-        if (book.missing || !book.chapter) return h('div', { className: `ww-desk-card ww-desk-missing${wide}`, key: book.id, style: accentOf(book.title) },
-          h('div', { className: 'ww-desk-main' }, h(BookCover, { load: loadImage, book, size: 'l' }),
-            h('div', { className: 'ww-desk-text' }, h('h4', { className: 'ww-desk-title' }, t('learningMissingTitle', { title: book.title })), h('p', { className: 'ww-desk-excerpt' }, t('learningMissingText')))),
-          deskMenu({ ...book, missing: true }, single));
-        const { chapter } = book, percent = book.finished ? 100 : Math.round(chapter.index / book.chapters * 100);
-        return h('div', { className: `ww-desk-card${wide}`, key: book.id, style: accentOf(book.title), 'aria-busy': opening === book.id || undefined },
-          // 读屏只读一句“读哪本第几章”，不把摘要、百分比和悬停才出现的文字都念一遍。
-          h('div', { className: 'ww-desk-main', 'aria-label': book.finished ? t('learningRereadLabel', { title: book.title }) : t('learningReadLabel', { title: book.title, index: chapter.index + 1, chapter: chapter.title }), ...pressable(() => openChapter(book.id, chapter.index, 'start', { title: book.title })) },
-            h(BookCover, { load: loadImage, book, size: 'l' }),
-            h('div', { className: 'ww-desk-text' },
-              h('p', { className: 'ww-desk-chapter' }, h('i', { 'aria-hidden': true }), book.finished ? t('learningFinished') : t('learningChapter', { index: chapter.index + 1, count: book.chapters }),
-                !book.finished && h('span', { className: 'ww-desk-chip' }, t('learningMinutes', { minutes: minutes(chapter.chars) }))),
-              h('h4', { className: 'ww-desk-title' }, book.finished ? book.title : chapter.title),
-              h('p', { className: 'ww-desk-excerpt' }, book.finished ? t('learningFinishedText') : chapter.excerpt),
-              h('div', { className: 'ww-desk-track', 'aria-hidden': true }, h('i', { style: { width: `${percent}%` } })),
-              h('div', { className: 'ww-desk-foot' },
-                h('span', { className: 'ww-desk-book' }, h('strong', null, book.title), book.author && h('span', null, ` · ${book.author}`)),
-                book.finished ? h('span', { className: 'ww-desk-go', 'aria-hidden': true }, t('learningFinishedSwap'))
-                  : h('span', { className: 'ww-desk-go', 'aria-hidden': true }, h('span', { className: 'ww-desk-pct' }, `${percent}%`), h('span', { className: 'ww-desk-read' }, t('learningReadChapter', { index: chapter.index + 1 })))))),
-          // “…”绝对定位在右上角；放在“接下来”之前，Tab 顺序是书卡、“…”、接下来三行、查看全部。
-          deskMenu(book, single),
-          single && h('div', { className: 'ww-desk-next' },
-            book.next.length > 0 && h('p', { className: 'ww-desk-eyebrow' }, t('learningNext')),
-            ...book.next.map(item => h('button', { type: 'button', key: item.index, className: 'ww-desk-next-row', disabled: busy, onClick: () => openChapter(book.id, item.index, 'start', { title: book.title }) },
-              h('small', null, t('learningChapterShort', { index: item.index + 1 })), h('strong', null, item.title), h('small', null, t('learningMinutes', { minutes: minutes(item.chars) })))),
-            h('button', { type: 'button', className: 'ww-desk-all', disabled: busy, onClick: () => openChapter(book.id, chapter.index, 'start', { title: book.title, toc: true }) }, t('learningAllChapters', { count: book.chapters }))),
-          // 书房的味道靠书卡边缘的半透明点缀，卡片底本身跟随 DSH 与皮肤。
-          h('i', { className: 'ww-orn-spine', 'aria-hidden': true }), h('i', { className: 'ww-orn-wave', 'aria-hidden': true }), h('i', { className: 'ww-whale', 'aria-hidden': true }));
-      };
-      // 零本常看：只放一张虚线占位卡，不出现任何真书；书架为空时进书架，焦点落在导入卡。
-      const addDesk = learning => h('button', { type: 'button', className: 'ww-desk-add', disabled: busy, 'aria-label': learning.total ? t('learningAddPinLabel') : undefined, onClick: () => learning.total ? openPins(null) : openLibrary({ id: 'import' }) },
-        h('span', { className: `ww-desk-ghosts${learning.total ? '' : ' ww-desk-ghost-one'}`, 'aria-hidden': true }, h('i'), learning.total > 0 && h('i'), h('b', null, '+')),
-        h('span', { className: 'ww-desk-add-text' }, h('strong', null, t(learning.total ? 'learningAddPin' : 'learningEmptyTitle')), h('small', null, t(learning.total ? 'learningAddPinText' : 'learningEmptyText'))));
-      // 书架读不出来时换成纸面提示卡，不显示占位卡，免得以为常看书没了。
-      const desk = learning => {
-        if (learning.issue) return h('div', { className: 'ww-desk' }, h('div', { className: 'ww-desk-issue', role: 'status' }, h('p', null, t('learningIssue', { reason: learning.issue })), button('learningReload', () => refreshTab())));
-        const books = learning.books;
-        return h('div', { className: `ww-desk${books.length > 1 ? ' ww-desk-pair' : ''}` }, books.length ? books.map(book => deskCard(book, books.length === 1)) : addDesk(learning));
-      };
-      // 近 14 天刻度：以首页日期为今天往前补齐空日；只做展示，不单独响应点击。
-      const recentDays = learning => {
-        const end = Date.parse(`${learning.date}T00:00:00Z`);
-        return Array.from({ length: 14 }, (_, i) => { const date = new Date(end - (13 - i) * 86400000).toISOString().slice(0, 10), day = learning.tipRecent.find(item => item.date === date); return { date, count: day?.count ?? 0, partial: day?.status === 'partial' }; });
-      };
-      // AI 使用技巧卡整卡只有一个可点目标：进技巧历史并定位当天首页那条；领域停用时进卡片设置并打开它的编辑抽屉。
-      const tipCard = learning => {
-        const { tip, tipField: tips, date } = learning, name = tips?.name || t('learningTip'), off = Boolean(tips && !tips.enabled);
-        const days = recentDays(learning), issued = days.filter(day => day.count > 0).length;
-        return h('article', { className: 'ww-tile ww-tip-card', key: 'tip', ...pressable(off ? () => editTipSources() : () => openTips(tip ? { date: tip.date, index: tip.index } : null)),
-          'aria-label': off ? `${t('learningTipDisabled', { name })}，${t('learningTipEnable')}` : t('learningTipLabel', { name, date: learningDate(tip?.date ?? date), title: tip?.title ?? t('learningTipWaiting'), count: issued }) },
-          tileTop('spark', name, h('span', { className: 'ww-tile-badge ww-tip-date' }, shortDate(tip?.date ?? date))),
-          h('h4', { className: 'ww-tile-title' }, off ? t('learningTipDisabled', { name }) : tip ? tip.title : t('learningTipWaiting')),
-          !off && h('p', { className: 'ww-tile-text' }, tip ? tip.brief : t('learningTipEmpty')),
-          !off && h('div', { className: 'ww-tip-strip', 'aria-hidden': true },
-            h('span', { className: 'ww-tip-cells' }, ...days.map(day => h('i', { key: day.date, 'data-day': day.count > 0 ? day.partial ? 'partial' : 'issued' : 'none', 'data-today': day.date === date || undefined }))),
-            h('small', null, t('learningTipRecent'))),
-          h('div', { className: 'ww-tile-foot' },
-            tip?.source && !off ? h('span', { className: 'ww-tile-source' }, h('span', { className: 'ww-tile-mono', style: { '--ww-mono': monoColor(tip.source) }, 'aria-hidden': true }, tip.source.trim().charAt(0).toUpperCase()), h('span', null, tip.source)) : h('span'),
-            h('span', { className: 'ww-tip-more' }, off ? t('learningTipEnable') : `${t('learningTipMore')} →`)));
-      };
-      // 技巧领域删除后整张技巧卡不显示，书桌区变宽。
-      const learningShelf = learning => {
-        const withTip = Boolean(learning.tipField && !learning.tipField.deleted);
-        const meta = learning.daily ? t('learningMeta', { daily: learning.daily, total: learning.total }) : learning.total ? t('learningNoPin', { total: learning.total }) : t('learningShelfEmpty');
-        return h('section', { className: 'ww-shelf ww-learning' },
-          shelfHead('book', t('newsLearning'), learningDate(learning.date), meta, [button('libraryOpen', () => openLibrary())]),
-          h('div', { className: `ww-desk-row${withTip ? '' : ' ww-desk-solo'}` }, desk(learning), withTip && tipCard(learning)));
-      };
       // 首屏读取超过 200ms 才显示骨架（样式里延迟淡入）；确认有书才出书卡，确认没有才出占位卡。
       const skeleton = () => h(React.Fragment, null,
         h('section', { className: 'ww-shelf ww-learning ww-skeleton', 'aria-hidden': true },
@@ -801,16 +878,23 @@ export function createView(kit) {
             !last && h('small', { className: 'ww-book-scroll-hint' }, t('libraryScrollNext')),
             last && book.source.kind === 'catalog' && h(React.Fragment, null, h('h3', null, t('learningSource')), book.source.attribution && h('p', null, book.source.attribution), h('p', null, externalLink(book.source.licenseUrl, book.source.license)))));
       };
-      const newsItemView = ({ item, index, total, fieldName }) => h(Modal, { title: item.title, onClose: () => setNewsItem(null) },
+      const newsItemView = ({ item, index, total, fieldName, report }) => h(Modal, { title: item.title, onClose: () => setNewsItem(null) },
         h('div', { className: 'ww-brief-detail', style: { '--ww-accent': accent(item) } },
           h('div', { className: 'ww-brief-meta' }, tileTop(newsIcons[item.category] ?? 'news', newsKicker(item), newsFlag(item), h('span', { className: 'ww-muted' }, fieldName, ' · ', `${index + 1} / ${total}`))),
           item.brief !== undefined
-            ? h(React.Fragment, null, h('p', { className: 'ww-brief-lead' }, item.brief), item.relevance && h('section', null, h('h3', null, t('newsRelevance')), h('p', null, item.relevance)))
+            ? h(React.Fragment, null, h('p', { className: 'ww-brief-lead' }, item.brief), item.relevance && h('section', null, h('h3', null, t(report?.personal ? 'homeRelation' : 'newsRelevance')), h('p', null, item.relevance)))
             : h(React.Fragment, null, h('p', { className: 'ww-brief-lead' }, item.summary), h('section', null, h('h3', null, t('newsImportance')), h('p', null, item.importance)), h('section', null, h('h3', null, t('newsRelevance')), h('p', null, item.relevance)), h('section', null, h('h3', null, t('newsImpact')), h('p', null, item.workImpact))),
           h('footer', { className: 'ww-brief-sources' },
             item.link && h('p', null, h('strong', null, t('newsViewSource')), externalLink(item.link, item.link.replace(/^https:\/\/(www\.)?/, ''))),
             h('h3', null, t('newsSourcesTitle')),
-            h('ul', null, ...item.sources.map(source => h('li', { key: source.id }, externalLink(source.url, source.source.name), h('small', { className: 'ww-muted' }, ' · ', beijing(source.publishedAt))))))));
+            h('ul', null, ...item.sources.map(source => h('li', { key: source.id }, externalLink(source.url, source.source.name), h('small', { className: 'ww-muted' }, ' · ', beijing(source.publishedAt))))),
+            // 从首页点开的才有存一条和多来点、少来点；历史日报弹窗里只看。
+            report && h('div', { className: 'ww-read ww-read-like' },
+              (() => { const key = newsKey(report, item), saved = readingHome?.captures.find(capture => capture.key === key);
+                return h('button', { type: 'button', className: 'ww-read-btn', 'aria-pressed': Boolean(saved), disabled: busy || !readingHome, onClick: () => saved ? notify(t('homeSavedAt', { name: saved.name }), { kind: 'info', action: toKnowledge }) : setCaptureDraft({ key, title: item.title, brief: item.brief ?? item.summary ?? '', url: item.link ?? item.sources[0].url, why: '' }) }, t(saved ? 'homeSaved' : 'homeSave')); })(),
+              item.category && h(React.Fragment, null, h('span', { className: 'ww-read-grow' }), h('span', { className: 'ww-read-hint' }, t('homeLikeLabel', { category: t(`newsCat_${item.category}`) })),
+                h('button', { type: 'button', className: 'ww-read-btn ww-ghost', disabled: busy, onClick: () => appendFocus(report.fieldId, t('homeMoreLine', { category: t(`newsCat_${item.category}`) })) }, t('homeMore')),
+                h('button', { type: 'button', className: 'ww-read-btn ww-ghost', disabled: busy, onClick: () => appendFocus(report.fieldId, t('homeLessLine', { category: t(`newsCat_${item.category}`) })) }, t('homeLess')))))));
       const newsRunView = report => h(Modal, { title: `${report.fieldName} · ${t('newsDiagnostics')}`, onClose: () => setNewsRun(null) },
         h('div', { className: 'ww-brief-detail' }, h('p', null, t('newsWindow'), ' · ', beijing(report.start), ' — ', beijing(report.cutoff)), h('p', null, report.coverage),
           ...report.sourceStatus.filter(source => source.status === 'failed').map(source => h('p', { key: source.url, className: 'ww-error' }, source.name, ' · ', source.message)),
@@ -860,32 +944,40 @@ export function createView(kit) {
           h('footer', { className: 'ww-dialog-actions' }, button('cancel', () => setReplace(null)),
             h('button', { type: 'button', className: 'ww-primary', disabled: busy || !chosen, onClick: () => replacePin() }, busy && h('span', { className: 'ww-spinner', 'aria-hidden': true }), chosen ? t('libraryPinReplace', { title: chosen.title }) : t('libraryPinChoose'))));
       };
-      // 页头摘要：书架几本、常看几本，今天的资讯有几条（今天 08:00 那期还没出就说尚未生成），再说哪里有问题。
-      // 今天那期的截点是北京时间今天 08:00，正好是 UTC 当天 0 点，所以截点的日期和首页日期相同；更早的一期不算今天的。
-      const homeSummary = home => {
-        if (!home) return t('cardsSummaryLoading');
-        const { learning } = home, today = home.reports.filter(report => report.cutoff.slice(0, 10) === learning.date);
-        const items = today.reduce((sum, report) => sum + Math.min(report.items.length, 8), 0), missing = learning.books.filter(book => book.missing || !book.chapter).length, partial = today.filter(report => report.status === 'partial').length;
-        return [
-          learning.issue ? t('cardsSummaryShelfIssue') : learning.total ? t('cardsSummaryShelf', { total: learning.total, daily: learning.daily }) : t('learningShelfEmpty'),
-          !today.length ? t('newsReportEmpty') : items ? t('cardsSummaryNews', { count: items }) : t('cardsSummaryNewsNone'),
-          missing > 0 && t('cardsSummaryMissing', { count: missing }),
-          partial > 0 && t('cardsSummaryPartial', { count: partial }),
-        ].filter(Boolean).join(' · ');
-      };
       // AI 使用技巧领域的历史日报就是技巧历史页。
       const fieldReports = field => field.id === 'ai-tips' ? openTips(null) : readNewsHistory(field);
       const viewing = page === 'tips' ? 'tips' : page === 'library' && library ? 'library' : newsSettings ? 'settings' : 'home';
       body = h('section', { ref: root, className: `ww-news ww-cards${serifOff ? ' ww-serif-off' : ''}` },
-        viewing === 'home' && h(React.Fragment, null,
-          h('header', { className: 'ww-news-header ww-pagehead' }, h('div', null, h('h2', null, t('news')), h('p', null, homeSummary(newsHome))), h('div', { className: 'ww-pagehead-actions' }, button('newsSettings', openNewsSettings))),
-          newsHome ? h(React.Fragment, null,
-            learningShelf(newsHome.learning),
-            newsHome.reports.length ? newsHome.reports.map(reportView) : h('section', { className: 'ww-shelf' }, shelfHead('news', t('newsDaily'), t('newsReportEmpty')))) : busy && skeleton()),
+        viewing === 'home' && (newsHome
+          ? h(HomeBoard, { t, busy, button, home: newsHome, reading: readingHome, loadImage, opening, assistant: workbench.internal?.assistantName?.().short ?? '小鲸',
+            format: { date: learningDate, short: shortDate, when, day: dayOf, minutes, accent: monoColor },
+            actions: {
+              info: text => notify(text, { kind: 'info' }), fail: failed, reload: () => refreshTab(),
+              openItem: ({ report, item, index, total }) => setNewsItem({ item, index, total, fieldName: report.fieldName, report }),
+              saveItem: draft => setCaptureDraft({ ...draft, why: '' }),
+              showSaved: capture => notify(t('homeSavedAt', { name: capture.name }), { kind: 'info', action: toKnowledge }),
+              openMe: report => setMeDraft({ report, text: '' }),
+              runDetails: report => setNewsRun(report), history: field => readNewsHistory(field),
+              loadReports: fieldId => api.newsRequest({ action: 'reports', fieldId }).then(value => value.reports),
+              tryTip: tip => openAssistant(t('homeTryPrompt', { title: tip.title, brief: tip.brief })), openTips, editTipSources, usageGo,
+              openLibrary, openPins, setPinned, removeBook: book => setConfirm({ kind: 'bookRemove', book: { ...book, daily: true } }),
+              openChapter: (book, index, toc = false) => openChapter(book.id, index, 'start', { title: book.title, toc }),
+              looked: id => api.readingRequest({ action: 'looked', id }).then(value => setReadingHome(home => home && { ...home, review: value.review }), failed),
+              more: () => api.readingRequest({ action: 'more' }).then(value => value.review, reason => { failed(reason); return null; }),
+              openMark: highlight => openChapter(highlight.book, highlight.chapter, 'start', { title: highlight.bookTitle, mark: highlight.id }),
+              weekNote: () => workbench.openTab('knowledge'), openSettings: openNewsSettings,
+            } })
+          : h(React.Fragment, null, h('header', { className: 'ww-news-header ww-pagehead' }, h('div', null, h('h2', null, t('news')), h('p', null, t('cardsSummaryLoading')))), busy && skeleton())),
         viewing === 'library' && libraryView(),
         viewing === 'tips' && h(TipsPage, { api, t, run, busy, setError, notify, field: newsHome ? newsHome.learning.tipField : undefined, focus: tipFocus, onFocusApplied: () => setTipFocus(null), externalLink, onBack: backFromTips, onEditSources: () => editTipSources(), reloadKey: tipsKey }),
         viewing === 'settings' && h('header', { className: 'ww-news-header ww-pagehead' }, h('h2', null, t('newsSettings')), h('div', { className: 'ww-pagehead-actions' }, button('newsSettingsClose', closeNewsSettings))),
         viewing === 'settings' && newsData && h('section', { className: 'ww-news-settings' },
+          readingHome && h('section', { className: 'ww-reading-set', 'aria-label': t('readingSettings') },
+            ...[['personal', false], ['diary', true], ['usage', false], ['weekly', false]].map(([key, sub]) => h('label', { key, className: `ww-choice${sub ? ' ww-reading-sub' : ''}` },
+              h('input', { type: 'checkbox', checked: readingHome.settings[key], disabled: busy || key === 'diary' && !readingHome.settings.personal, onChange: event => saveReading({ ...readingHome.settings, [key]: event.target.checked, ...(key === 'personal' && !event.target.checked ? { diary: false } : {}) }) }),
+              h('span', null, t(`reading${key[0].toUpperCase()}${key.slice(1)}`), h('small', null, t(`reading${key[0].toUpperCase()}${key.slice(1)}Help`))))),
+            h('div', { className: 'ww-reading-review' }, h('span', null, t('readingReview'), h('small', null, t('readingReviewHelp'))),
+              h('div', { className: 'ww-read-chips', role: 'group', 'aria-label': t('readingReview') }, ...readingLimits.review.map(count => h('button', { type: 'button', key: count, className: 'ww-chip', 'aria-pressed': readingHome.settings.review === count, disabled: busy, onClick: () => readingHome.settings.review !== count && saveReading({ ...readingHome.settings, review: count }) }, t(`readingReview_${count}`)))))),
           h('div', { className: 'ww-news-toolbar' }, button('newsConfigureSchedule', () => { return workbench.openTab('automation'); }), button('newsSources', () => setNewsAbout(true))),
           h('div', { className: 'ww-grid' }, ...newsData.fields.map(field => h('article', { className: 'ww-card ww-news-field', key: field.id },
             h('div', { className: 'ww-card-top' }, h('div', { className: 'ww-card-identity' }, h('h2', null, field.name), !field.enabled && h('small', { className: 'ww-muted' }, t('taskPaused'))),
@@ -941,8 +1033,21 @@ export function createView(kit) {
                 h('small', null, t('libraryLicense'), '：', externalLink(entry.licenseUrl, entry.license))),
               entry.installed ? h('span', { className: 'ww-tile-badge' }, t('libraryInstalled')) : button('libraryDownload', () => download(entry))))) : !catalog.error && help('libraryCatalogEmpty'),
             catalog.fetchedAt && h('small', { className: 'ww-muted' }, t('libraryFetchedAt', { time: beijing(catalog.fetchedAt).slice(0, 16) })))),
-        reading && h(BookReader, { key: reading.book.id, bookId: reading.book.id, title: reading.book.title, accent: monoColor(reading.book.title), t, chapters: reading.toc, current: reading.chapter.index, anchor: reading.anchor, initialToc: reading.showToc, onClose: closeReader,
+        reading && h(BookReader, { key: reading.book.id, bookId: reading.book.id, title: reading.book.title, accent: monoColor(reading.book.title), t, chapters: reading.toc, current: reading.chapter.index, anchor: reading.anchor, initialToc: reading.showToc, onClose: closeReader, marks: marks.book === reading.book.id ? marks.list : [], focusMark: reading.focusMark, onMark: addMark, onNote: saveMarkNote, onUnmark: removeMark, onBookNote: bookNoteWhere, info: text => notify(text, { kind: 'info' }),
           onChapter: (index, anchor) => openChapter(reading.book.id, index, anchor, { title: reading.book.title }), onEnd: index => finishChapter(reading.book.id, index) }, chapterBody()),
+        captureDraft && h(Modal, { title: t('homeSaveTitle'), busy, onClose: () => setCaptureDraft(null), className: 'ww-confirm' },
+          h('form', { className: 'ww-read-form', onSubmit: event => { event.preventDefault(); return saveCapture(); } },
+            h('div', { className: 'ww-confirm-body' }, h('p', null, h('strong', null, captureDraft.title)),
+              h('label', { className: 'ww-field' }, t('homeSaveWhy'), h('input', { type: 'text', autoFocus: true, value: captureDraft.why, maxLength: readingLimits.why, placeholder: t('homeSaveWhyPlaceholder'), disabled: busy, onChange: event => setCaptureDraft(draft => draft && { ...draft, why: event.target.value }) })),
+              h('p', { className: 'ww-muted' }, t('homeSaveHelp'))),
+            h('footer', { className: 'ww-dialog-actions' }, button('cancel', () => setCaptureDraft(null)), h('button', { type: 'submit', className: 'ww-primary', disabled: busy }, busy && h('span', { className: 'ww-spinner', 'aria-hidden': true }), t('homeSaveConfirm'))))),
+        meDraft && h(Modal, { title: t('homeMeTitle'), busy, onClose: () => setMeDraft(null), className: 'ww-confirm' },
+          h('form', { className: 'ww-read-form', onSubmit: event => { event.preventDefault(); return meDraft.text.trim() && meDraft.report ? appendFocus(meDraft.report.fieldId, t('homeTellLine', { text: meDraft.text.trim() }), () => setMeDraft(null)) : undefined; } },
+            h('div', { className: 'ww-confirm-body' },
+              h('p', null, t(!readingHome?.settings.personal ? 'homeMeOffHelp' : meDraft.report?.personal ? 'homeMePersonal' : meDraft.report ? 'homeMePlain' : 'homeMeNext')),
+              readingHome?.settings.personal && meDraft.report && !meDraft.report.personal && h('p', null, t('homeMeNext')),
+              meDraft.report && h('label', { className: 'ww-field' }, t('homeTell'), h('input', { type: 'text', autoFocus: true, value: meDraft.text, maxLength: 60, placeholder: t('homeTellPlaceholder'), disabled: busy, onChange: event => setMeDraft(draft => draft && { ...draft, text: event.target.value }) }))),
+            h('footer', { className: 'ww-dialog-actions' }, button('homeToSettings', () => { setMeDraft(null); openNewsSettings(); }), meDraft.report && h('button', { type: 'submit', className: 'ww-primary', disabled: busy || !meDraft.text.trim() }, busy && h('span', { className: 'ww-spinner', 'aria-hidden': true }), t('homeTellSend'))))),
         pinDrawer && pinDrawerView(),
         replace && library && replaceView(),
         confirm?.kind === 'pinDraft' && h(ConfirmDialog, { title: t('libraryDiscardTitle'), message: t('libraryPinsDiscardHelp'), confirmLabel: t('libraryDiscard'), cancelLabel: t('cancel'), danger: true, busy, onCancel: () => setConfirm(null), onConfirm: () => { setPinDrawer(null); setConfirm(null); } }),

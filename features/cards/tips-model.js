@@ -14,7 +14,7 @@ export const cutoffDate = cutoff => cutoff.slice(0, 10);
 export const nextDayCutoff = cutoff => new Date(Date.parse(cutoff) + dayMs).toISOString();
 export const dateParts = date => ({ year: Number(date.slice(0, 4)), month: Number(date.slice(5, 7)), day: Number(date.slice(8, 10)), week: new Date(`${date}T00:00:00Z`).getUTCDay() });
 
-// 与知识卡片其它来源圆徽同一套配色和取色公式，同一来源在首页和历史页颜色一致。
+// 与每日阅读其它来源圆徽同一套配色和取色公式，同一来源在首页和历史页颜色一致。
 const monoColors = ['#2563eb', '#0d9488', '#d97706', '#db2777', '#7c3aed', '#0284c7', '#65a30d', '#e11d48'];
 export const monoColor = name => monoColors[[...(name || '')].reduce((sum, char) => (sum * 31 + char.codePointAt(0)) >>> 0, 7) % monoColors.length];
 
@@ -66,6 +66,8 @@ export function buildTimeline(days, { today, complete = true }) {
 
 /** 条目高度（含下方间距）。骨架与正文同高，估算即准确值；界面仍按实测修正。 */
 export const tipsMetrics = Object.freeze({ top: 16, card: 134, cardGap: 12, row: 56, dayGap: 36, slim: 32, slimGap: 24, month: 48, end: 56 });
+/** 同一套尺寸写成样式变量（--ww-tips-size-card 等），页面根节点带上，样式里的条目高度从这里取，两边不会走样。 */
+export const tipsMetricVars = Object.freeze(Object.fromEntries(Object.entries(tipsMetrics).map(([key, value]) => [`--ww-tips-size-${key.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`)}`, `${value}px`])));
 export const restRows = (count, columns) => count > 1 ? Math.ceil((count - 1) / columns) : 0;
 export function entryHeight(entry, columns = 2) {
   const m = tipsMetrics;

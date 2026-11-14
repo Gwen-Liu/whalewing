@@ -105,13 +105,13 @@ const asParts = time => { const p = beijingParts(time); return [p.month, p.day, 
 
 // ===================== 页面、状态点、执行记录 =====================
 
-// 需求§定时任务（看得到结果：页头写几个任务、下一次是哪个、几个上次没完成；列表每个任务前一个状态点；详情是“下次时间”“上次运行”两张小卡，上次运行写结果、计划时间和是否补发）；需求§定时任务（每日资讯：知识卡片开启时默认初始化，每天北京时间 08:00；每日记忆、每周思考默认打开，2026-11-02）
+// 需求§定时任务（看得到结果：页头写几个任务、下一次是哪个、几个上次没完成；列表每个任务前一个状态点；详情是“下次时间”“上次运行”两张小卡，上次运行写结果、计划时间和是否补发）；需求§定时任务（每日资讯：每日阅读开启时默认初始化，每天北京时间 08:00；每日记忆、每周思考默认打开，2026-11-02）
 test('页头一句写任务数和下一次，每日记忆、每周思考默认已打开、没有未启用的卡，详情是“下次时间”“上次运行”两张小卡', async t => {
   const now = Date.now();
   await withPage(browser, t, async ({ page, errors, external }) => {
     await openSchedules(page);
     const news = newsTask();
-    assert.ok(news, '知识卡片开着，DSH 里已默认建好每日资讯');
+    assert.ok(news, '每日阅读开着，DSH 里已默认建好每日资讯');
     assert.equal(news.record.kind, 'daily');
     assert.equal(news.record.timeZone, 'Asia/Shanghai');
     assert.match(news.record.time, /^08:00/);
@@ -525,15 +525,15 @@ test('反例：取消计划时在确认框点“取消”，任务还在、下�
 
 // ===================== 每日资讯 =====================
 
-// 需求§定时任务（每日资讯固定每天 08:00，详情写明要改关注的领域和来源到知识卡片的卡片设置里改，只留暂停、删除等原生允许的操作；DSH 0.2.2 起原版定时服务支持暂停，菜单里有暂停、恢复）
-test('每日资讯详情写明固定每天 08:00、到知识卡片的卡片设置里改领域和来源；菜单里没有编辑，暂停后 DSH 里也停了，恢复后下次还是北京时间 08:00', async t => {
+// 需求§定时任务（每日资讯固定每天 08:00，详情写明要改关注的领域和来源到每日阅读的阅读设置里改，只留暂停、删除等原生允许的操作；DSH 0.2.2 起原版定时服务支持暂停，菜单里有暂停、恢复）
+test('每日资讯详情写明固定每天 08:00、到每日阅读的阅读设置里改领域和来源；菜单里没有编辑，暂停后 DSH 里也停了，恢复后下次还是北京时间 08:00', async t => {
   await withPage(browser, t, async ({ page, errors }) => {
     await openSchedules(page);
     await selectTask(page, '每日资讯');
     const text = await detail(page).innerText();
     assert.match(text, /固定每天 08:00/);
-    assert.match(text, /知识卡片/);
-    assert.match(text, /卡片设置/);
+    assert.match(text, /每日阅读/);
+    assert.match(text, /阅读设置/);
     assert.match(text, /领域和来源/);
     const menu = await taskMenu(page, '每日资讯'), items = await menu.getByRole('button').allInnerTexts();
     assert.ok(!items.some(item => /编辑/.test(item)), `没有编辑项：${items.join('、')}`);
@@ -551,17 +551,17 @@ test('每日资讯详情写明固定每天 08:00、到知识卡片的卡片设�
   });
 });
 
-// 需求§定时任务（DSH 所有运行共用一个任务会话，“打开原会话”打开的是整个会话）
-test('打开原会话：进入每日资讯的任务会话，不触发运行；回到鲸翼后定时任务页没变', async t => {
+// 需求§定时任务（DSH 所有运行共用一个任务会话，“打开原会话”打开的是整个会话；还没跑过、会话还空白时不打开，说清下一次几点跑）
+test('打开原会话：每日资讯还没跑过时不打开空白会话，右上角说还没运行过和下一次几点；不触发运行，定时任务页没变', async t => {
   const news = newsTask(), storedBefore = JSON.stringify(news);
   await withPage(browser, t, async ({ page, errors }) => {
     await openSchedules(page);
     await selectTask(page, '每日资讯');
     const head = await summary(page).innerText(), card = await detail(page).locator('.ww-task-fact').nth(1).innerText();
     await detail(page).getByRole('button', { name: '打开原会话' }).click();
-    await page.locator(`[data-conversation-session="${news.sessionId}"]`).waitFor();
-    await page.getByRole('button', { name: '鲸翼', exact: true }).first().click();
-    await schedulesLoaded(page);
+    await toast(page, /「每日资讯」还没运行过，任务会话里还没有内容；下一次是 \d+\/\d+ \d\d:\d\d，跑过一次后再打开/, 'info').waitFor();
+    assert.equal(await page.locator(`[data-conversation-session="${news.sessionId}"]`).isVisible(), false, '没有打开那段空白会话');
+    assert.equal(await summary(page).isVisible(), true, '还在定时任务页');
     assert.equal(await summary(page).innerText(), head);
     await selectTask(page, '每日资讯');
     assert.equal(await detail(page).locator('.ww-task-fact').nth(1).innerText(), card, '上次运行没变');

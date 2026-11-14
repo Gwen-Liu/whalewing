@@ -15,10 +15,10 @@ import Tools, { validateJsonSchemaValue } from '@deepseek-ai/dsh-tools';
 import * as NativeExecutor from '@deepseek-ai/dsh-tool-executor-native';
 import { TypertRegistry } from '@deepseek-ai/dsh-typert-registry';
 import { z } from 'zod';
-import { newsContract, newsItemLimit, newsSubmitLimit } from '../features/cards/contract.js';
+import { newsContract, newsItemLimit, newsSubmitLimit, newsExcerptLimit, newsTipsExcerptLimit } from '../features/cards/contract.js';
 import { newsExcerpt, headlineBrief } from '../features/cards/news-evidence.js';
 import * as NewsTool from '../features/cards/tool.js';
-import { News, newsDomain, defaultNewsField, defaultTipsField, dailyTip, newsWindow, parseNewsFeed, newsUrl } from '../features/cards/news.js';
+import { News, newsDomain, defaultNewsField, defaultTipsField, dailyTip, newsWindow, parseNewsFeed, newsUrl, candidatesForModel, newsModelBudget, newsShortId, movedSources, movedSourcesVersion } from '../features/cards/news.js';
 import { beijingDate, tipIndex } from '../features/cards/tip-index.js';
 
 const source = { name: '测试源', url: 'https://example.com/feed', kind: 'primary', region: 'domestic' };
@@ -392,7 +392,7 @@ test('旧v1领域升级只恢复固定AI身份一次，保留关注来源与已�
   await h.manage({ action: 'remove', id: 'same-name', expectedRevision: 1 });
 });
 
-test('知识卡片首页：技巧领域的日报只进学习区不进资讯栏，每日一章来自书架；书架读失败不影响资讯', async t => {
+test('每日阅读首页：技巧领域的日报只进学习区不进资讯栏，每日一章来自书架；书架读失败不影响资讯', async t => {
   const daily = { date: '2026-10-14', total: 1, daily: 1, books: [{ id: '00000000-0000-4000-8000-000000000001', title: '书', author: '', cover: false, chapters: 3, finished: false, chapter: { index: 0, title: '第一章', excerpt: '摘要', chars: 900 }, next: [{ index: 1, title: '第二章', chars: 800 }, { index: 2, title: '第三章', chars: 700 }] }] };
   let learning = async () => daily;
   const h = await harness(t, { learning: signal => learning(signal) }, { tips: true }); await h.enable();
@@ -893,4 +893,138 @@ test('往期日报翻页：before 倒序配 nextBefore 保持原样，after 往�
   assert.deepEqual(await read({ after: '2026-10-05T00:00:00.000Z' }), { reports: [], nextBefore: null, nextAfter: null });
   assert.ok([latest, older, newer, rest].every(result => result.reports.every(r => r.fieldId === defaultTipsField.id)));
   await assert.rejects(read({ before: '2026-09-10T00:00:00.000Z', after: '2026-09-01T00:00:00.000Z' }), /before 和 after 只能给一个/);
+});
+
+// —— 2026-11-14 真模型跑了一期之后补的 ——
+// 那一期模型把一个 64 位来源编号抄错了一个字符，整份提交被拒两次，报错只说“包含本轮未取得的来源”；它单拿一条去试，那一条存下后这一期就定了。
+const twoItems = feed(item('模型甲发布', undefined, 'https://example.com/a') + item('工具乙开源', undefined, 'https://example.com/b'));
+const secondItem = (candidate, id = candidate.id) => selection([candidate], { sourceIds: [id], title: '开发者开源工具「乙」', eventKey: '工具乙开源', category: 'opensource', label: 'media', link: candidate.url });
+
+test('来源编号对不上时报错写明第几条、哪个编号，什么都不存；改掉后用同一 receipt 交完整列表，存下后这一期就定了', async t => {
+  const h = await harness(t, { fetch: async url => response(twoItems, url) }); await h.enable();
+  const c = await h.run({ action: 'candidates', fieldId: 'custom-one' });
+  const [first, second] = c.candidates;
+  const wrong = second.id.slice(0, 20) + (second.id[20] === 'a' ? 'b' : 'a') + second.id.slice(21);
+  await assert.rejects(h.run({ action: 'submit', receipt: c.receipt, items: [selection([first]), secondItem(second, wrong)] }), error => {
+    assert.equal(error.code, 'NEWS_SOURCE');
+    assert.ok(error.message.startsWith(`NEWS_SOURCE: 第 2 条的来源编号 ${wrong.slice(0, 24)} 不在本次候选里。`), error.message);
+    assert.ok(error.message.endsWith('用同一 receipt 重新提交完整的列表；不要先交一两条试，提交成功这一期就定了'), error.message);
+    return true;
+  });
+  assert.equal([...h.domain.table('reports').keys()].length, 0, '被拒的提交什么都不存');
+  const saved = await h.run({ action: 'submit', receipt: c.receipt, items: [selection([first]), secondItem(second)] });
+  assert.deepEqual([saved.completed, saved.recovered, saved.report.items.length], [true, false, 2]);
+  const again = await h.run({ action: 'submit', receipt: c.receipt, items: [selection([first])] });
+  assert.deepEqual([again.completed, again.recovered, again.report.items.length], [true, true, 2], '再交只拿回已存的那份，不覆盖');
+});
+
+test('别的报错也写明是第几条：重复用同一来源、同一事件、链接不是这一条的、有正文却走来源标题分支', async t => {
+  const h = await harness(t, { fetch: async url => response(twoItems, url) }); await h.enable();
+  const c = await h.run({ action: 'candidates', fieldId: 'custom-one' });
+  const [first, second] = c.candidates, submit = items => h.run({ action: 'submit', receipt: c.receipt, items });
+  await assert.rejects(submit([selection([first]), secondItem(second, first.id)]), { code: 'NEWS_DUPLICATE', message: /^NEWS_DUPLICATE: 第 2 条：同一来源只可使用一次/ });
+  await assert.rejects(submit([selection([first]), { ...secondItem(second), eventKey: selection([first]).eventKey }]), { code: 'NEWS_DUPLICATE', message: /^NEWS_DUPLICATE: 第 2 条和前面的条目是同一事件或同一标题/ });
+  await assert.rejects(submit([selection([first]), { ...secondItem(second), link: first.url }]), { code: 'NEWS_SOURCE', message: /^NEWS_SOURCE: 第 2 条：条目链接须取自本条来源的地址/ });
+  await assert.rejects(submit([selection([first]), { sourceIds: [second.id], category: 'research', label: 'headline' }]), { code: 'NEWS_EVIDENCE', message: /^NEWS_EVIDENCE: 第 2 条：此候选有有效正文/ });
+  assert.equal([...h.domain.table('reports').keys()].length, 0);
+});
+
+test('来源编号认 12 位以上、只对上一个候选的前缀：不够 12 位不认，对上两个要求写全，短的和完整的引同一个算重复；存下的日报里是完整编号', async t => {
+  const h = await harness(t); await h.enable();
+  const c = await h.run({ action: 'candidates', fieldId: 'custom-one' });
+  const full = c.candidates[0].id, submit = sourceIds => h.run({ action: 'submit', receipt: c.receipt, items: [selection(c.candidates, { sourceIds })] });
+  assert.equal(newsShortId, 12);
+  await assert.rejects(submit([full.slice(0, 11)]), { code: 'NEWS_SOURCE', message: /^NEWS_SOURCE: 第 1 条的来源编号 .{11} 不在本次候选里/ });
+  await assert.rejects(submit([full.slice(0, 12), full]), { code: 'NEWS_DUPLICATE' });
+  // 凭据里再放一个前 12 位相同的候选：短编号对上两个，要求写全；写全了照样认。
+  const run = h.news.receipts.get(c.receipt), twin = { ...c.candidates[0], id: full.slice(0, 12) + (full[12] === 'f' ? '0' : 'f') + full.slice(13), url: 'https://example.com/twin' };
+  run.candidates.push(twin);
+  await assert.rejects(submit([full.slice(0, 12)]), { code: 'NEWS_SOURCE', message: /对上了不止一个候选/ });
+  run.candidates.pop();
+  const saved = await submit([full.slice(0, 12)]);
+  assert.equal(saved.completed, true); assert.equal(saved.report.items[0].sources[0].id, full);
+});
+
+test('交给模型的候选：短编号、不带重复的来源配置，上周清单和来源状态排在候选前面；超过预算就截短摘要，候选一条不丢、有正文的仍有正文；已完成的期次原样返回', () => {
+  const id = index => createHash('sha256').update(`候选${index}`).digest('hex');
+  const links = ['https://example.org/release', 'https://example.org/repo'];
+  const candidate = index => ({ id: id(index), title: `候选标题 ${index}`, url: `https://example.com/post/${index}`, publishedAt: '2026-11-13T02:00:00.000Z', eventTime: null, collectedAt: '2026-11-14T00:00:05.000Z', excerpt: index % 5 ? '正'.repeat(500) : '', links, source });
+  const result = (count, extra = {}) => ({ receipt: '00000000-0000-4000-8000-000000000001', field: { id: 'custom-one', revision: 1, deleted: false, ...field }, start: '2026-11-13T00:00:00.000Z', cutoff: '2026-11-14T00:00:00.000Z', candidates: Array.from({ length: count }, (_, index) => candidate(index)), sources: [{ ...source, status: 'ok', candidates: count }, { ...source, name: '坏源', url: 'https://example.com/bad', status: 'failed', message: '连接失败' }], coverage: '仅覆盖配置订阅。', ...extra });
+  const lastWeek = [{ ref: '2026-11-09#1', date: '2026-11-09', title: '上周的一件事' }];
+  const small = candidatesForModel(result(3, { lastWeek }));
+  assert.deepEqual(Object.keys(small), ['receipt', 'field', 'start', 'cutoff', 'lastWeek', 'sources', 'coverage', 'candidates']);
+  assert.deepEqual(small.field, { id: 'custom-one', name: field.name, focus: field.focus });
+  assert.deepEqual(small.lastWeek, lastWeek);
+  assert.deepEqual(small.sources, [{ name: source.name, status: 'ok', candidates: 3 }, { name: '坏源', status: 'failed', message: '连接失败' }]);
+  assert.deepEqual(small.candidates[1], { id: id(1).slice(0, 12), source: source.name, kind: 'primary', title: '候选标题 1', url: 'https://example.com/post/1', publishedAt: '2026-11-13T02:00:00.000Z', excerpt: '正'.repeat(500), links });
+  assert.equal(small.candidates[0].excerpt, '', '没有正文的还是空的');
+  assert.equal(small.coverage, '仅覆盖配置订阅。', '没截短时不加说明');
+  assert.equal(Object.hasOwn(candidatesForModel(result(1)), 'lastWeek'), false);
+  // 120 条、多数带 500 字正文：原样九万多字，压到预算以内。
+  const big = result(120), shown = candidatesForModel(big), text = JSON.stringify(shown);
+  assert.ok(JSON.stringify(big).length > 2 * newsModelBudget);
+  assert.ok(text.length <= newsModelBudget, `${text.length} 字`);
+  assert.equal(shown.candidates.length, 120, '候选一条不丢');
+  assert.equal(shown.candidates.filter(entry => entry.excerpt).length, big.candidates.filter(entry => entry.excerpt).length, '有正文的截短后仍有正文');
+  const longest = Math.max(...shown.candidates.map(entry => [...entry.excerpt].length));
+  assert.ok(longest < 500);
+  assert.ok(shown.candidates.filter(entry => entry.excerpt).every(entry => entry.excerpt.endsWith('…')));
+  assert.ok(shown.coverage.includes(`每条 excerpt 只给了前 ${longest} 字`), shown.coverage);
+  // 预算再紧：不带正文里的外链，并在 coverage 里说明；实在放不下也把候选全给出去。
+  const tight = candidatesForModel(big, 30000);
+  assert.equal(tight.candidates.length, 120); assert.ok(tight.candidates.every(entry => !Object.hasOwn(entry, 'links')));
+  assert.ok(tight.coverage.includes('没带正文里的外链，link 用候选的 url'));
+  // 前 12 位撞了就加长到不撞。
+  const twins = result(2); twins.candidates[0].id = 'a'.repeat(64); twins.candidates[1].id = 'a'.repeat(13) + 'b'.repeat(51);
+  assert.deepEqual(candidatesForModel(twins).candidates.map(entry => entry.id), ['a'.repeat(16), 'a'.repeat(13) + 'bbb']);
+  const done = { completed: true, report: { fieldId: 'custom-one' } };
+  assert.equal(candidatesForModel(done), done);
+});
+
+// 2026-11-14 真模型跑的两期里“宝玉”都抓取失败：订阅整站搬到了 s.baoyu.io，鲸翼不跟跨域跳转。
+test('订阅搬了家的来源：默认来源用新地址；员工的领域里原样留着旧地址的升级时换成新的，新旧都在就去掉旧的，没有旧地址的不动；只做一次', async t => {
+  const old = 'https://baoyu.io/feed.xml', moved = movedSources[old];
+  assert.equal(moved, 'https://s.baoyu.io/feed.xml');
+  assert.equal(defaultTipsField.sources[0].url, moved);
+  const h = await harness(t, {}, { tips: true }), fields = h.domain.table('fields');
+  await fields.put('ai-tips', { ...structuredClone(defaultTipsField), revision: 3, sources: defaultTipsField.sources.map(entry => entry.url === moved ? { ...entry, url: old } : entry) });
+  await fields.put('custom-both', { id: 'custom-both', revision: 1, deleted: false, ...field, sources: [{ ...source, name: '旧地址', url: old }, { ...source, name: '新地址', url: moved }, source] });
+  await fields.put('custom-none', { id: 'custom-none', revision: 5, deleted: false, ...field });
+  const byId = Object.fromEntries((await h.manage({ action: 'list' })).fields.map(entry => [entry.id, entry]));
+  assert.deepEqual(byId['ai-tips'].sources, defaultTipsField.sources); assert.equal(byId['ai-tips'].revision, 4);
+  assert.deepEqual(byId['custom-both'].sources.map(entry => entry.url), [moved, source.url], '新地址已经在了就只去掉旧的'); assert.equal(byId['custom-both'].revision, 2);
+  assert.equal(byId['custom-none'].revision, 5, '没有旧地址的不动');
+  assert.deepEqual(h.domain.table('lifecycle').get('moved-sources'), { sourcesVersion: movedSourcesVersion });
+  // 只做一次：之后再出现旧地址（比如员工自己填回去）不再替他改。
+  await fields.put('custom-none', { ...fields.get('custom-none'), sources: [{ ...source, url: old }] });
+  const again = new News(h.domain, h.dependencies);
+  t.after(() => again.dispose());
+  assert.equal((await again.manage({ action: 'list' }, signal())).fields.find(entry => entry.id === 'custom-none').sources[0].url, old);
+});
+
+// 2026-11-14 “AI 使用技巧”两期都是空的：GitHub 博客 AI、One Useful Thing 这些订阅同时给了短摘要和全文，鲸翼只取了排在前面的短摘要（43 到 271 字），写不出做法。
+test('技巧领域取订阅里最长的那段正文、给到 1500 字；别的领域照旧取第一段有效正文、500 字；存下的技巧日报里是长的那段', async t => {
+  assert.deepEqual([newsExcerptLimit, newsTipsExcerptLimit], [500, 1500]);
+  const short = '一句话导语。', long = '先让助手把任务拆成三步，再逐步执行并核对输出。' + '每一步都写清楚输入、输出和检查办法。'.repeat(120);
+  assert.equal(newsExcerpt('怎么拆任务', [short, long]), short, '默认取第一段');
+  assert.equal(newsExcerpt('怎么拆任务', [short, long], { max: 1500, longest: true }), long.slice(0, 1500), '技巧领域取最长的一段，截到 1500 字');
+  assert.equal(newsExcerpt('怎么拆任务', ['怎么拆任务', '<a href="https://example.com/x">阅读全文</a>', short], { max: 1500, longest: true }), short, '原标题和链接壳照样不算正文');
+  assert.equal(newsExcerpt('标题', ['It&rsquo;s here &mdash; &ldquo;done&rdquo;&hellip;']), 'It’s here — “done”…', '常见排版符号实体还原成字符');
+  const xml = feed('<item><title>怎么拆任务</title><link>https://example.com/how</link><pubDate>Sun, 11 Oct 2026 12:00:00 +0000</pubDate><description>' + short + '</description><content:encoded xmlns:content="http://purl.org/rss/1.0/modules/content/"><![CDATA[<p>' + long + '</p>]]></content:encoded></item>');
+  const window = newsWindow(Date.parse('2026-10-12T05:00:00Z'));
+  assert.equal(parseNewsFeed(xml, source, window, '2026-10-12T05:00:00.000Z')[0].excerpt, short);
+  assert.equal(parseNewsFeed(xml, source, window, '2026-10-12T05:00:00.000Z', 100, { max: 1500, longest: true })[0].excerpt, long.slice(0, 1500));
+  // 走一遍真的读候选和提交：技巧领域拿到长的，自建领域拿到短的。
+  const h = await harness(t, { fetch: async url => response(xml, url) }, { tips: true }); await h.enable();
+  const tips = await h.run({ action: 'candidates', fieldId: defaultTipsField.id });
+  assert.equal(tips.candidates.length, 1, '同一地址在几个来源里只算一条');
+  assert.equal([...tips.candidates[0].excerpt].length, 1500);
+  const custom = await h.run({ action: 'candidates', fieldId: 'custom-one' });
+  assert.equal(custom.candidates[0].excerpt, short);
+  // 交给模型时不截短（一条 1500 字远在预算以内），覆盖说明里也不提截短。
+  const shown = candidatesForModel(tips);
+  assert.equal([...shown.candidates[0].excerpt].length, 1500); assert.equal(shown.coverage, tips.coverage);
+  const saved = await h.run({ action: 'submit', receipt: tips.receipt, items: [{ sourceIds: [tips.candidates[0].id.slice(0, 12)], category: 'research', label: 'media', title: '先让助手把任务拆成三步再执行', link: tips.candidates[0].url, brief: '每一步写清输入、输出和检查办法。', relevance: '', eventKey: '拆任务三步法' }] });
+  assert.equal(saved.completed, true);
+  assert.equal([...(await h.manage({ action: 'report', fieldId: defaultTipsField.id, cutoff: tips.cutoff })).report.items[0].sources[0].excerpt].length, 1500, '契约接受 1500 字的摘要');
 });

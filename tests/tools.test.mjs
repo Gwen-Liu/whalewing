@@ -14,7 +14,7 @@ import { SkillLibrary } from '../src/skills.js';
 import { seedBundledSkills } from './skill-seed.mjs';
 
 // 随包技能 = 鲸翼自写的 whalewing-* 加上来源清单里收录的开源技能。
-const bundledSkills = [...['whalewing-check', 'whalewing-clarify', 'whalewing-code-review', 'whalewing-coding', 'whalewing-data-analysis', 'whalewing-debugging', 'whalewing-frontend-design', 'whalewing-knowledge', 'whalewing-news', 'whalewing-plugin-management', 'whalewing-research', 'whalewing-skill-evolution', 'whalewing-slides', 'whalewing-ui-review', 'whalewing-visual', 'whalewing-web-testing', 'whalewing-writing'], ...JSON.parse(await fs.readFile(new URL('../scripts/skill-sources.json', import.meta.url), 'utf8')).map(item => item.name)].sort();
+const bundledSkills = [...['whalewing-check', 'whalewing-clarify', 'whalewing-code-review', 'whalewing-coding', 'whalewing-data-analysis', 'whalewing-debugging', 'whalewing-frontend-design', 'whalewing-knowledge', 'whalewing-news', 'whalewing-plugin-management', 'whalewing-research', 'whalewing-skill-evolution', 'whalewing-slides', 'whalewing-toolbox', 'whalewing-ui-review', 'whalewing-visual', 'whalewing-web-testing', 'whalewing-writing'], ...JSON.parse(await fs.readFile(new URL('../scripts/skill-sources.json', import.meta.url), 'utf8')).map(item => item.name)].sort();
 
 async function setup(t) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'whalewing-tools-'));
@@ -44,28 +44,54 @@ test('真实宿主defineTool接受全部schema，原生审批拒绝不会执行�
     on() {}, effect(fn) { cleanups.push(fn()); },
     sandboxPolicy: { resolve: () => ({ mode: 'workspace-write' }) },
     get: key => key === 'approval' ? { request: async () => { approvalCount++; return 'rejected'; } } : undefined,
+    // 会话上记的定时任务用途：每日记忆 knowledge、每周思考 thinking、自建 custom、扩展 extension，员工自己的会话没有。
+    sessionProjections: { stateOf: (session, key) => key === 'whalewingAutomation' ? { purpose: { daily: 'knowledge', weekly: 'thinking', custom: 'custom', extension: 'extension' }[session.id] ?? null } : undefined },
   });
   ctx.whalewingCards = { executeNews: ctx.whalewing.executeNews };
   expertTool(ctx); newsTool(ctx); knowledgeTool(ctx); skillTool(ctx);
   t.after(async () => { for (const cleanup of cleanups) await cleanup(); });
   assert.deepEqual([...tools.keys()], ['whalewing_experts', 'whalewing_news', 'whalewing_knowledge', 'whalewing_skill']);
   const exec = { signal: new AbortController().signal, agent: { session: { id: 'fixture' } }, callId: 'fixture-call' };
-  await tools.get('whalewing_knowledge').execute({ action: 'status' }, exec);
+  // 只读的动作不审批（2026-11-08 用户定）；写入、删除、恢复、提交覆盖每次都要批。
+  const reads = ['status', 'search', 'read', 'document', 'graph', 'validate', 'sources', 'coverage', 'source_read'];
+  for (const action of reads) await tools.get('whalewing_knowledge').execute({ action }, exec);
   assert.equal(approvalCount, 0);
-  await assert.rejects(tools.get('whalewing_knowledge').execute({ action: 'write', path: '40-知识/a.md' }, exec), /rejected/);
-  assert.equal(approvalCount, 1);
-  assert.equal(calls.length, 1);
+  assert.equal(calls.length, reads.length);
+  for (const action of ['write', 'remove', 'restore', 'complete']) await assert.rejects(tools.get('whalewing_knowledge').execute({ action, path: '40-知识/a.md' }, exec), /rejected/);
+  assert.equal(approvalCount, 4);
+  assert.equal(calls.length, reads.length, '没批准的写入不执行');
+  assert.deepEqual(['search', 'write', 'complete'].map(action => tools.get('whalewing_knowledge').presentCall({ action }).kind), ['read', 'other', 'other']);
+  for (const action of ['list', 'read']) await tools.get('whalewing_skill').execute({ action }, exec);
+  assert.equal(approvalCount, 4, '查看技能不审批');
+  await assert.rejects(tools.get('whalewing_skill').execute({ action: 'stage' }, exec), /rejected/);
+  assert.equal(approvalCount, 5);
+  const before = calls.length;
   assert.deepEqual(JSON.parse(await tools.get('whalewing_news').execute({ action: 'fields' }, exec)), { action: 'fields', sessionId: 'fixture' });
-  assert.equal(calls.length, 1, '资讯不得经过知识执行入口');
+  assert.equal(calls.length, before, '资讯不得经过知识执行入口');
   const list = JSON.parse(await tools.get('whalewing_experts').execute({ action: 'list' }, exec));
-  assert.deepEqual(list.experts, [{ id: 'manager', name: '小鲸助手', description: '统一助手' }]);
+  assert.deepEqual(list.experts, [{ id: 'manager', name: '小鲸助手', description: '统一助手', from: '员工的' }]);
+  assert.deepEqual(JSON.parse(await tools.get('whalewing_experts').execute({ action: 'list', query: '统一' }, exec)).experts.map(item => item.id), ['manager']);
+  assert.deepEqual(JSON.parse(await tools.get('whalewing_experts').execute({ action: 'list', query: '没有这个词' }, exec)).experts, []);
   const detail = JSON.parse(await tools.get('whalewing_experts').execute({ action: 'get', id: 'manager' }, exec));
   assert.equal(detail.prompt, '配置正文');
   assert.equal(Object.hasOwn(detail, 'avatar'), false);
   await assert.rejects(tools.get('whalewing_experts').execute({ action: 'save' }, exec), { code: 'INVALID_ARGS' });
   await assert.rejects(tools.get('whalewing_experts').execute({ action: 'get' }, exec), { code: 'INPUT' });
   await assert.rejects(tools.get('whalewing_experts').execute({ action: 'list', prompt: '写入企图' }, exec), { code: 'INPUT' });
-  assert.equal(approvalCount, 1);
+  assert.equal(approvalCount, 5);
+  // 每日记忆、每周思考到点运行时没人批（2026-11-11 用户选 A）：这两个任务自己的会话里写笔记、交回进度不审批；删除、恢复照样要批。
+  const knowledge = tools.get('whalewing_knowledge');
+  for (const id of ['daily', 'weekly']) {
+    const routine = { ...exec, agent: { session: { id } } };
+    for (const action of ['write', 'complete']) await knowledge.execute({ action, path: '60-时间线/日记/2026/2026-11-11.md' }, routine);
+    for (const action of ['remove', 'restore']) await assert.rejects(knowledge.execute({ action, path: '40-知识/a.md' }, routine), /rejected/);
+  }
+  assert.equal(approvalCount, 9, '内置任务里只有删除、恢复弹审批');
+  assert.deepEqual(calls.slice(-4).map(([args, caller]) => [args.action, caller.agent.session.id]), [['write', 'daily'], ['complete', 'daily'], ['write', 'weekly'], ['complete', 'weekly']]);
+  // 自建任务、扩展任务和员工自己的会话里，写入照旧要批。
+  for (const id of ['custom', 'extension', 'fixture']) await assert.rejects(knowledge.execute({ action: 'write', path: '40-知识/a.md' }, { ...exec, agent: { session: { id } } }), /rejected/);
+  assert.equal(approvalCount, 12);
+  assert.equal(calls.length, before + 4, '没批准的写入不执行');
 });
 
 test('官方filesystem发现器隔离坏个人Skill，基础Skills持续可用；卸载关闭watcher', async t => {

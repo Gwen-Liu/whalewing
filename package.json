@@ -1,9 +1,9 @@
 {
   "name": "dsh-whalewing",
-  "version": "0.2.2-rc.1.1",
+  "version": "0.2.2-rc.1.2",
   "license": "Apache-2.0",
   "icon": "./art/brand/whalewing-app-256.png",
-  "description": "鲸翼：专家团队、个人知识与持续技能沉淀",
+  "description": "鲸翼 · DSH 超级个体工作台：专家团队与小鲸助手、知识积累、技能中心、定时任务、AI 网页、办公工坊、每日阅读、模型世界",
   "keywords": ["dsh", "dsh-plugin", "deepseek-harness", "deepseek-harness-plugin", "whalewing", "鲸翼"],
   "homepage": "https://github.com/gwen-liu/whalewing#readme",
   "repository": { "type": "git", "url": "git+https://github.com/gwen-liu/whalewing.git" },
@@ -32,7 +32,7 @@
     "./model-world/icon": "./features/model-world/icon.svg",
     "./model-world/locale/*": "./features/model-world/locale/*"
   },
-  "files": ["index.js", "client.js", "client.toolbox.js", "client.model-world.js", "client.portrait-openai.js", "client.portrait-anthropic.js", "client.portrait-google.js", "client.portrait-deepseek.js", "client.portrait-alibaba.js", "client.portrait-moonshotai.js", "client.portrait-zhipuai.js", "client.portrait-bytedance-seed.js", "client.portrait-minimax.js", "client.portrait-tencent.js", "client.portrait-baidu.js", "client.portrait-xiaomi.js", "client.portrait-meituan.js", "client.portrait-stepfun.js", "client.portrait-xai.js", "client.portrait-meta.js", "client.portrait-mistral.js", "client.portrait-perplexity.js", "client.portrait-deepseek-flash.js", "src", "content/roles.js", "content/experts", "content/expert-templates", "content/skills", "content/model-world", "content/avatars", "content/utilities", "content/vault", "cordis.patch.yml", "README.md", "COMPATIBILITY.md", "EXTENDING.md", "MAINTAINING.md", "examples/feature-starter", "examples/stateful-feature", "LICENSE", "NOTICE", "art/brand", "features", "locale"],
+  "files": ["index.js", "client.js", "client.toolbox.js", "client.model-world.js", "client.portrait-openai.js", "client.portrait-anthropic.js", "client.portrait-google.js", "client.portrait-deepseek.js", "client.portrait-alibaba.js", "client.portrait-moonshotai.js", "client.portrait-zhipuai.js", "client.portrait-bytedance-seed.js", "client.portrait-minimax.js", "client.portrait-tencent.js", "client.portrait-baidu.js", "client.portrait-xiaomi.js", "client.portrait-meituan.js", "client.portrait-stepfun.js", "client.portrait-xai.js", "client.portrait-meta.js", "client.portrait-mistral.js", "client.portrait-perplexity.js", "client.portrait-deepseek-flash.js", "src", "content/roles.js", "content/experts", "content/expert-templates", "content/skills", "content/packs", "content/model-world", "content/avatars", "content/utilities", "content/vault", "cordis.patch.yml", "README.md", "COMPATIBILITY.md", "EXTENDING.md", "MAINTAINING.md", "examples/feature-starter", "examples/stateful-feature", "LICENSE", "NOTICE", "art/brand", "features", "locale"],
   "scripts": {
     "build": "node scripts/build.mjs",
     "test": "node scripts/run-tests.mjs unit && npm --prefix examples/feature-starter test && npm --prefix examples/stateful-feature test",
@@ -58,6 +58,7 @@
     "@deepseek-ai/dsh-atomic-write": "0.2.2-rc.1",
     "@deepseek-ai/dsh-file-reference": "0.2.2-rc.1",
     "@deepseek-ai/dsh-llm": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-mcp-client": "0.2.2-rc.1",
     "@deepseek-ai/dsh-web-fetch-http": "0.2.2-rc.1",
     "@deepseek-ai/dsh-typert-protocol": "0.2.2-rc.1"
   },

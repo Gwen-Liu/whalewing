@@ -1,6 +1,8 @@
 /** 办公工坊只消费用户选件；下载与后台任务仅在当前挂载实例存活。 */
 import { utilityTools, searchUtilities, utilityGapsFor, unsupportedImageReason } from './catalog.js';
 import { decodeAudio, captureFrames } from './media-prep.js';
+import { createWorkshopView } from './workshop.js';
+import { createSortable, moveItem } from '../sortable.js';
 
 const copy = Object.freeze({
   title: '办公工坊', help: '内置本地处理，不上传文件，不调用模型 API。每次最多 20 个文件，PDF 最多 200 页，单文件 25 MiB、总输入与输出 100 MiB；文本 2 MiB',
@@ -15,7 +17,7 @@ const copy = Object.freeze({
   operation: '文本操作', result: '上次已完成的结果', download: '下载', pending: '尚未内置：在线视频／文案分享链接提取、OCR；不以外链代替内置能力',
 });
 
-function validateResult(result) {
+export function validateResult(result) {
   if (!result || typeof result !== 'object') throw new Error('后台返回结果格式不正确');
   if (Object.hasOwn(result, 'sheets')) {
     if (!Array.isArray(result.sheets) || !result.sheets.length || result.sheets.length > 2000 || result.sheets.some(name => typeof name !== 'string' || !name || name.length > 31) || new Set(result.sheets).size !== result.sheets.length || result.files) throw new Error('工作表目录格式不正确');
@@ -148,8 +150,9 @@ export function createUtilityRunner(workerSource, platform, onChange) {
 }
 
 /** 返回稳定挂载的办公工坊；所属功能负责 active 和卸载。 */
-export function createUtilityViews(React, workerSource) {
+export function createUtilityViews(React, workerSource, services = {}) {
   const h = React.createElement;
+  const useSortable = createSortable(React);
   const tools = utilityTools;
   const icons = {
     convert: 'M7 7h11l-3-3M17 17H6l3 3',
@@ -165,30 +168,38 @@ export function createUtilityViews(React, workerSource) {
     h('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round' }, h('path', { d: icons[tool.icon] })));
   // 模态框不承担整页布局：明确固定定位与内容高度，避免四边定位把 auto 高度拉满。
   const css = [
-    '.ww-tool-directory{display:grid!important;grid-template-columns:repeat(auto-fill,minmax(300px,1fr))!important;gap:14px;margin-top:16px}',
-    '.ww-tool-card{position:relative;overflow:hidden;display:flex!important;flex-direction:column;align-items:stretch;text-align:left;gap:12px;padding:20px 20px 30px!important;border-radius:16px!important;background:var(--ww-surface)!important;border:1px solid var(--ww-line)!important;box-shadow:var(--dsw-elevation-soft,none);cursor:pointer;transition:border-color .15s}',
-    '.ww-tool-card:hover{border-color:var(--ww-line-2)!important}.ww-tool-card-head{display:flex;gap:12px;align-items:center}.ww-tool-card-head strong{font:600 17px/1.35 var(--ww-serif);letter-spacing:.01em;display:block;color:var(--ww-ink)}.ww-tool-card-head small{display:block;color:var(--dsw-alias-label-secondary);font-size:12px;margin-top:3px}',
+    '.ww-tool-directory{display:flex;flex-direction:column;margin:0}',
+    '.ww-tool-card{display:flex;flex-direction:column;border-bottom:1px solid var(--ww-line)}.ww-tool-card:last-child{border-bottom:0}',
+    '.ww-tool-card-head{all:unset;box-sizing:border-box;display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;column-gap:10px;width:100%;min-height:0!important;padding:11px 8px!important;border:0!important;border-radius:10px!important;background:transparent!important;box-shadow:none!important;text-align:left;font:inherit;cursor:pointer;color:var(--ww-ink)!important}.ww-tool-card-head:hover{background:var(--ww-hover,var(--ww-tint))!important}.ww-tool-card-head:focus-visible{outline:2px solid var(--ww-accent)}.ww-tool-card-title{min-width:0}.ww-tool-card-head strong{display:block;font:600 15px/1.35 var(--ww-serif);letter-spacing:.01em}.ww-tool-card-head small{display:block;margin-top:2px;font-size:12px;color:var(--dsw-alias-label-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ww-tool-card .ww-tool-icon{width:auto;height:auto;background:none}.ww-tool-count{font-size:12px;color:var(--dsw-alias-label-secondary);white-space:nowrap}.ww-tool-chev{display:inline-block;color:var(--dsw-alias-label-secondary);transition:transform .15s}.ww-tool-card-head[aria-expanded=true] .ww-tool-chev{transform:rotate(90deg)}.ww-tool-card .ww-tool-chips{padding:2px 8px 14px 36px}',
     '.ww-tool-icon{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:11px;flex:none;background:var(--ww-surface-2);color:var(--ww-ink-2)}',
     '.ww-tool-chips{display:flex;flex-wrap:wrap;gap:6px}.ww-tool-chip{min-height:0!important;font-size:12.5px!important;padding:3px 10px!important;border-radius:999px!important;border:1px solid var(--ww-line)!important;background:transparent!important;color:var(--ww-ink-2)!important;cursor:pointer}.ww-tool-chip:hover{color:var(--ww-ink)!important;border-color:var(--ww-line-2)!important;background:var(--ww-tint)!important}',
     '.ww-tool-results{display:grid;gap:6px;margin-top:16px}.ww-tool-hit{display:flex!important;align-items:center;gap:12px;text-align:left;padding:10px 14px!important;border-radius:12px!important}.ww-tool-hit .ww-tool-icon{width:32px;height:32px;border-radius:9px}.ww-tool-hit small{color:var(--dsw-alias-label-secondary);margin-left:auto}',
-    'dialog.ww-tool-modal{position:fixed;inset:0;margin:auto;display:block;box-sizing:border-box;width:min(1040px,calc(100vw - 32px));height:fit-content;min-height:0;max-height:calc(100dvh - 48px);padding:0;border:1px solid var(--ww-line-2);border-radius:20px;color:var(--ww-ink);background:var(--ww-raised);box-shadow:var(--dsw-elevation-prominent);overflow:auto}',
+    'dialog.ww-tool-modal{position:fixed;inset:0;margin:auto;display:block;box-sizing:border-box;width:min(calc(100vw - 32px),clamp(45rem,64vw,87.5rem));height:fit-content;min-height:0;max-height:calc(100dvh - 48px);padding:0;border:1px solid var(--ww-line-2);border-radius:20px;color:var(--ww-ink);background:var(--ww-raised);box-shadow:var(--dsw-elevation-prominent);overflow:auto;container:ww-tool/inline-size}',
     '.ww-tool-modal::backdrop{background:color-mix(in srgb,var(--dsw-alias-label-primary) 26%,transparent);backdrop-filter:blur(3px)}dialog.ww-tool-modal:not([open]){display:none}',
     '.ww-tool-modal header{display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid var(--ww-line);position:sticky;top:0;background:var(--ww-raised);z-index:2}.ww-tool-modal header h2{flex:1;margin:0;font:600 18px/1.3 var(--ww-serif)}',
-    '.ww-tool-layout{display:grid;grid-template-columns:200px 1fr;min-height:420px}.ww-tool-nav{display:flex;flex-direction:column;gap:2px;padding:12px;border-right:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2)}',
+    '.ww-tool-layout{display:grid;grid-template-columns:clamp(10rem,20%,15rem) minmax(0,1fr);min-height:min(26.25rem,60dvh)}.ww-tool-nav{display:flex;flex-direction:column;gap:2px;padding:12px;border-right:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2)}',
     '.ww-tool-nav button{text-align:left;padding:9px 12px!important;border-radius:10px!important;border:0!important;background:none!important;cursor:pointer;color:var(--dsw-alias-label-secondary)}.ww-tool-nav button[aria-current=true]{background:var(--dsw-alias-bg-layer-1)!important;color:var(--dsw-alias-label-primary);box-shadow:0 1px 3px var(--dsw-alias-border-l1)}.ww-tool-nav button small{display:block;font-size:11px;opacity:.8;margin-top:2px}',
     '.ww-tool-body{padding:20px 24px;display:flex;flex-direction:column;gap:14px;min-width:0}.ww-tool-body h3{font-size:16px;font-weight:500;margin:0}.ww-tool-body .ww-field{min-width:0;display:flex;flex-direction:column;gap:5px}.ww-tool-body textarea{width:100%;min-height:100px;resize:vertical}.ww-tool-body .ww-row{gap:12px;flex-wrap:wrap}',
     '.ww-tool-drop{position:relative;display:flex;flex-direction:column;align-items:center;gap:8px;padding:26px 22px;border:1.5px dashed var(--ww-line-3);border-radius:14px;text-align:center;color:var(--ww-ink-2);cursor:pointer;transition:border-color .15s,background .15s}.ww-tool-drop strong{font-size:14px;font-weight:500;color:var(--ww-ink)}.ww-tool-drop input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}.ww-tool-pick{display:inline-flex;align-items:center;height:32px;padding:0 14px;border:1px solid var(--ww-line-2);border-radius:10px;background:var(--ww-surface);color:var(--ww-ink);font-weight:500}.ww-tool-drop:hover,.ww-tool-drop.ww-file-over{border-color:var(--ww-brand);background:var(--ww-tint)}.ww-tool-drop:focus-within{outline:2px solid var(--ww-brand);outline-offset:2px}',
-    '.ww-tool-body .ww-primary{background:var(--ww-fill)!important;color:var(--ww-on-fill)!important;border:0!important;padding:8px 20px!important;border-radius:10px!important;cursor:pointer}.ww-tool-body .ww-primary:disabled{opacity:.45;cursor:default}.ww-tool-preview{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px}.ww-tool-preview img{max-height:220px;max-width:100%;border-radius:8px;border:1px solid var(--dsw-alias-border-l1);background:repeating-conic-gradient(#e5e7eb 0 25%,#fff 0 50%) 0 0/16px 16px}',
+    '.ww-tool-body .ww-primary{background:var(--ww-fill)!important;color:var(--ww-on-fill)!important;border:0!important;padding:8px 20px!important;border-radius:10px!important;cursor:pointer}.ww-tool-body .ww-primary:disabled{opacity:.45;cursor:default}.ww-tool-preview{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px}.ww-tool-preview img{max-height:min(13.75rem,30dvh);max-width:100%;border-radius:8px;border:1px solid var(--dsw-alias-border-l1);background:repeating-conic-gradient(#e5e7eb 0 25%,#fff 0 50%) 0 0/16px 16px}',
     '.ww-tool-result{border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:12px 14px;overflow-wrap:anywhere;background:var(--dsw-alias-bg-layer-2)}.ww-tool-result a{color:var(--dsw-alias-brand-primary)}',
-    '.ww-region{position:relative;display:inline-block;max-width:100%;overflow:hidden;border-radius:10px;cursor:crosshair;user-select:none;touch-action:none;align-self:flex-start}.ww-region img{display:block;max-width:100%;max-height:380px;pointer-events:none}.ww-region-box{position:absolute;border:2px dashed #fff;box-shadow:0 0 0 9999px rgba(0,0,0,.4),0 0 0 1px rgba(0,0,0,.6)}',
-    '.ww-tool-files ol{margin:0 0 8px;padding-left:22px;display:grid;gap:4px}.ww-tool-files li{display:flex;align-items:center;gap:8px}.ww-tool-files li span{flex:1;min-width:0;overflow-wrap:anywhere}.ww-tool-files li button{padding:2px 8px!important;font-size:12px}',
+    '.ww-region{position:relative;display:inline-block;max-width:100%;overflow:hidden;border-radius:10px;cursor:crosshair;user-select:none;touch-action:none;align-self:flex-start}.ww-region img{display:block;max-width:100%;max-height:min(60dvh,56.25rem);pointer-events:none}.ww-region-box{position:absolute;border:2px dashed #fff;box-shadow:0 0 0 9999px rgba(0,0,0,.4),0 0 0 1px rgba(0,0,0,.6)}',
+    '.ww-tool-files ol{margin:0 0 8px;padding-left:22px;display:grid;gap:4px}.ww-tool-files li{display:flex;align-items:center;gap:8px;border-radius:8px}.ww-tool-files li[data-dragging]{background:var(--ww-raised,var(--dsw-alias-bg-layer-1))}.ww-tool-files li span{flex:1;min-width:0;overflow-wrap:anywhere}.ww-tool-files li button{padding:2px 8px!important;font-size:12px}',
     '.ww-tool-columns{display:flex;flex-wrap:wrap;gap:6px 14px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;padding:8px 12px;margin:0}.ww-tool-columns label{display:inline-flex!important;flex-direction:row!important;align-items:center;gap:4px;cursor:pointer}.ww-tool-columns legend{font-size:12px;color:var(--dsw-alias-label-secondary);padding:0 4px}.ww-tool-join{display:flex;flex-direction:column;gap:10px}',
-    '.ww-pdf-grid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}.ww-pdf-grid li{display:flex;flex-direction:column;gap:6px;padding:8px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-2);cursor:grab;font-size:12px}.ww-pdf-grid li.ww-pdf-removed{opacity:.4}.ww-pdf-thumb{height:150px;display:flex;align-items:center;justify-content:center;overflow:hidden}.ww-pdf-thumb img{max-width:130px;max-height:130px;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .15s}.ww-pdf-actions{display:flex;gap:4px;flex-wrap:wrap}.ww-pdf-actions button{padding:2px 6px!important;font-size:12px}.ww-pdf-pages{display:flex;flex-direction:column;gap:8px}',
-    '.ww-page .ww-tool-search{flex:none;width:360px;max-width:100%;min-width:0}.ww-tool-search input{width:100%;height:36px;border-radius:10px}',
+    '.ww-pdf-grid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,150px),1fr));gap:10px}.ww-pdf-grid li{display:flex;flex-direction:column;gap:6px;padding:8px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-2);font-size:12px}.ww-pdf-caption{display:flex;align-items:center;gap:4px;min-width:0}.ww-pdf-grid li.ww-pdf-removed{opacity:.4}.ww-pdf-thumb{height:150px;display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:grab;touch-action:none}.ww-pdf-thumb img{max-width:130px;max-height:130px;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .15s}.ww-pdf-actions{display:flex;gap:4px;flex-wrap:wrap}.ww-pdf-actions button{padding:2px 6px!important;font-size:12px}.ww-pdf-pages{display:flex;flex-direction:column;gap:8px}',
+    '.ww-page .ww-tool-search{flex:0 1 auto;width:clamp(12.5rem,40cqi,26rem);max-width:100%;min-width:0}.ww-tool-search input{width:100%;height:36px;border-radius:10px}',
     '.ww-tool-gaps{margin:12px 0 0;padding-left:20px;color:var(--dsw-alias-label-secondary);font-size:13px;display:grid;gap:4px}',
     '.ww-tool-hint{display:grid;gap:4px;color:var(--ww-warn);font-size:13px}.ww-tool-hint p{margin:0;overflow-wrap:anywhere}',
-    '.ww-tool-restore{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:12px;margin:12px 0;border:1px solid var(--dsw-alias-brand-primary);border-radius:12px}.ww-tool-help{color:var(--dsw-alias-label-secondary);font-size:12px}',
-    '@media(max-width:720px){.ww-tool-layout{grid-template-columns:1fr}.ww-tool-nav{flex-direction:row;overflow-x:auto;border-right:0;border-bottom:1px solid var(--dsw-alias-border-l1)}.ww-tool-nav button{white-space:nowrap}.ww-tool-nav button small{display:none}}',
+    '.ww-tool-help{color:var(--dsw-alias-label-secondary);font-size:12px}',
+    // 关掉前问一句：放在窗口顶栏里占一整行，顶栏钉在上面，滚到哪都看得见。
+    '.ww-tool-modal header{flex-wrap:wrap}.ww-tool-ask{flex-basis:100%;display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin:2px -20px -14px;padding:10px 20px;border-top:1px solid var(--ww-line);background:color-mix(in srgb,var(--ww-warn) 8%,var(--ww-raised));font-size:13px}.ww-tool-ask .ww-grow{flex:1}',
+    // 全部功能项抽屉（2026-11-12）：从右侧拉出，宽度跟着窗口，分类卡片一列一张，标签照常换行。
+    '.ww-tool-scrim{position:fixed;inset:0;z-index:1099;background:color-mix(in srgb,var(--dsw-alias-label-primary) 18%,transparent)}',
+    '.ww-tool-drawer{position:fixed;z-index:1100;top:var(--dsh-frame-top-clearance,0px);right:0;bottom:0;width:min(100%,clamp(22rem,36vw,34rem));box-sizing:border-box;padding:16px 18px 20px;overflow:auto;display:flex;flex-direction:column;gap:12px;background:var(--ww-raised);border-left:1px solid var(--ww-line-2);box-shadow:var(--dsw-elevation-prominent);container:ww-tool-shelf/inline-size}',
+    '.ww-tool-shelf-head{display:flex;align-items:flex-start;gap:12px}.ww-tool-shelf-head>div{flex:1;min-width:0}.ww-tool-shelf-head h2{margin:0;font:600 18px/1.3 var(--ww-serif)}.ww-tool-shelf-head p{margin:3px 0 0;color:var(--dsw-alias-label-secondary);font-size:12px}',
+    '.ww-tool-drawer .ww-tool-search,.ww-tool-inline .ww-tool-search{width:100%}',
+    '.ww-tool-inline{display:flex;flex-direction:column;gap:12px}',
+    '@container ww-tool (max-width:43rem){.ww-tool-layout{grid-template-columns:minmax(0,1fr)}.ww-tool-nav{flex-direction:row;overflow-x:auto;border-right:0;border-bottom:1px solid var(--dsw-alias-border-l1)}.ww-tool-nav button{white-space:nowrap}.ww-tool-nav button small{display:none}}',
     'html:is([data-platform=darwin],[data-windows-titlebar]) .ww-tool-modal{padding-top:0;max-height:calc(100dvh - var(--dsh-frame-top-clearance,0px) - 48px)}',
   ].join('');
 
@@ -219,13 +230,19 @@ export function createUtilityViews(React, workerSource) {
   }
 
   /** 一个功能项的输入、参数与结果；切换功能项时整体重建，避免上一项的选件和结果串到下一项。 */
-  function FunctionPanel({ item, active, runnerRef }) {
+  function FunctionPanel({ item, active, runnerRef, onStatus }) {
     const [files, setFiles] = React.useState([]), [text, setText] = React.useState(''), [sheet, setSheet] = React.useState('');
     // 图片默认保持原尺寸；三种处理方式各有自己的输出格式，切换方式不互相覆盖。
     const [settings, setSettings] = React.useState({ mode: item.mode || 'convert', convertFormat: 'png', compressFormat: 'jpeg', editFormat: 'keep', quality: 90, maxEdge: '', target: 'quality', targetKB: 500, resizeWidth: '', resizeHeight: '', keepRatio: true, operation: 'dedupe', conversion: 'excel-csv', other: '', angle: 90, flip: 'none', x: 0, y: 0, width: 0, height: 0, direction: 'vertical', watermark: '', fontSize: 24, opacity: 0.5, position: 'bottom-right', pages: '', columns: '', match: 'equals', value: '', sortType: 'text', order: 'asc', find: '', replacement: '', block: 14, rows: 3, gridColumns: 3, size: 512, level: 'M', start: 0, end: '', times: '每 5 秒', preset: 'standard', splitOutput: 'files', leftTable: '', rightTable: '', leftKey: '', rightKey: '', joinColumns: [], joinType: 'left', ignoreCase: false, numericKey: false });
     const [state, setState] = React.useState({ busy: false, error: '', notice: '', result: null, sheets: [], tables: [], thumbs: [] });
     // 页面整理的逐页布局：原页码、追加旋转、是否删除；顺序即输出顺序。
-    const [layout, setLayout] = React.useState([]), dragging = React.useRef(null);
+    const [layout, setLayout] = React.useState([]);
+    // 调顺序（2026-11-13 用户定：不要一格一格挪的按钮和箭头，按住小块前面的小点拖到哪放到哪；全产品共用，见 src/sortable.js）。
+    // 文件没有自己的标识，按对象给一个只在这次打开里有效的号，拖的时候认得出是哪一个。
+    const fileIds = React.useRef(null), fileSeq = React.useRef(0);
+    const fileId = file => { const ids = fileIds.current ||= new WeakMap(); if (!ids.has(file)) ids.set(file, ++fileSeq.current); return ids.get(file); };
+    const fileSort = useSortable({ axis: 'y', order: files.map(fileId), disabled: state.busy, move: (id, index) => setFiles(previous => moveItem(previous, previous.findIndex(file => fileId(file) === id), index)) });
+    const pageSort = useSortable({ axis: 'x', order: layout.map(entry => entry.page), disabled: state.busy, move: (page, index) => setLayout(previous => moveItem(previous, previous.findIndex(entry => entry.page === page), index)) });
     // 文件可以直接拖进选文件区；拖动经过时给出提示。
     const [fileOver, setFileOver] = React.useState(false);
     const runner = React.useRef(null), fileInput = React.useRef(null), activeRef = React.useRef(active), ran = React.useRef({ files: [], positions: [] });
@@ -235,7 +252,12 @@ export function createUtilityViews(React, workerSource) {
       runner.current = instance; if (runnerRef) runnerRef.current = instance;
       return () => instance.dispose();
     }, []);
-    React.useEffect(() => { if (!active) runner.current?.cancel(); }, [active]);
+    // 员工切到别的页签时处理照常做完（2026-11-14 用户定方案 A：做好了右上角提示、页签上标点；原来一切走就停）。
+    // 结果下载过没有：点过这份结果的下载链接就算下载了，换了新结果重新算。
+    const [taken, setTaken] = React.useState(null);
+    const kind = state.busy ? 'running' : state.error ? 'failed' : state.result ? (taken === state.result ? 'saved' : 'done') : 'idle';
+    const progressDone = state.busy ? state.progress?.done : undefined, progressTotal = state.busy ? state.progress?.total : undefined;
+    React.useEffect(() => { onStatus?.({ kind, progress: progressTotal ? { done: progressDone, total: progressTotal } : null, error: kind === 'failed' ? state.error : '' }); }, [kind, progressDone, progressTotal]);
     React.useEffect(() => { if (item.id === 'excel-join') runner.current?.clearSheets(); }, [files]);
     React.useEffect(() => { setLayout((state.thumbs || []).map(thumb => ({ page: thumb.page, rotate: 0, removed: false }))); }, [state.thumbs]);
     // 读到表头后默认第一张为主表、第二张为查找表，关键列默认各自首列，避免下拉框显示的值与实际提交不一致。
@@ -265,6 +287,8 @@ export function createUtilityViews(React, workerSource) {
       const options = { ...settings, format: imageFormat, quality: settings.quality / 100, sheetName: sheet, columns: item.id === 'image-grid' ? settings.gridColumns : settings.columns, positions: override.positions, layout: item.id === 'pdf-pages' && !chosen ? layout.filter(entry => !entry.removed).map(({ page, rotate }) => ({ page, rotate })) : undefined };
       if (item.audio) return runner.current.prepare(() => decodeAudio(files[0], item.trim ? { start: settings.start, end: settings.end } : {}), pcm => ({ tool: 'audio-encode', files: [], text: '', options: { pcm: { sampleRate: pcm.sampleRate, channels: pcm.channels }, name: files[0].name } }));
       if (item.video) return runner.current.prepare(() => captureFrames(files[0], settings.times));
+      // Office 转 PDF 用 DSH 自带的转换（2026-11-12）：文件交给主机，结果和其他功能项一样显示。
+      if (item.office) return runner.current.prepare(() => { if (typeof services.officePdf !== 'function') throw new Error('办公工坊还没连上主机，转不了 PDF'); return services.officePdf(files[0]); });
       ran.current = { files: chosenFiles, positions: override.positions || chosenFiles.map((_, i) => i) };
       runner.current.run({ tool: chosen || tool, files: chosenFiles, text, options }, { append: !!override.append });
     };
@@ -272,7 +296,6 @@ export function createUtilityViews(React, workerSource) {
     const pagesReady = item.id !== 'pdf-pages' || layout.some(entry => !entry.removed);
     const ready = !state.busy && active && (!item.accept || files.length > 0 || item.id === 'text' && text) && (!excel || sheet) && (!item.region || settings.width > 0 && settings.height > 0) && (!usesText || item.accept || text.trim()) && joinReady && pagesReady;
     const clearFiles = () => { if (fileInput.current) fileInput.current.value = ''; setFiles([]); setSheet(''); runner.current.clearSheets(); runner.current.clearThumbs(); };
-    const moveFile = (index, step) => setFiles(previous => { const next = previous.slice(); [next[index], next[index + step]] = [next[index + step], next[index]]; return next; });
     // 只重试失败项：失败序号对应上一轮实际提交的文件，沿用原序号命名，结果接在已有下载后面。
     const retryFailed = () => {
       const failed = state.result.failed.filter(index => ran.current.files[index]);
@@ -316,21 +339,18 @@ export function createUtilityViews(React, workerSource) {
         state.tables.length > 0 && h('div', { className: 'ww-row' }, select('joinType', '关联方式', [['left', '保留主表全部行（没匹配到的留空）'], ['inner', '只保留两边都有的行']]),
           h('label', { className: 'ww-field' }, '关键值比较', h('span', null, h('input', { type: 'checkbox', checked: settings.ignoreCase, disabled: state.busy, onChange: event => update('ignoreCase', event.target.checked) }), ' 忽略大小写　', h('input', { type: 'checkbox', checked: settings.numericKey, disabled: state.busy, onChange: event => update('numericKey', event.target.checked) }), ' 数字按数值比较（001 = 1）'))));
     };
-    const movePage = (from, to) => setLayout(previous => { if (from === to || from == null || to < 0 || to >= previous.length) return previous; const next = previous.slice(), [entry] = next.splice(from, 1); next.splice(to, 0, entry); return next; });
     const changePage = (index, patch) => setLayout(previous => previous.map((entry, i) => i === index ? { ...entry, ...patch(entry) } : entry));
-    /** 页面缩略图：拖动或用按钮调整顺序，逐页旋转、删除（可恢复）。 */
+    /** 页面缩略图：按住缩略图或它前面的小点拖动调整顺序，逐页旋转、删除（可恢复）。 */
     const pageGrid = () => {
       const thumbs = new Map(state.thumbs.map(thumb => [thumb.page, thumb])), kept = layout.filter(entry => !entry.removed).length;
       return h('div', { className: 'ww-pdf-pages' },
-        h('div', { className: 'ww-row' }, h('small', { className: 'ww-tool-help' }, `拖动缩略图调整顺序，或用按钮移动、旋转、删除；将保留 ${kept} / ${layout.length} 页`), h('button', { type: 'button', disabled: state.busy, onClick: () => setLayout(state.thumbs.map(thumb => ({ page: thumb.page, rotate: 0, removed: false }))) }, '恢复原样')),
-        h('ol', { className: 'ww-pdf-grid' }, layout.map((entry, index) => {
+        h('div', { className: 'ww-row' }, h('small', { className: 'ww-tool-help' }, `按住缩略图或页码前面的小点拖动，调整顺序；可以逐页旋转、删除；将保留 ${kept} / ${layout.length} 页`), h('button', { type: 'button', disabled: state.busy, onClick: () => setLayout(state.thumbs.map(thumb => ({ page: thumb.page, rotate: 0, removed: false }))) }, '恢复原样')),
+        h('ol', { ...pageSort.list, className: 'ww-pdf-grid' }, layout.map((entry, index) => {
           const thumb = thumbs.get(entry.page), label = `原第 ${entry.page + 1} 页`;
-          return h('li', { key: entry.page, className: entry.removed ? 'ww-pdf-removed' : '', draggable: !state.busy, onDragStart: event => { dragging.current = index; if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'; }, onDragOver: event => event.preventDefault(), onDrop: event => { event.preventDefault(); movePage(dragging.current, index); dragging.current = null; } },
-            h('div', { className: 'ww-pdf-thumb' }, thumb && h('img', { src: thumb.url, alt: label, draggable: false, style: { transform: `rotate(${entry.rotate}deg)` } })),
-            h('span', null, `${index + 1}. ${label}${entry.rotate ? ` · 转 ${entry.rotate}°` : ''}`),
+          return h('li', { key: entry.page, className: entry.removed ? 'ww-pdf-removed' : '', ...pageSort.item(entry.page) },
+            h('div', { className: 'ww-pdf-thumb', onPointerDown: event => pageSort.start(event, entry.page) }, thumb && h('img', { src: thumb.url, alt: label, draggable: false, style: { transform: `rotate(${entry.rotate}deg)` } })),
+            h('span', { className: 'ww-pdf-caption' }, pageSort.grip(entry.page, { label: `拖动${label}调整顺序，也可以按左右方向键`, title: '按住拖动，换位置' }), `${index + 1}. ${label}${entry.rotate ? ` · 转 ${entry.rotate}°` : ''}`),
             h('div', { className: 'ww-pdf-actions' },
-              h('button', { type: 'button', disabled: state.busy || index === 0, onClick: () => movePage(index, index - 1), 'aria-label': `${label}前移` }, '←'),
-              h('button', { type: 'button', disabled: state.busy || index === layout.length - 1, onClick: () => movePage(index, index + 1), 'aria-label': `${label}后移` }, '→'),
               h('button', { type: 'button', disabled: state.busy || entry.removed, onClick: () => changePage(index, current => ({ rotate: (current.rotate + 90) % 360 })), 'aria-label': `${label}顺时针旋转` }, '旋转'),
               h('button', { type: 'button', disabled: state.busy, onClick: () => changePage(index, current => ({ removed: !current.removed })), 'aria-label': `${entry.removed ? '恢复' : '删除'}${label}` }, entry.removed ? '恢复' : '删除')));
         })));
@@ -344,10 +364,9 @@ export function createUtilityViews(React, workerSource) {
         h('strong', null, item.multiple ? '把文件拖到这里，可以一次放多个' : '把文件拖到这里'), h('span', { className: 'ww-tool-pick', 'aria-hidden': true }, item.multiple ? '选择文件' : '选择文件'),
         h('input', { ref: fileInput, key: tool, type: 'file', accept, multiple: !!item.multiple, disabled: state.busy, onChange: event => choose(Array.from(event.target.files || [])) }), h('small', null, `支持 ${accept.split(',').join(' ')}`)),
       files.length > 0 && (item.multiple ? h('div', { className: 'ww-tool-files' },
-        // 多选时可调整顺序、单独移除或继续添加；顺序即处理和合并的顺序。
-        h('ol', null, files.map((file, index) => h('li', { key: `${index}-${file.name}` }, h('span', null, file.name),
-          h('button', { type: 'button', disabled: state.busy || index === 0, onClick: () => moveFile(index, -1), 'aria-label': `上移 ${file.name}` }, '上移'),
-          h('button', { type: 'button', disabled: state.busy || index === files.length - 1, onClick: () => moveFile(index, 1), 'aria-label': `下移 ${file.name}` }, '下移'),
+        // 多选时可拖动调整顺序、单独移除或继续添加；顺序即处理和合并的顺序。
+        h('ol', { ...fileSort.list }, files.map((file, index) => h('li', { key: fileId(file), ...fileSort.item(fileId(file)) },
+          fileSort.grip(fileId(file), { label: `拖动 ${file.name} 调整顺序，也可以按上下方向键`, title: '按住拖动，换位置' }), h('span', null, file.name),
           h('button', { type: 'button', disabled: state.busy, onClick: () => setFiles(previous => previous.filter((_, i) => i !== index)), 'aria-label': `移除 ${file.name}` }, '移除')))),
         h('div', { className: 'ww-row' }, h('label', { className: 'ww-field' }, '继续添加', h('input', { type: 'file', accept, multiple: true, disabled: state.busy, onChange: event => { const more = Array.from(event.target.files || []); event.target.value = ''; setFiles(previous => [...previous, ...more]); } })), h('button', { type: 'button', disabled: state.busy, onClick: clearFiles }, '清除选件')))
         : h('div', { className: 'ww-row' }, h('span', null, files.map(file => file.name).join('；')), h('button', { type: 'button', disabled: state.busy, onClick: clearFiles }, '清除选件'))),
@@ -383,7 +402,7 @@ export function createUtilityViews(React, workerSource) {
       item.video && input('times', '截图时间点', '如“1, 5.5, 10”或“每 5 秒”'),
       h('div', { className: 'ww-row' }, h('button', { type: 'button', className: 'ww-primary', disabled: !ready, onClick: () => run() }, '开始处理'), state.busy && h('button', { type: 'button', onClick: () => runner.current.cancel() }, '取消')),
       h('div', { 'aria-live': 'polite' }, state.busy && h('span', { role: 'status' }, state.progress ? `正在处理第 ${state.progress.done + 1} / ${state.progress.total} 个，可随时取消` : copy.running), state.error && h('p', { role: 'alert' }, state.error), state.notice && h('p', { role: 'status' }, state.notice)),
-      state.result && h('section', { className: 'ww-tool-result' }, h('strong', null, state.result.summary), h('div', { className: 'ww-row' }, state.result.files.map(file => h('a', { key: file.url, href: file.url, download: file.name }, '下载 ' + file.name))),
+      state.result && h('section', { className: 'ww-tool-result' }, h('strong', null, state.result.summary), h('div', { className: 'ww-row' }, state.result.files.map(file => h('a', { key: file.url, href: file.url, download: file.name, onClick: () => setTaken(state.result) }, '下载 ' + file.name))),
         (state.result.files.length > 1 && !state.result.files.some(file => file.mime === 'application/zip') || state.result.failed?.length > 0) && h('div', { className: 'ww-row' },
           state.result.files.length > 1 && !state.result.files.some(file => file.mime === 'application/zip') && h('button', { type: 'button', disabled: state.busy, onClick: pack }, '全部打包下载（ZIP）'),
           state.result.failed?.length > 0 && h('button', { type: 'button', disabled: state.busy, onClick: retryFailed }, `只重试失败的 ${state.result.failed.length} 个`)),
@@ -391,8 +410,13 @@ export function createUtilityViews(React, workerSource) {
         state.result.files.some(file => file.mime?.startsWith('image/')) && h('div', { className: 'ww-tool-preview' }, state.result.files.filter(file => file.mime?.startsWith('image/')).slice(0, 6).map(file => h('img', { key: file.url, src: file.url, alt: file.name }))), state.result.listing.length > 0 && h('details', null, h('summary', null, '处理明细'), h('ul', null, state.result.listing.map((line, i) => h('li', { key: i }, line))))));
   }
 
-  function ToolWindow({ tool, initial, request, active, minimized, onMinimize, onClose }) {
-    const [current, setCurrent] = React.useState(initial || tool.functions[0].id), [dialogError, setDialogError] = React.useState('');
+  /**
+   * 功能项窗口（2026-11-14 用户看了原型定方案 A）：“最小化”是收起不是关，点窗口外面、按 Esc 也是收起；
+   * 收起后的入口是办公工坊页头上的胶囊（由页面画），这里不再往页面里插“恢复”一行。
+   * 只有点“关闭”才关；还在处理或结果没下载时先在窗口里问一句（asking），员工点“仍然关闭”才关。
+   */
+  function ToolWindow({ tool, initial, request, active, minimized, onMinimize, onClose, onStatus, asking, onAsk, onCancelClose }) {
+    const [current, setCurrent] = React.useState(initial || tool.functions[0].id), [dialogError, setDialogError] = React.useState(''), [status, setStatus] = React.useState({ kind: 'idle' });
     const modal = React.useRef(null), panelRunner = React.useRef(null);
     // 同一分类内从目录点另一个功能项：保持窗口，只切换功能项。
     React.useEffect(() => { if (initial) setCurrent(initial); }, [request]);
@@ -407,50 +431,104 @@ export function createUtilityViews(React, workerSource) {
     }, [active, minimized]);
     // 关闭即终止任务并释放下载，不等组件卸载。
     const closeWindow = () => { modal.current?.close(); panelRunner.current?.dispose(); onClose(); };
-    // 对话框固定为第一个子节点，最小化时出现的恢复条不改变其位置，面板与任务保持不变。
+    // 进度连同功能项名字报给页面（页头胶囊、做好了的提示、页签上的点都看它）。
+    const report = next => { setStatus(next); onStatus?.({ ...next, title: item.title }); };
+    const minimize = () => { onCancelClose?.(); onMinimize(true); };
+    const askText = status.kind === 'running' ? '还在处理，关掉窗口就停了，放进来的文件也要重新放。' : '做好的结果还没下载，关掉窗口就没了。';
     return h(React.Fragment, null,
-      h('dialog', { ref: modal, className: 'ww-tool-modal', 'aria-label': tool.title, onCancel: event => { event.preventDefault(); closeWindow(); }, onClick: event => { if (event.target === event.currentTarget) { const rect = event.currentTarget.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) closeWindow(); } } },
-        h('header', null, h(ToolIcon, { tool, size: 18 }), h('h2', null, tool.title), h('button', { type: 'button', onClick: () => onMinimize(true), 'aria-label': '最小化窗口' }, '最小化'), h('button', { type: 'button', onClick: closeWindow, 'aria-label': '关闭窗口' }, '关闭')),
+      h('dialog', { ref: modal, className: 'ww-tool-modal', 'aria-label': tool.title, onCancel: event => { event.preventDefault(); if (asking) onCancelClose?.(); else minimize(); }, onClick: event => { if (event.target === event.currentTarget) { const rect = event.currentTarget.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) minimize(); } } },
+        h('header', null, h(ToolIcon, { tool, size: 18 }), h('h2', null, tool.title), h('button', { type: 'button', onClick: minimize, 'aria-label': '最小化窗口', title: '收起来，输入和结果都留着' }, '最小化'), h('button', { type: 'button', onClick: () => (status.kind === 'running' || status.kind === 'done') && onAsk ? onAsk() : closeWindow(), 'aria-label': '关闭窗口' }, '关闭'),
+          asking && h('div', { className: 'ww-tool-ask', role: 'alertdialog', 'aria-label': '关闭窗口' }, h('span', null, askText), h('span', { className: 'ww-grow' }),
+            h('button', { type: 'button', className: 'ww-chip', onClick: closeWindow }, '仍然关闭'), h('button', { type: 'button', className: 'ww-primary', autoFocus: true, onClick: onCancelClose }, '先不关'))),
         h('div', { className: 'ww-tool-layout' },
           h('nav', { className: 'ww-tool-nav', 'aria-label': `${tool.title}的功能项` }, tool.functions.map(entry => h('button', { type: 'button', key: entry.id, 'aria-current': entry.id === item.id, onClick: () => setCurrent(entry.id) }, entry.title, h('small', null, entry.brief)))),
-          h(FunctionPanel, { key: item.id, item, active, runnerRef: panelRunner }))),
-      active && minimized && h('div', { className: 'ww-tool-restore' }, h('span', null, `${tool.title} · ${item.title}`), h('div', { className: 'ww-row' }, h('button', { type: 'button', onClick: () => onMinimize(false) }, '恢复'), h('button', { type: 'button', onClick: closeWindow }, '关闭窗口'))),
+          h(FunctionPanel, { key: item.id, item, active, runnerRef: panelRunner, onStatus: report }))),
       dialogError && h('p', { role: 'alert' }, dialogError));
   }
 
-  function ToolboxView({ active = true }) {
+  /**
+   * 全部功能项（2026-11-12 用户定）：从办公工坊页右侧拉出的抽屉，每个分类一张卡片，下面列出它的功能项标签；
+   * 点一个标签就关掉抽屉、打开那个功能项的窗口。窗口和里面的结果由这里持有，抽屉关上也不丢。
+   * 单独使用（没有 onClose）时内容直接铺在页面里。
+   */
+  function ToolboxView({ active = true, open: shelfOpen = true, onClose, onDock, host = {} }) {
     const [query, setQuery] = React.useState(''), [opened, setOpened] = React.useState(null), [minimized, setMinimized] = React.useState(false);
+    // 窗口里功能项的进度（页头胶囊、做好了的提示、页签上的点都看它）和“关掉前先问一句”。
+    const [status, setStatus] = React.useState(null), [asking, setAsking] = React.useState(false);
+    // 展开了哪些分类：默认都收起，分类多了也不占地方；抽屉关上再打开还是上次的样子。
+    const [expanded, setExpanded] = React.useState([]);
+    const toggle = id => setExpanded(previous => previous.includes(id) ? previous.filter(value => value !== id) : [...previous, id]);
     const opener = React.useRef(null), directory = React.useRef(null), pendingFocus = React.useRef(null);
     React.useEffect(() => {
       if (pendingFocus.current && !opened) { directory.current?.querySelector(`[data-tool-id="${pendingFocus.current}"]`)?.focus(); pendingFocus.current = null; }
     }, [opened, query]);
     const close = () => {
       const previous = opener.current, toolId = opened?.tool.id; opener.current = null;
-      setOpened(null); setMinimized(false);
+      setOpened(null); setMinimized(false); setStatus(null); setAsking(false);
       if (previous?.isConnected !== false && (!previous?.getClientRects || previous.getClientRects().length)) previous?.focus();
       else { pendingFocus.current = toolId; setQuery(''); }
     };
+    // 还在处理、做好了没下载时先问；从页头胶囊上点 × 也一样，先把窗口打开让员工看到要丢的是什么。
+    const ask = () => { setMinimized(false); setAsking(true); };
+    const requestClose = () => { const kind = status?.kind; if (kind === 'running' || kind === 'done') ask(); else close(); };
+    const restore = () => { setMinimized(false); host.openPage?.(); };
+    // 收起后的入口交给页面画在页头（2026-11-14 用户定方案 A）。
+    React.useEffect(() => { onDock?.(opened && minimized ? { tool: opened.tool, title: status?.title || '', status: status || { kind: 'idle' }, restore, requestClose } : null); }, [opened, minimized, status]);
+    // 收起了或员工在别的页签时做好了（或没做成）：右上角提示一句，能直接回来看。
+    const lastKind = React.useRef('idle'), away = React.useRef(false), noticed = React.useRef(0);
+    away.current = minimized || !active;
+    React.useEffect(() => {
+      const kind = status?.kind ?? 'idle', before = lastKind.current;
+      lastKind.current = kind;
+      if (before !== 'running' || !opened || !away.current || !host.notify) return;
+      const go = { label: '去看看', run: restore };
+      noticed.current = Date.now();
+      if (kind === 'done') host.notify(`「${status.title}」做好了，结果还没下载`, { duration: 10000, action: go });
+      else if (kind === 'failed') host.notify(`「${status.title}」没做成：${status.error || '请回去看看'}`, { kind: 'error', action: go });
+    }, [status?.kind]);
+    // 员工回来看窗口了（恢复、或回到这一页时窗口开着）：刚才那条“做好了”的提示收掉，免得盖在窗口右上角的按钮上。
+    // 只收自己 10 秒内发的那条（提示本身 10 秒后也会自己收起），不碰别的功能后来发的提示。
+    React.useEffect(() => {
+      if (active && !minimized && noticed.current && Date.now() - noticed.current < 10000) host.notify?.(null);
+      if (active && !minimized) noticed.current = 0;
+    }, [active, minimized]);
+    // 不在办公工坊页时，页头的办公工坊页签上标个点：处理中、做好了没下载、没做成；回来就消失。
+    const mark = opened && !active ? ({ running: ['busy', '办公工坊：还在处理'], done: ['done', '办公工坊：做好了，结果还没下载'], failed: ['failed', '办公工坊：没做成'] })[status?.kind] : null;
+    React.useEffect(() => { host.setAttention?.(mark ? { tone: mark[0], label: mark[1] } : null); }, [mark?.[0]]);
+    React.useEffect(() => () => host.setAttention?.(null), []);
     const open = (tool, functionId, event) => {
       if (opened && opened.tool.id !== tool.id && !globalThis.confirm('关闭当前窗口并清除其中的输入和下载结果，打开另一个分类？')) return;
       if (!opened || opened.tool.id !== tool.id) opener.current = event?.currentTarget ?? null;
+      if (!opened || opened.tool.id !== tool.id) { setStatus(null); setAsking(false); }
       setOpened(previous => ({ tool, functionId, request: (previous?.request ?? 0) + 1 })); setMinimized(false);
+      onClose?.();
     };
     const keyword = query.trim();
     const hits = keyword ? searchUtilities(keyword) : [], gaps = keyword ? utilityGapsFor(keyword) : [];
-    return h('section', { hidden: !active, 'aria-label': copy.title },
-      h('style', null, css),
-      h('header', { className: 'ww-pagehead' }, h('div', null, h('h2', null, copy.title), h('p', null, `${tools.reduce((sum, tool) => sum + tool.functions.length, 0)} 项本机处理 · 文件不离开这台电脑`)),
-        h('div', { className: 'ww-pagehead-actions' }, h('label', { className: 'ww-field ww-tool-search' }, h('input', { type: 'search', value: query, placeholder: '搜索功能项或格式，如“PDF 合并”“AVIF”“转 WAV”', 'aria-label': copy.search, onChange: event => setQuery(event.target.value) })))),
-      opened && h(ToolWindow, { key: opened.tool.id, tool: opened.tool, initial: opened.functionId, request: opened.request, active, minimized, onMinimize: setMinimized, onClose: close }),
+    const total = tools.reduce((sum, tool) => sum + tool.functions.length, 0);
+    const shelf = h('aside', { className: onClose ? 'ww-tool-drawer' : 'ww-tool-inline', role: onClose ? 'dialog' : undefined, 'aria-label': '全部功能项' },
+      h('header', { className: 'ww-tool-shelf-head' }, h('div', null, h('h2', null, '全部功能项'), h('p', null, `${total} 项 · 知道要用哪个就自己点开用，不经过小鲸，不花 token`)),
+        onClose && h('button', { type: 'button', className: 'ww-chip', onClick: onClose }, '关闭')),
+      h('label', { className: 'ww-field ww-tool-search' }, h('input', { type: 'search', value: query, placeholder: '搜索功能项或格式，如“PDF 合并”“AVIF”“转 WAV”', 'aria-label': copy.search, onChange: event => setQuery(event.target.value) })),
       keyword ? h('div', null, hits.length ? h('div', { className: 'ww-tool-results' }, hits.map(({ tool, item }) => h('button', { type: 'button', key: item.id, className: 'ww-tool-hit', 'data-tool-id': tool.id, onClick: event => open(tool, item.id, event), 'aria-haspopup': 'dialog' }, h(ToolIcon, { tool, size: 16 }), h('span', null, item.title), h('small', null, `${tool.title} · ${item.brief}`))))
         : h('p', { role: 'status' }, copy.empty),
         // 搜到尚未内置的能力时如实说明，不让搜索结果显得像已有支持。
         gaps.length > 0 && h('ul', { className: 'ww-tool-gaps', 'aria-label': '尚未内置' }, gaps.map(text => h('li', { key: text }, text))))
-        : h('div', { ref: directory, className: 'ww-grid ww-tool-directory' }, tools.map(tool => h('div', { key: tool.id, className: 'ww-tool-card' },
-          h('button', { type: 'button', className: 'ww-tool-card-head', 'data-tool-id': tool.id, onClick: event => open(tool, null, event), 'aria-haspopup': 'dialog', 'aria-label': tool.title, style: { all: 'unset', display: 'flex', gap: '12px', alignItems: 'center', cursor: 'pointer' } }, h(ToolIcon, { tool }), h('span', null, h('strong', null, tool.title), h('small', null, `${tool.brief} · `, h('span', { style: { whiteSpace: 'nowrap' } }, `${tool.functions.length} 个功能项`)))),
-          h('div', { className: 'ww-tool-chips' }, tool.functions.map(item => h('button', { type: 'button', key: item.id, className: 'ww-tool-chip', onClick: event => open(tool, item.id, event), 'aria-label': `${tool.title}：${item.title}` }, item.title))),
-          // 分类卡底边一道水纹，和专家卡同一种点缀（2026-11-02 补齐设计稿）。
-          h('i', { className: 'ww-orn-wave', 'aria-hidden': true })))));
+        : h('div', { ref: directory, className: 'ww-tool-directory' }, tools.map(tool => {
+          const isOpen = expanded.includes(tool.id);
+          return h('div', { key: tool.id, className: 'ww-tool-card' },
+            h('button', { type: 'button', className: 'ww-tool-card-head', 'data-tool-id': tool.id, 'aria-expanded': isOpen, 'aria-label': `${tool.title}，${tool.functions.length} 个功能项`, onClick: () => toggle(tool.id) },
+              h(ToolIcon, { tool, size: 18 }), h('span', { className: 'ww-tool-card-title' }, h('strong', null, tool.title), h('small', null, tool.brief)),
+              h('span', { className: 'ww-tool-count' }, `${tool.functions.length} 个`), h('span', { className: 'ww-tool-chev', 'aria-hidden': true }, '›')),
+            isOpen && h('div', { className: 'ww-tool-chips' }, tool.functions.map(item => h('button', { type: 'button', key: item.id, className: 'ww-tool-chip', onClick: event => open(tool, item.id, event), 'aria-label': `${tool.title}：${item.title}` }, item.title))));
+        })));
+    return h('section', { hidden: !active, 'aria-label': copy.title },
+      h('style', null, css),
+      opened && h(ToolWindow, { key: opened.tool.id, tool: opened.tool, initial: opened.functionId, request: opened.request, active, minimized, onMinimize: setMinimized, onClose: close, onStatus: setStatus, asking, onAsk: ask, onCancelClose: () => setAsking(false) }),
+      shelfOpen && (onClose ? h(React.Fragment, null, h('div', { className: 'ww-tool-scrim', onClick: onClose }), shelf) : shelf));
   }
-  return { ToolboxView };
+
+  // 办公工坊页（2026-11-12 改版）：文件交给小鲸；原来的分类卡片和功能窗口收进“全部功能项”。
+  const WorkshopView = createWorkshopView(React, { workerSource, ToolboxView, RegionPicker, validateResult, services });
+  return { ToolboxView, WorkshopView };
 }

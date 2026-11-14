@@ -67,3 +67,13 @@ export function storedExperts(home) {
 
 /** 按名字找专家记录。 */
 export const storedByName = (home, name) => Object.values(storedExperts(home)).find(record => record.name === name);
+
+/** 员工的“选用 / 放回”记号和天数存在 storages/whalewing_expert_roster.json（DSH 存储域 whalewing_expert_roster）。 */
+export const rosterFile = home => path.join(home, 'storages', 'whalewing_expert_roster.json');
+
+/** 读出 { marks: { 标识: { state, at } }, idleDays }；还没写过时是空记号、天数 undefined。 */
+export function storedRoster(home) {
+  let tables = {};
+  try { tables = JSON.parse(fs.readFileSync(rosterFile(home), 'utf8')).tables ?? {}; } catch (error) { if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error; }
+  return { marks: tables.marks ?? {}, idleDays: tables.settings?.idleDays?.value };
+}

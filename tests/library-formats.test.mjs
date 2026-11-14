@@ -6,7 +6,7 @@ import { PDFDocument } from 'pdf-lib';
 import { parseBook, rtfText, imageType } from '../features/cards/library/formats.js';
 import { decodeBookText, textBook, splitMarkdown } from '../features/cards/library/text.js';
 import { markupToMarkdown, parseMarkup } from '../features/cards/library/html.js';
-import { wordPdf } from '../src/utilities/pdf.js';
+import { renderDefinition } from '../src/utilities/pdf.js';
 
 const utf8 = text => new TextEncoder().encode(text);
 const png = Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64'));
@@ -128,8 +128,8 @@ test('DOCX：按标题样式分章，保留加粗、表格和图片', async () =
 test('PDF：提取中文文字并连成段落，没有书签时每 10 页一章；扫描件和加密件给出说明', async () => {
   const children = [new Paragraph({ text: '第一章 PDF 测试', heading: HeadingLevel.HEADING_1 })];
   for (let i = 0; i < 160; i++) children.push(new Paragraph(`第${i}段。${'项目管理需要明确目标、范围和验收标准，团队才知道往哪里走。'.repeat(4)}`));
-  const docx = new Uint8Array(await Packer.toBuffer(new Document({ sections: [{ children }] })));
-  const pdf = (await wordPdf(docx, 'book.docx')).files[0].bytes;
+  // Word 转 PDF 改用 DSH 自带的转换后（2026-11-12），测试用的中文 PDF 直接用随包字体排出来。
+  const pdf = await renderDefinition({ content: [{ text: '第一章 PDF 测试', fontSize: 18 }, ...Array.from({ length: 160 }, (_, i) => ({ text: `第${i}段。${'项目管理需要明确目标、范围和验收标准，团队才知道往哪里走。'.repeat(4)}`, margin: [0, 0, 0, 6] }))] });
   const book = await parseBook(pdf, 'book.pdf');
   assert.equal(book.format, 'PDF');
   assert.ok(book.chapters.length >= 2, '多于 10 页时分成多章');

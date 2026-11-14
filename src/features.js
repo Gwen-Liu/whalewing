@@ -2,14 +2,18 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { fail } from './vault.js';
-import { parts } from '../features/index.js';
+import { parts, navGroups } from '../features/index.js';
 
 const packageName = z.string().regex(/^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/).max(214);
 const manifestSchema = z.strictObject({
   id: z.string().regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/).max(80),
   api: z.number().int(), package: packageName,
   skills: z.array(z.string().refine(path.isAbsolute, '技能目录必须是绝对路径')).max(100).default([]),
-  tab: z.strictObject({ placement: z.literal('end').optional(), keepAlive: z.literal(true).optional(), icon: z.string().max(65536).optional() }).optional(),
+  tab: z.strictObject({
+    placement: z.literal('end').optional(), keepAlive: z.literal(true).optional(), icon: z.string().max(65536).optional(),
+    // “全部功能”里放在哪一组、名字下面那句用途（也用来搜）。
+    group: z.enum(navGroups).optional(), summary: z.strictObject({ zh: z.string().trim().min(1).max(40), en: z.string().trim().min(1).max(80) }).optional(),
+  }).optional(),
 });
 
 /** 清单只持有内置身份；登记只持有本轮运行实例，关闭不释放内置id。 */

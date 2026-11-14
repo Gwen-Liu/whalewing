@@ -24,6 +24,14 @@ export const modelWorldVendors = Object.freeze([
 ].map(([id, name, nameZh, homepage, providers]) => Object.freeze({ id, name, nameZh, homepage, providers: Object.freeze(providers) })));
 export const modelWorldVendorIds = Object.freeze(modelWorldVendors.map(vendor => vendor.id));
 
+/** 各家的 API 开放平台（2026-11-12 逐个打开核对）：图鉴里没相遇的角色直接给这个入口，申请 Key 后在 DSH 里配上。 */
+export const modelWorldPlatforms = Object.freeze({
+  openai: 'https://platform.openai.com', anthropic: 'https://platform.claude.com', google: 'https://aistudio.google.com', deepseek: 'https://platform.deepseek.com',
+  alibaba: 'https://bailian.console.aliyun.com', moonshotai: 'https://platform.kimi.com', zhipuai: 'https://open.bigmodel.cn', 'bytedance-seed': 'https://console.volcengine.com/ark',
+  minimax: 'https://platform.minimaxi.com', tencent: 'https://cloud.tencent.com/product/hunyuan', baidu: 'https://qianfan.cloud.baidu.com', xiaomi: 'https://platform.xiaomimimo.com',
+  meituan: 'https://longcat.chat/platform', stepfun: 'https://platform.stepfun.com', xai: 'https://console.x.ai', meta: 'https://dev.meta.ai', mistral: 'https://console.mistral.ai', perplexity: 'https://docs.perplexity.ai',
+});
+
 /** 同一厂商的不同系列使用不同形象：DeepSeek Flash 是“小飞鱼妹妹”，其余型号是“大飞鱼姐姐”。 */
 export const modelWorldVariants = Object.freeze([
   Object.freeze({ id: 'deepseek-flash', vendorId: 'deepseek', pattern: 'flash' }),

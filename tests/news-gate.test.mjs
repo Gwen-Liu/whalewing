@@ -27,7 +27,7 @@ import { mountFeatures } from './feature-fixture.mjs';
 // 两版 JSONL 的 Cordis 入口分别是默认类和具名 apply；测试仍加载当前真实实现。
 const Persistence = JsonlModule.default ?? JsonlModule;
 
-const notice = '「知识卡片」已关闭，本次资讯未生成';
+const notice = '「每日阅读」已关闭，本次资讯未生成';
 const message = (kind, text) => createUserMessage({ source: { kind }, content: [{ type: 'text', text }] });
 const notices = events => events.filter(event => event.type === 'command/done' && event.data.kind === 'success' && event.data.text === notice);
 
@@ -106,7 +106,7 @@ test('真实到点、活动登记、JSONL冷读、混合输入、周期推进与
     await h.due(news, '关闭状态不应发给模型');
     assert.equal(adapter.requests.length, 0);
     assert.equal(notices(news.session.snapshotEvents()).length, 1);
-    assert.match(await h.disk(news), /「知识卡片」已关闭，本次资讯未生成/);
+    assert.match(await h.disk(news), /「每日阅读」已关闭，本次资讯未生成/);
   });
   await t.test('真实Cards登记开启恢复，撤销后下一次再拦截', async () => {
     const cards = await ctx.plugin(Cards);
@@ -172,6 +172,39 @@ test('真实到点、活动登记、JSONL冷读、混合输入、周期推进与
   });
 });
 
+test('扩展任务：登记它的扩展没打开时到点跳过并留说明；开着时照常；刚启动时先等扩展登记', async t => {
+  const h = await harness(t), { ctx, adapter } = h;
+  const skipped = '登记这个任务的扩展没有打开，本次没有运行';
+  const skips = events => events.filter(event => event.type === 'command/done' && event.data.kind === 'success' && event.data.text === skipped);
+  ctx.whalewing.tasks.startupWaitMs = 50;
+  const handle = await ctx.agents.create({ sessionId: 'ext-task', meta: { agentPreset: 'standard' }, agentOptions: { provider: 'fixture', model: 'fixture' } });
+  h.handles.push(handle);
+  const claim = await ctx.commands.execute(handle.agent, `/whalewing ${JSON.stringify({ action: 'automation_claim', purpose: 'extension', owner: 'team/digest' })}`, [], new AbortController().signal);
+  assert.equal(claim.result.kind, 'success');
+  assert.equal(ctx.sessionProjections.stateOf(handle.agent.session, 'whalewingTaskOwner').owner, 'team/digest');
+  const agent = handle.agent;
+  await h.due(agent, '扩展没开时的输入');
+  assert.equal(adapter.requests.length, 0);
+  assert.equal(skips(agent.session.snapshotEvents()).length, 1);
+  assert.match(await h.disk(agent), /登记这个任务的扩展没有打开/);
+  const open = () => ctx.plugin({ inject: ['whalewing'], apply(scope) {
+    scope.whalewing.features.register(scope, { id: 'team', api: 1, package: 'dsh-fixture-team' });
+    scope.whalewing.schedule.registerTask(scope, { id: 'digest', title: '团队沉淀', daily: { time: '02:00' }, prompt: '沉淀' });
+  } });
+  let extension = await open();
+  await h.due(agent, '扩展开着时的输入');
+  assert.equal(adapter.requests.length, 1);
+  await extension.dispose();
+  // 到点时还没登记（比如 DSH 刚启动）：等一会儿，登记上了就照常跑。
+  ctx.whalewing.tasks.startupWaitMs = 8000;
+  const later = setTimeout(async () => { extension = await open(); }, 1500);
+  t.after(() => clearTimeout(later));
+  await h.due(agent, '扩展稍后才登记的输入');
+  assert.equal(adapter.requests.length, 2);
+  assert.equal(skips(agent.session.snapshotEvents()).length, 1);
+  await extension.dispose();
+});
+
 for (const mode of ['false', 'throw', 'unknown']) test(`跳过说明持久化${mode}：恢复原批次且不自动重试，修复后同源去重`, async t => {
   const h = await harness(t), { ctx, adapter } = h, { agent } = await h.create('failed');
   const flush = ctx.sessions.flush.bind(ctx.sessions), errors = [];
@@ -195,7 +228,7 @@ for (const mode of ['false', 'throw', 'unknown']) test(`跳过说明持久化${m
   assert.ok(JSON.stringify(adapter.requests[0]).includes('恢复人工输入'));
   assert.ok(!JSON.stringify(adapter.requests[0]).includes('恢复定时输入'));
   assert.equal(notices(agent.session.snapshotEvents()).length, 1);
-  await flush(agent.session); assert.match(await h.disk(agent), /「知识卡片」已关闭/);
+  await flush(agent.session); assert.match(await h.disk(agent), /「每日阅读」已关闭/);
 });
 
 for (const mode of ['unload', 'cancel', 'keepInbox']) test(`跳过检查点在途${mode}尊重原生取消与卸载边界`, async t => {
@@ -218,7 +251,7 @@ for (const mode of ['unload', 'cancel', 'keepInbox']) test(`跳过检查点在�
   else if (mode === 'cancel') assert.equal(pending.length, 0);
   else { assert.equal(pending.length, 1); assert.ok(JSON.stringify(pending).includes('后续输入')); }
   ctx.sessions.flush = flush;
-  await flush(agent.session); assert.match(await h.disk(agent), /「知识卡片」已关闭/);
+  await flush(agent.session); assert.match(await h.disk(agent), /「每日阅读」已关闭/);
 });
 
 test('恢复输入失败显式报错，不把部分恢复当作无损完成', async t => {

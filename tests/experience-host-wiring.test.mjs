@@ -10,6 +10,7 @@ import Storage from '@deepseek-ai/dsh-storage';
 import * as StorageJson from '@deepseek-ai/dsh-storage-json';
 import * as StorageDomain from '@deepseek-ai/dsh-storage-domain';
 import Whalewing from '../index.js';
+import { aiWebEntries } from '../features/ai-web/catalog.js';
 import { selectedWorkspaces } from '../features/automation/automation.js';
 
 const customId = 'custom-62a4fd50-8951-4133-b09c-4f92e6a48ae1';
@@ -45,7 +46,7 @@ test('AI的真实Typert声明指向独立whalewingAiWeb服务，懒域保存重�
   assert.equal(h.aiWebHost.typertRemote.serviceKey, descriptor.service);
   assert.equal(h.aiWebHost.typertRemote.namespace, descriptor.namespace);
   assert.equal(h.aiWebHost.resource.owner, undefined);
-  assert.equal((await h.ctx.get(descriptor.service)[descriptor.method](save())).entries.length, 11);
+  assert.equal((await h.ctx.get(descriptor.service)[descriptor.method](save())).entries.length, aiWebEntries.length + 1);
   assert.equal(await h.service.vault.initialized(), false);
   const previous = h.aiWebHost;
   await h.fiber.dispose();
@@ -69,11 +70,11 @@ test('同一存储根的不同真实profile隔离，重复profile持锁拒收后
   const b = await host(t, { storage: a.storage });
   const same = await host(t, { storage: a.storage, profile: a.profile });
   try {
-    assert.equal((await b.aiWebHost.manageAiWeb({ action: 'list' })).entries.length, 10);
+    assert.equal((await b.aiWebHost.manageAiWeb({ action: 'list' })).entries.length, aiWebEntries.length);
     await assert.rejects(same.aiWebHost.manageAiWeb({ action: 'list' }), /lock|锁|busy|EEXIST/i);
     assert.equal(same.aiWebHost.resource.owner, undefined);
     await a.fiber.dispose();
-    assert.equal((await same.aiWebHost.manageAiWeb({ action: 'list' })).entries.length, 11);
+    assert.equal((await same.aiWebHost.manageAiWeb({ action: 'list' })).entries.length, aiWebEntries.length + 1);
   } finally { await same.ctx.fiber.dispose(); await b.ctx.fiber.dispose(); }
 });
 
@@ -102,7 +103,7 @@ test('AI持久写进行时拒收busy；提交后取消不报假失败，卸载�
     const result = await operation; assert.equal(result.entries.find(item => item.id === customId).revision, 1);
     await disposal;
     assert.equal(h.aiWebHost.resource.pending.size, 0);
-    await h.mount(); assert.equal((await h.aiWebHost.manageAiWeb({ action: 'list' })).entries.length, 11);
+    await h.mount(); assert.equal((await h.aiWebHost.manageAiWeb({ action: 'list' })).entries.length, aiWebEntries.length + 1);
   } finally { release.resolve(); await Promise.allSettled([operation, disposal]); }
 });
 

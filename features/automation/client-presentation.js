@@ -33,6 +33,16 @@ export const zh = {
   "scheduleUnavailable": "新版请检查 DSH 启动日志并重启；旧版请确认官方定时任务插件已启用，然后刷新；草稿会保留",
   "taskTitle": "任务名称",
   "taskPrompt": "工作指令",
+  "taskExpert": "交给哪位专家",
+  "taskExpertNone": "不交给专家",
+  "taskExpertHelp": "选了专家，每次运行都带上这位专家的岗位说明、技能、记忆和模型，跑完它会把进度记进自己的记忆，下次接着往下做",
+  "taskExpertOf": "{name}的定时任务",
+  "taskExtensionOf": "「{name}」登记的任务",
+  "taskExtensionClosed": "所属扩展已关闭",
+  "taskExtensionHelp": "名字、时间和说明由「{name}」维护，你可以暂停和恢复；暂停后到点不运行",
+  "taskExtensionClosedHelp": "「{name}」现在没有打开，到点会跳过；重新打开后照常运行。不再需要的话可以取消这个任务",
+  "taskExtensionSessions": "这个任务会读你 {since} 以后的对话，用来完成上面的事；暂停期间的对话不读",
+  "taskDraftKept": "还有一个没保存的定时任务草稿，先处理完它再加新的",
   "taskRule": "时间规则",
   "taskSeconds": "秒数",
   "taskAt": "时间（含时区的 ISO 日期）",
@@ -80,7 +90,9 @@ export const zh = {
   "customScopeDropped": "这个任务以前附带了工作区清单，保存后只保留你写的工作指令",
   "taskLastRun": "上次运行",
   "taskNeverRun": "还没运行过",
-  "newsTaskFixed": "固定每天 08:00 运行。要改关注的领域和来源，到「知识卡片」的卡片设置里改",
+  "taskSessionEmpty": "「{title}」还没运行过，任务会话里还没有内容；{next}跑过一次后再打开，就能看到过程和结果",
+  "taskSessionEmptyNext": "下一次是 {time}，",
+  "newsTaskFixed": "固定每天 08:00 运行。要改关注的领域和来源，到「每日阅读」的阅读设置里改",
   "runLate": "{time} 补上",
   "runStatus_waiting": "排队中",
   "runStatus_running": "进行中",
@@ -102,6 +114,8 @@ export const en = {
   "customScopeDropped": "This task used to carry a workspace list; saving keeps only your instructions",
   "taskLastRun": "Last run",
   "taskNeverRun": "Not run yet",
+  "taskSessionEmpty": "“{title}” has not run yet, so its task session is still empty. {next}Open it after the first run to see the work and the result",
+  "taskSessionEmptyNext": "The next run is at {time}. ",
   "newsTaskFixed": "Runs every day at 08:00. Change topics and sources in Knowledge Cards settings",
   "runLate": "caught up at {time}",
   "runStatus_waiting": "Queued",
@@ -111,22 +125,31 @@ export const en = {
   "runStatus_interrupted": "Interrupted",
   "runStatus_incomplete": "Cut off",
   "runStatus_skipped": "Not run",
-  "runStatus_unknown": "Result unknown"
+  "runStatus_unknown": "Result unknown",
+  "taskExpert": "Expert",
+  "taskExpertNone": "No expert",
+  "taskExpertHelp": "With an expert, every run brings that expert's role guide, skills, memory and model, and it records its progress in its memory",
+  "taskExpertOf": "Scheduled task of {name}",
+  "taskExtensionOf": "Registered by {name}",
+  "taskExtensionClosed": "Extension is off",
+  "taskExtensionHelp": "{name} maintains the name, time and instructions. You can pause and resume it; a paused task does not run",
+  "taskExtensionClosedHelp": "{name} is not turned on, so runs are skipped. They continue once it is back on. Cancel the task if you no longer need it",
+  "taskExtensionSessions": "This task reads your conversations from {since} on to do the work above; conversations while it is paused are not read",
+  "taskDraftKept": "There is an unsaved task draft. Finish it before adding a new one"
 };
 export const styles = [
 `
-.ww-page .ww-task-time{display:flex;align-items:end;gap:16px;margin-block:16px}.ww-page .ww-task-time .ww-field{flex:none;width:160px}.ww-page .ww-task-time>span{padding-bottom:10px}.ww-page .ww-task-workspaces{display:grid;grid-template-columns:1fr 1fr;gap:16px}.ww-page .ww-workspace-options{max-height:280px;overflow:auto}.ww-page .ww-workspace-options .ww-choice{display:flex;gap:8px;align-items:start;padding:8px}.ww-page .ww-workspace-options small{display:block;overflow-wrap:anywhere}
-@media(max-width:700px){.ww-page .ww-task-workspaces{grid-template-columns:1fr}}`,
+.ww-page .ww-task-time{display:flex;flex-wrap:wrap;align-items:end;gap:16px;margin-block:16px}.ww-page .ww-task-time .ww-field{flex:0 1 12em;min-width:9em}.ww-page .ww-task-time>span{padding-bottom:10px}.ww-page .ww-workspace-options{max-height:min(17.5rem,50dvh);overflow:auto}.ww-page .ww-workspace-options .ww-choice{display:flex;gap:8px;align-items:start;padding:8px}.ww-page .ww-workspace-options small{display:block;overflow-wrap:anywhere}`,
 `
 
-    .ww-schedules{height:100%;min-height:360px;display:flex;flex-direction:column}.ww-task-split{display:grid;grid-template-columns:minmax(210px,270px) minmax(0,1fr);flex:1;min-height:0;border:1px solid var(--dsw-alias-border-l1);border-radius:14px;overflow:hidden}.ww-task-list{padding:12px 8px;background:var(--dsw-alias-bg-layer-2);border-right:1px solid var(--dsw-alias-border-l1);overflow:auto}.ww-task-list>.ww-row{justify-content:space-between;padding:0 6px 12px}.ww-task-list h2{font-size:15px}.ww-task-list h3{font-size:13px;margin:0}.ww-task-template{display:grid;gap:6px;padding:12px 8px}.ww-task-template small,.ww-task-row small{color:var(--dsw-alias-label-secondary);font-size:11px}.ww-task-row{display:flex;align-items:center;border-radius:9px;margin:4px 0;min-width:0}.ww-task-row.ww-selected{background:var(--dsw-alias-interactive-bg-hover)}.ww-page .ww-task-select{display:flex;flex-direction:column;gap:5px;min-width:0;flex:1;text-align:left;border:0;background:transparent;padding:10px 8px}.ww-task-select span,.ww-task-select small{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ww-task-main{padding:24px;min-width:0;overflow:auto}.ww-task-prompt{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.8}.ww-task-detail>details{margin-top:24px}.ww-task-editor{max-width:680px;margin:auto}.ww-task-editor>.ww-field{margin:14px 0}.ww-task-editor h2{margin-bottom:20px}.ww-task-empty{min-height:300px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:16px;color:var(--dsw-alias-label-secondary)}.ww-task-empty h2{font-size:16px}`,
-`@media(max-width:700px){.ww-task-split{grid-template-columns:1fr}.ww-task-list{max-height:220px;border-right:0;border-bottom:1px solid var(--dsw-alias-border-l1)}.ww-task-main{padding:16px}}`,
-`.ww-task-time>.ww-field{min-width:0}.ww-workspace-options{min-width:250px;max-width:min(480px,calc(100vw - 48px))}`,
+    .ww-schedules{height:100%;display:flex;flex-direction:column}.ww-task-split{display:grid;grid-template-columns:minmax(0,clamp(13.75rem,26%,22.5rem)) minmax(0,1fr);grid-template-rows:minmax(0,1fr);flex:1;min-height:15rem;border:1px solid var(--dsw-alias-border-l1);border-radius:14px;overflow:hidden}.ww-task-list{padding:12px 8px;background:var(--dsw-alias-bg-layer-2);border-right:1px solid var(--dsw-alias-border-l1);overflow:auto}.ww-task-list>.ww-row{justify-content:space-between;padding:0 6px 12px}.ww-task-list h2{font-size:15px}.ww-task-list h3{font-size:13px;margin:0}.ww-task-template{display:grid;gap:6px;padding:12px 8px}.ww-task-template small,.ww-task-row small{color:var(--dsw-alias-label-secondary);font-size:11px}.ww-task-row{display:flex;align-items:center;border-radius:9px;margin:4px 0;min-width:0}.ww-task-row.ww-selected{background:var(--dsw-alias-interactive-bg-hover)}.ww-page .ww-task-select{display:flex;flex-direction:column;gap:5px;min-width:0;flex:1;text-align:left;border:0;background:transparent;padding:10px 8px}.ww-task-select span,.ww-task-select small{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ww-task-main{padding:24px;min-width:0;overflow:auto}.ww-task-prompt{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.8}.ww-task-detail>details{margin-top:24px}.ww-task-editor{max-width:clamp(35rem,70%,60rem);margin:auto}.ww-task-editor>.ww-field{margin:14px 0}.ww-task-editor h2{margin-bottom:20px}.ww-task-empty{min-height:100%;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:16px;color:var(--dsw-alias-label-secondary)}.ww-task-empty h2{font-size:16px}`,
+`@container ww-main (max-width:40rem){.ww-task-split{grid-template-columns:minmax(0,1fr);grid-template-rows:fit-content(40%) minmax(0,1fr)}.ww-task-list{border-right:0;border-bottom:1px solid var(--dsw-alias-border-l1)}.ww-task-main{padding:16px}}`,
+`.ww-workspace-options{min-width:min(15.625rem,calc(100vw - 48px));max-width:min(30rem,calc(100vw - 48px))}`,
 `
     .ww-schedule-off{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:12px 16px;margin:0 0 12px;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-alias-bg-layer-2)}.ww-schedule-off p{margin:2px 0 0}.ww-page .ww-schedule-off .ww-primary{margin:0}`,
 // 2026-10-25 随皮点缀：任务行前一个状态点；详情两张小卡写下次运行和上次结果；编辑时一句规则预览；执行记录在弹窗里逐条带状态点。
 `.ww-task-split{border-color:var(--ww-line)}.ww-task-list{background:var(--ww-surface-2)}.ww-task-select>span:first-child{display:inline-flex;align-items:center;gap:8px}.ww-task-select .ww-dot{width:16px;height:16px;font-size:10px}
-.ww-page .ww-task-detail .ww-team-heading h2,.ww-page .ww-task-editor>h2{font:600 22px/1.35 var(--ww-serif);letter-spacing:.01em}.ww-task-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:4px 0 16px}.ww-task-fact{display:flex;flex-direction:column;gap:4px;padding:14px 16px;border-radius:12px;background:var(--ww-surface-2)}.ww-task-fact small{font-size:12px;letter-spacing:.06em;color:var(--ww-ink-3)}.ww-task-fact strong{display:inline-flex;align-items:center;gap:8px;font-size:17px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--ww-ink)}.ww-task-fact span{font-size:12.5px;color:var(--ww-ink-2)}.ww-task-fact-err{background:color-mix(in srgb,var(--ww-err) 10%,transparent)}.ww-task-fact-err strong{color:var(--ww-err)}
+.ww-page .ww-task-detail .ww-team-heading h2,.ww-page .ww-task-editor>h2{font:600 22px/1.35 var(--ww-serif);letter-spacing:.01em}.ww-task-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,12.5rem),1fr));gap:12px;margin:4px 0 16px}.ww-task-fact{display:flex;flex-direction:column;gap:4px;padding:14px 16px;border-radius:12px;background:var(--ww-surface-2)}.ww-task-fact small{font-size:12px;letter-spacing:.06em;color:var(--ww-ink-3)}.ww-task-fact strong{display:inline-flex;align-items:center;gap:8px;font-size:17px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--ww-ink)}.ww-task-fact span{font-size:12.5px;color:var(--ww-ink-2)}.ww-task-fact-err{background:color-mix(in srgb,var(--ww-err) 10%,transparent)}.ww-task-fact-err strong{color:var(--ww-err)}
 .ww-task-preview{margin:4px 0 8px;padding:10px 12px;border-radius:10px;background:var(--ww-tint);font-size:13.5px;color:var(--ww-ink);font-variant-numeric:tabular-nums}
 .ww-task-runs{display:flex;flex-direction:column;gap:2px;margin:12px 0 0;padding:0;list-style:none}.ww-task-runs li{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--ww-line)}.ww-task-runs li:first-child{border-top:0}.ww-task-runs .ww-task-run{margin:0;font-variant-numeric:tabular-nums}`,
 // 2026-11-02 补齐设计稿的点缀：整块分栏右上角一枚淡鲸尾印（设计稿的位置；右下角会被小鲸气泡挡住）。
