@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { startDsh } from '../support/dsh.mjs';
-import { launchBrowser, withPage, openWhaleWing, openTab, toast, modal, dialogButton, isCentered, isRed } from '../support/browser.mjs';
+import { launchBrowser, withPage, openWhaleWing, openTab, resizeAndSettle, toast, modal, dialogButton, isCentered, isRed } from '../support/browser.mjs';
 import { zones, fixtures, writeFixture, vaultNotes, titleOf, linesWith, noteText } from '../support/knowledge-fixture.mjs';
 
 let dsh, browser, vaultWasEmpty;
@@ -968,7 +968,7 @@ test('知识区窄时右侧栏默认收起，点按钮浮出，点目录跳转�
       return heading && Math.abs(heading.getBoundingClientRect().top - box.getBoundingClientRect().top) <= 40;
     }, target);
     // 再窄（知识区不到 640px）左栏也收起来，点页签条左头的按钮浮出来，选一篇笔记后自动收起。
-    await page.setViewportSize({ width: 600, height: 700 });
+    await resizeAndSettle(page, { width: 600, height: 700 });
     await page.locator('.ww-note-tree').waitFor({ state: 'detached' });
     await page.getByRole('button', { name: '显示左侧栏', exact: true }).click();
     await page.locator('.ww-note-tree.ww-overlay').waitFor();

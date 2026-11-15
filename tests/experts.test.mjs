@@ -216,7 +216,8 @@ test('专家全文只在历史里看不到时重发，其余轮次发短提醒�
 test('新spawn通过正式命令继承，fork直接从成功日志投影继承', async t => {
   const h = await harness(t);
   await h.run({ expertId: 'development' });
-  const child = await h.create('child', { parentAgent: h.agent });
+  // DSH 0.2.2-rc.3 起子代理只认会话头，照 DSH 建子代理的样子带上 origin 和 parentSession。
+  const child = await h.create('child', { parentAgent: h.agent, meta: { origin: 'subagent', parentSession: h.agent.id } });
   assert.equal(h.state(child).view.expertId, 'development');
   assert.equal(child.session.snapshotEvents().filter(event => event.type === 'command/run').length, 1);
   assert.ok(h.saved.get('child').some(event => event.type === 'command/done'));
@@ -594,7 +595,7 @@ test('MCP 按正式归属限制实际请求工具，切换和继承不泄漏', a
   assert.equal(h.adapter.requests.length, 1);
   assert.ok(h.adapter.requests[0].tools.some(tool => tool.name === 'mcp__opaque_hash'));
   assert.ok(!h.adapter.requests[0].tools.some(tool => tool.name === 'mcp__other_read'));
-  const child = await h.create('mcp-child', { parentAgent: h.agent });
+  const child = await h.create('mcp-child', { parentAgent: h.agent, meta: { origin: 'subagent', parentSession: h.agent.id } });
   await turn(h.ctx, child);
   assert.ok(!h.adapter.requests.at(-1).tools.some(tool => tool.name === 'mcp__other_read'));
   await h.run({ expertId: null });

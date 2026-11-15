@@ -139,11 +139,11 @@ export default class Toolbox extends Service {
 
   handoffs(signal) { return this.broker.watchHandoffs(signal); }
 
-  /** Office 转 PDF：交给 DSH 自带的转换服务（随包 LibreOffice），不走命令行、不弹审批。 */
+  /** Office 转 PDF：交给 DSH 自带的 Office 服务 `officeKit`（随包 LibreOffice；DSH 0.2.2-rc.3 起取代原来的 `officeToPdf`，convert 的参数和结果不变），不走命令行、不弹审批。 */
   async officePdf(input, signal) {
     try {
       const parsed = contract.officeInput.parse(input);
-      const service = this.ctx.get('officeToPdf');
+      const service = this.ctx.get('officeKit');
       if (typeof service?.convert !== 'function') fail('TOOLBOX_OFFICE_UNAVAILABLE', '这个 DSH 没有开 Office 转 PDF 服务，转不了；可以先在 Word、Excel 里“另存为 PDF”');
       const bytes = new Uint8Array(Buffer.from(parsed.data, 'base64'));
       const digest = createHash('sha256').update(bytes).digest('hex');

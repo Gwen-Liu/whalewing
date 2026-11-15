@@ -2,7 +2,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { startDsh } from '../support/dsh.mjs';
-import { launchBrowser, withPage, openWhaleWing, openTab, toast, titlebarProblems } from '../support/browser.mjs';
+import { launchBrowser, withPage, openWhaleWing, openTab, resizeAndSettle, toast, titlebarProblems } from '../support/browser.mjs';
 import { bundledSkills } from '../support/skills-fixture.mjs';
 
 let dsh, browser;
@@ -528,13 +528,24 @@ test('窄窗口：钉的页签放不下时收进页签条末尾的“更多”�
     await openWhaleWing(page, dsh.url, { assistant: 'float' });
     await groupTabs(page).filter({ hasText: '每日阅读' }).waitFor({ state: 'attached' });
     assert.deepEqual(await header(page).locator('nav.ww-tabs:not(.ww-tabs-end) > button').evaluateAll(list => list.map(button => button.textContent.trim())), featureTabs, '七个都钉着');
-    await page.setViewportSize({ width: 760, height: 900 });
+    await resizeAndSettle(page, { width: 760, height: 900 });
     await moreTabs(page).waitFor();
     const state = async () => {
       const all = await header(page).locator('nav.ww-tabs:not(.ww-tabs-end) > button').evaluateAll(list => list.map(button => ({ name: button.textContent.trim(), shown: button.offsetParent !== null, pressed: button.getAttribute('aria-pressed') === 'true' })));
       return { shown: all.filter(tab => tab.shown).map(tab => tab.name), tucked: all.filter(tab => !tab.shown).map(tab => tab.name), pressed: all.find(tab => tab.pressed)?.name, count: (await moreTabs(page).locator('.ww-tabs-count').innerText()).trim() };
     };
-    const narrow = await state();
+    // 侧栏收好以后页签条还要一两帧才把放得下的放回来，连着两次量得一样再比。
+    const settled = async () => {
+      let last = JSON.stringify(await state());
+      for (let i = 0; i < 30; i++) {
+        await page.waitForTimeout(150);
+        const now = JSON.stringify(await state());
+        if (now === last) return JSON.parse(now);
+        last = now;
+      }
+      return JSON.parse(last);
+    };
+    const narrow = await settled();
     assert.ok(narrow.tucked.length >= 1, `有页签被收起：${JSON.stringify(narrow)}`);
     assert.equal(narrow.count, String(narrow.tucked.length), '“更多”上的数字是收了几个');
     assert.deepEqual([...narrow.shown, ...narrow.tucked], featureTabs, '从前往后留，后面的收起，一个不少');

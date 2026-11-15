@@ -300,14 +300,15 @@ test('Office 转 PDF 交给 DSH 的转换服务：读回的版本和登记的一
   const { default: Toolbox } = await import('../features/toolbox/host.js');
   const requests = [];
   // 照 DSH 转换服务的规矩：读回的 version 必须和登记的 source.version 一样，否则报 source-changed。
-  const officeToPdf = { async convert(request, signal) {
+  const officeKit = { async convert(request, signal) {
     requests.push(request);
     const input = await request.source.read(signal, request.source.bytes);
     if (input.version !== request.source.version) throw Object.assign(new Error('The source changed while waiting for conversion.'), { code: 'source-changed' });
     assert.equal(input.bytes.byteLength, request.source.bytes);
     return { pdf: new TextEncoder().encode('%PDF-1.7 fake'), missingFonts: ['方正小标宋'] };
   } };
-  const self = { ctx: { get: name => (name === 'officeToPdf' ? officeToPdf : undefined) } };
+  // DSH 0.2.2-rc.3 起服务叫 officeKit（原 officeToPdf 包已删）。
+  const self = { ctx: { get: name => (name === 'officeKit' ? officeKit : undefined) } };
   const data = Buffer.from('word bytes').toString('base64');
   const value = await Toolbox.prototype.officePdf.call(self, { name: '培训通知.docx', extension: 'docx', data });
   assert.equal(Buffer.from(value.data, 'base64').toString(), '%PDF-1.7 fake');

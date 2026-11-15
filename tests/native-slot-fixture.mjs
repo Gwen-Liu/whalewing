@@ -20,8 +20,10 @@ export async function nativeSlots() {
   const React = { Component: class {}, createContext: value => ({ value }), Fragment: 'fragment', createElement: (type, props, ...children) => jsx(type, { ...props, children }), useRef: current => ({ current }), useLayoutEffect() {}, useSyncExternalStore(_subscribe, get) { return get(); } };
   const renderer = new URL(import.meta.resolve('@deepseek-ai/dsh-client-ui-renderer/package.json'));
   const raw = await readFile(new URL('lib/client.js', renderer), 'utf8');
-  const seam = 'exports.SlotRegistry = SlotRegistry;';
-  assert.equal(raw.split(seam).length, 2);
+  // DSH 0.2.2-rc.3 起这份分发物去掉了空白（exports.SlotRegistry=SlotRegistry;），两种写法都认，仍要求恰好一处。
+  const seams = raw.match(/exports\.SlotRegistry\s*=\s*SlotRegistry;/g) ?? [];
+  assert.equal(seams.length, 1);
+  const seam = seams[0];
   // 测试暴露原函数，不改函数体、输入或选举实现。
   const exposed = raw.replace(seam, `exports.renderOutletContent = renderOutletContent; ${seam}`);
   let registration;

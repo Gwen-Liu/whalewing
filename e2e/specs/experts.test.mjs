@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { startDsh, removeTree } from '../support/dsh.mjs';
-import { launchBrowser, withPage, openWhaleWing, openTab, textOf, toast, drawer, modal, dialogButton, isCentered, isRed, scratchFiles, discardDrawer } from '../support/browser.mjs';
+import { launchBrowser, withPage, openWhaleWing, openTab, resizeAndSettle, textOf, toast, drawer, modal, dialogButton, isCentered, isRed, scratchFiles, discardDrawer } from '../support/browser.mjs';
 import { png, pngSize, animatedGif, templateText, expertsFileText, storedExperts, storedByName, storedRoster } from '../support/experts-fixture.mjs';
 import { roles, expertTemplates } from '../../content/roles.js';
 
@@ -669,7 +669,7 @@ test('窗口最窄（480 宽）时左栏收到中间一栏上面，头像、专�
   await withPage(browser, t, async ({ page }) => {
     // 480 宽时 DSH 收起了侧栏，点不到“鲸翼”：先在正常宽度进来再把窗口缩窄。
     await openExperts(page, { assistant: 'float' });
-    await page.setViewportSize({ width: 480, height: 800 });
+    await resizeAndSettle(page, { width: 480, height: 800 });
     const middle = page.locator('.ww-team > section');
     await page.waitForFunction(() => { const nav = document.querySelector('nav.ww-roster')?.getBoundingClientRect(), mid = document.querySelector('.ww-team > section')?.getBoundingClientRect(); return nav && mid && nav.bottom <= mid.top + 1; });
     const [top, below] = [await roster(page).boundingBox(), await middle.boundingBox()];

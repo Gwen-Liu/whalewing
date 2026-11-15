@@ -186,12 +186,13 @@ test('真实原生管理操作参数和结果保持原语义，不改profile或�
   assert.equal(h.agent.session.header.agentPreset, 'standard');
 });
 
-test('没有父会话header的真实owned子Agent仍不取得管理主资格', async t => {
+// DSH 0.2.2-rc.3 去掉了 isOwnedBy，子代理只认会话头（origin、parentSession）；没有会话头的子 Agent 不继承小鲸，也拿不到管理资格。
+test('没有子代理会话头的子Agent不继承小鲸选择，也不取得管理主资格', async t => {
   const h = await setup(t);
   await h.select();
   const child = await h.create('owned-without-header', { parentAgent: h.agent });
   assert.equal(child.session.header.parentSession, undefined);
-  assert.equal(h.ctx.agents.isOwnedBy(child.id, h.agent), true);
+  assert.notEqual(child.session.header.origin, 'subagent');
   assert.equal(h.ctx.whalewingExperts.selectedFor(child), null);
   const result = await h.execute({ action: 'set_bundle', target: 'fixture', enabled: false }, child);
   assert.equal(result.isError, true);

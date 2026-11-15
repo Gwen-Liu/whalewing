@@ -27,12 +27,18 @@ const viewSchema = z.object({ expertId: expertIdSchema });
 const resources = new Set(['list_mcp_resources', 'list_mcp_resource_templates', 'read_mcp_resource']);
 const sameModel = (a, b) => Boolean(a && b && a.provider === b.provider && a.model === b.model && a.reasoningEffort === b.reasoningEffort);
 
-function isSubagent(ctx, agent) {
-  if (agent.session.header.origin === 'subagent') return true;
-  const parent = ctx.agents.get(agent.session.header.parentSession);
-  if (parent && ctx.agents.isOwnedBy(agent.id, parent)) return true;
-  // 运行时所有权先于可选日志元数据成立，缺 parentSession 也不是普通主会话。
-  return ctx.agents.list().some(candidate => candidate !== agent && ctx.agents.isOwnedBy(agent.id, candidate));
+/**
+ * 子代理只看会话头：DSH 0.2.2-rc.3 去掉了智能体注册表的 isOwnedBy（运行时所有权），
+ * 它自己的会话控制器和建专家推荐也改成只认 `origin === 'subagent'`、沿 `parentSession` 找父会话，鲸翼跟着认。
+ */
+function isSubagent(agent) {
+  return agent.session.header.origin === 'subagent';
+}
+/** 子代理的父会话（还活着的）；不是子代理或父会话已经不在了就是 undefined。 */
+function parentOf(ctx, agent) {
+  if (!isSubagent(agent)) return undefined;
+  const parentId = agent.session.header.parentSession;
+  return parentId === undefined ? undefined : ctx.agents.get(parentId);
 }
 
 /**
@@ -147,7 +153,7 @@ export class ExpertRegistry extends Service {
   }
   /** 管理能力只消费已完成的普通主会话选择，不自行重建专家身份。 */
   selectedFor(agent) {
-    if (!agent || this.ctx.agents.get(agent.id) !== agent || isSubagent(this.ctx, agent)) return null;
+    if (!agent || this.ctx.agents.get(agent.id) !== agent || isSubagent(agent)) return null;
     const state = expertState(this.ctx, agent.session);
     return state?.selected ? state.view.expertId : null;
   }
@@ -177,7 +183,7 @@ export class ExpertRegistry extends Service {
   async prepareModel(input, signal) {
     signal = AbortSignal.any([this.closing.signal, AbortSignal.timeout(this.config.operationMs), ...(signal ? [signal] : [])]);
     const agent = this.ctx.agents.get(input.sessionId);
-    if (!agent || isSubagent(this.ctx, agent)) throw expertError('SESSION_UNAVAILABLE', '模型准备只接受当前原生普通会话');
+    if (!agent || isSubagent(agent)) throw expertError('SESSION_UNAVAILABLE', '模型准备只接受当前原生普通会话');
     const automation = this.ctx.sessionProjections.stateOf(agent.session, 'whalewingAutomation')?.purpose;
     if (input.automation && !automation) throw expertError('AUTOMATION_IDENTITY', '自动任务模型准备需要已认领的原会话');
     const assertCurrent = () => {
@@ -336,7 +342,7 @@ export async function apply(ctx, config) {
   // prepend 在原 installModelSelection 的普通监听前完成准备；不改写组装结果或请求路由。
   ctx.on('system-prompt/assemble', async (_assembly, context, next) => {
     const agent = context.agent;
-    if (!agent || isSubagent(ctx, agent)) return next();
+    if (!agent || isSubagent(agent)) return next();
     if (ctx.sessionProjections.stateOf(agent.session, 'whalewingAutomation')?.purpose) {
       await registry.prepareModel({ sessionId: agent.session.id, automation: true }, context.signal);
       return next();
@@ -513,7 +519,8 @@ export async function apply(ctx, config) {
   ctx.on('agent/created', async ({ agent, source, signal }) => {
     attach(agent);
     if (source !== 'startup' || read(agent.session).selected || agent.session.inheritedEventCount > 0) return;
-    const parent = ctx.agents.list().find(candidate => ctx.agents.isOwnedBy(agent.id, candidate));
+    // 子代理继承父会话选的专家：父会话按会话头的 parentSession 找（DSH 0.2.2-rc.3 起不再有 isOwnedBy）。
+    const parent = parentOf(ctx, agent);
     if (!parent) return;
     const state = read(parent.session);
     if (!state?.selected) return;

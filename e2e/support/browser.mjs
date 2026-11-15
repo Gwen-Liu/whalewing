@@ -108,6 +108,23 @@ export async function openTab(page, name) {
   return tab;
 }
 
+/**
+ * 改窗口大小并等鲸翼排定再量。窄于 768px 时 DSH 会收起左侧栏：0.2.2-rc.3 起是缩窄后约 0.1 秒才收（rc.1 是马上收），
+ * 收之前鲸翼主区还挤在侧栏旁边（480 宽时只有 172px），量两个元素的位置要是跨过这一下就会对不上。
+ * 等鲸翼页头的位置和宽度连着三次（每次隔 100ms）不变，最多等 5 秒。
+ */
+export async function resizeAndSettle(page, size) {
+  await page.setViewportSize(size);
+  const box = () => page.evaluate(() => { const rect = document.querySelector('.ww-workbench-header')?.getBoundingClientRect(); return rect ? `${Math.round(rect.left)},${Math.round(rect.width)}` : ''; });
+  let last = await box(), same = 0;
+  for (let i = 0; i < 50 && same < 3; i++) {
+    await page.waitForTimeout(100);
+    const now = await box();
+    same = now === last ? same + 1 : 0;
+    last = now;
+  }
+}
+
 /** DSH 桌面版在 Windows 上的标题栏：高 40px，整条可拖动窗口；右上角是窗口自己的最小化、最大化、关闭，约 138px 宽。 */
 export const windowsTitlebar = Object.freeze({ height: 40, controlsWidth: 138 });
 
