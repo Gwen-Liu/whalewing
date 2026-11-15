@@ -10,6 +10,7 @@ export function createView({ React, loadChunk, Glyph }) {
     return function ToolboxFeature({ active, workbench }) {
       const api = workbench?.internal?.clients?.toolbox;
       services.officePdf = api?.officePdf;
+      services.officeConvert = api?.officeConvert;
       // 功能项窗口收起或员工在别的页签时做好了：用外壳右上角的提示、切回办公工坊、页签上标点（2026-11-14 方案 A）。
       const host = { notify: workbench?.notify, openPage: () => workbench?.openTab?.('toolbox'), setAttention: workbench?.setAttention };
       return React.createElement(WorkshopView, { key: 'toolbox', active, Glyph, api, host });

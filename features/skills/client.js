@@ -56,7 +56,7 @@ export function createView(kit, navigation) {
     const [searching, setSearching] = useState(false);
     const [marketItem, setMarketItem] = useState(null);
     const upload = useRef(null);
-    // MCP：列表只在切到 MCP 时读；有正在连的，每 3 秒再读一次状态，连完就停。
+    // MCP：列表只在切到 MCP 时读；有正在连或在重试的，每 3 秒再读一次 DSH 报的状态，连完就停。
     const [mcp, setMcp] = useState(null);
     const [mcpOpen, setMcpOpen] = useState(null);
     const [mcpEditor, setMcpEditor] = useState(null);
@@ -68,8 +68,15 @@ export function createView(kit, navigation) {
     const mcpCommand = (action, extra = {}) => api.mcpRequest({ action, ...extra }, operation.current?.controller.signal);
     const loadMcp = () => run(async () => { const value = await mcpCommand('list'); return () => setMcp(value); });
     // 工作台同一时间只跑一个操作，忙时新操作会被丢掉：等不忙了再读。插件包的详情里也要看 MCP 连没连上。
-    useEffect(() => { if (active && (kind === 'mcp' || kind === 'plugins') && !mcp && !busy) loadMcp(); }, [active, kind, busy, Boolean(mcp)]);
-    const connecting = Boolean(mcp?.servers.some(server => server.status === 'connecting'));
+    // 插件包页只是顺带看 MCP 连没连上：在后台读，不占着“忙”（占着的话员工这时上传插件包会被丢掉）。
+    useEffect(() => { if (active && kind === 'mcp' && !mcp && !busy) loadMcp(); }, [active, kind, busy, Boolean(mcp)]);
+    useEffect(() => {
+      if (!active || kind !== 'plugins' || mcp) return;
+      let live = true;
+      api.mcpRequest({ action: 'list' }).then(value => { if (live) setMcp(value); }, () => {});
+      return () => { live = false; };
+    }, [active, kind, Boolean(mcp)]);
+    const connecting = Boolean(mcp?.servers.some(server => !server.packOff && ['connecting', 'retrying'].includes(server.status)));
     useEffect(() => {
       if (!active || (kind !== 'mcp' && kind !== 'plugins') || !connecting) return;
       let live = true;
@@ -208,7 +215,7 @@ export function createView(kit, navigation) {
     const currentFilter = filterOptions.some(option => option.id === filter) ? filter : 'all';
     const switchView = next => { setView(next); setFilter('all'); setQuery(''); };
     const installedNames = new Set(rows.map(item => item.name));
-    const mcpSummary = mcp ? [`MCP ${mcpView.rows.length} 个`, `已连上 ${mcp.servers.filter(server => server.status === 'connected').length}`, mcpView.count('failed') > 0 && `${mcpView.count('failed')} 个连不上`, mcp.profile.length > 0 && `DSH 配置 ${mcp.profile.length}`].filter(Boolean).join(' · ') : '正在读 MCP…';
+    const mcpSummary = mcp ? [`MCP ${mcpView.rows.length} 个`, `已连上 ${mcp.servers.filter(server => server.status === 'connected' && !server.packOff).length}`, mcpView.count('todo') > 0 && `要处理 ${mcpView.count('todo')}`].filter(Boolean).join(' · ') : '正在读 MCP…';
     const projectCount = rows.filter(item => item.origin === 'project').length;
     const skillSummary = [`技能 ${total + rows.filter(item => ['extension', 'pack', 'agents', 'project'].includes(item.origin)).length} 项`, `个人 ${count('mine')}`, count('agents') > 0 && `共用 ${count('agents')}`, ...extensions.map(extension => `${labelText(extension)} ${count(`ext:${extension.id}`)}`), count('pack') > 0 && `插件包 ${count('pack')}`, `内置 ${count('builtin')}`, projectCount > 0 && `项目里 ${projectCount}`, count('updated') > 0 && `${count('updated')} 项原件有更新`, count('review') > 0 && `${count('review')} 项待复核`, count('issue') > 0 && `${count('issue')} 项需要修复`].filter(Boolean).join(' · ');
     const pluginSummary = packs ? [`插件包 ${packs.length} 个`, `开着 ${packView.count('on')}`, packView.count('off') > 0 && `停用 ${packView.count('off')}`, `技能 ${packs.reduce((sum, pack) => sum + pack.skills.length, 0)} 项`, `MCP ${packs.reduce((sum, pack) => sum + pack.mcp.length, 0)} 个`].filter(Boolean).join(' · ') : '正在读插件包…';
@@ -288,15 +295,19 @@ export function createView(kit, navigation) {
     const mcpShown = mcpOpen && mcpView.rows.find(row => row.key === mcpOpen);
     // 适合哪几位专家用：只认鲸翼精选里写了推荐的；专家团队里没有的（删了）不写。
     const expertName = id => expertList.experts.find(role => role.id === id)?.name ?? '';
-    const recommendFor = server => (!server || server.profile ? [] : mcpCatalog.find(item => item.id === server.catalogId)?.experts ?? []).map(expertName).filter(Boolean);
+    const recommendFor = server => (!server?.catalogId ? [] : mcpCatalog.find(item => item.id === server.catalogId)?.experts ?? []).map(expertName).filter(Boolean);
     const mcpDone = (value, message) => () => { setMcp(current => current && ({ ...current, servers: [...current.servers.filter(server => server.name !== value.server.name), value.server] })); if (message) notify(message); };
     const saveMcp = async (server, expectedRevision) => {
       const value = await api.mcpRequest({ action: 'save', server, expectedRevision });
       mcpDone(value)();
-      setMcpEditor(null); setView('mine'); setMcpOpen(`ww:${value.server.name}`);
-      notify(value.server.status === 'failed' ? `已保存「${value.server.title}」，但没连上：${value.server.error}` : `已添加「${value.server.title}」`, value.server.status === 'failed' ? { kind: 'error' } : undefined);
+      setMcpEditor(null); setView('mine'); setMcpOpen(value.server.name);
+      notify(expectedRevision === null ? `已添加「${value.server.title}」` : `已保存「${value.server.title}」`);
     };
-    const toggleMcp = server => run(async () => mcpDone(await mcpCommand('toggle', { name: server.name, enabled: !server.enabled, expectedRevision: server.revision }), server.enabled ? `已断开「${server.title}」` : `正在连「${server.title}」`));
+    // 试连一下：不保存，结果显示在抽屉里。
+    const probeMcp = async server => (await api.mcpRequest({ action: 'probe', server })).probe;
+    const secretMcp = (server, field, value) => run(async () => mcpDone(await mcpCommand('secret', { name: server.name, field, value }), '密钥已存进 DSH 凭据库，DSH 会自己重连'));
+    const dismissMcp = () => run(async () => { const value = await mcpCommand('dismiss'); return () => setMcp(value); });
+    const toggleMcp = server => run(async () => mcpDone(await mcpCommand('toggle', { name: server.name, enabled: !server.enabled, expectedRevision: server.revision }), server.enabled ? `已停用「${server.title}」` : `已启用「${server.title}」，正在连`));
     const reconnectMcp = server => run(async () => mcpDone(await mcpCommand('reconnect', { name: server.name })));
     const removeMcp = () => run(async () => {
       await mcpCommand('remove', { name: mcpRemove.name, expectedRevision: mcpRemove.revision });
@@ -340,7 +351,7 @@ export function createView(kit, navigation) {
         : h(DiscoverPacks, { markets: packMarkets, installed: new Set((packs ?? []).map(pack => pack.name)), filter: currentFilter, query, sortDown, busy, onOpen: openPackEntry, onRefresh: refreshMarket, onRemoveMarket: removeMarket }))
       : kind === 'mcp'
       ? (view === 'mine'
-        ? h(MineMcp, { data: mcp, packTitle, filter: currentFilter, query, sortDown, busy, onOpen: openMcpServer, onDiscover: () => switchView('discover') })
+        ? h(MineMcp, { data: mcp, packTitle, filter: currentFilter, query, sortDown, busy, onOpen: openMcpServer, onDiscover: () => switchView('discover'), onDismiss: dismissMcp })
         : h(DiscoverMcp, { query, filter: currentFilter, sortDown, added: new Set((mcp?.servers ?? []).map(server => server.catalogId).filter(Boolean)), busy, expertName, onOpen: item => setMcpEditor({ item }), onCustom: mcp ? () => setMcpEditor({}) : null }))
       : view === 'mine'
       ? h(MineSkills, { rows, filter: currentFilter, query, sortDown, t, busy, onOpen: openSkill, empty: help('emptySkills') })
@@ -354,13 +365,13 @@ export function createView(kit, navigation) {
       skill && h(SkillDrawer, { skill, t, busy, assistantShort, onOpenPack: skill.pack ? () => { setSkill(null); setKind('plugins'); setView('mine'); setPackOpen(skill.pack.name); } : undefined, onClose: () => setSkill(null), onEdit: editSkill, onAsk: confirmAction, onToggle: toggleSkill, onAssist: () => openAssistant(t('skillEditPrompt', { reference: JSON.stringify({ name: skill.name, state: skill.state, hash: skill.hash }) })) }),
       confirm && h(ConfirmDialog, { title: t(confirmText[confirm.kind][0]), message: t(confirmText[confirm.kind][1]), confirmLabel: t(confirmText[confirm.kind][2]), cancelLabel: t('cancel'), danger: confirmText[confirm.kind][3], busy, onCancel: () => setConfirm(null), onConfirm: runConfirm }),
       marketItem && h(MarketDrawer, { item: marketItem.item, preview: marketItem.preview, installed: installedNames.has(marketItem.item.name), busy, onClose: () => setMarketItem(null), onInstall: installMarket }),
-      packShown && h(PackDrawer, { pack: packShown, servers: mcp?.servers, busy, onClose: () => setPackOpen(null), onToggle: () => togglePack(packShown), onRemove: () => setPackRemove(packShown), onSkill: item => openPackSkill(packShown, item), onMcp: server => { setPackOpen(null); setKind('mcp'); setView('mine'); setFilter('all'); setQuery(''); setMcpOpen(`ww:${server.name}`); } }),
+      packShown && h(PackDrawer, { pack: packShown, servers: mcp?.servers, busy, onClose: () => setPackOpen(null), onToggle: () => togglePack(packShown), onRemove: () => setPackRemove(packShown), onSkill: item => openPackSkill(packShown, item), onMcp: server => { setPackOpen(null); setKind('mcp'); setView('mine'); setFilter('all'); setQuery(''); setMcpOpen(server.name); } }),
       packPreview && h(PackPreview, { key: packPreview.preview?.stage ?? `loading:${packPreview.entry?.id}`, entry: packPreview.entry, preview: packPreview.preview, busy: installing, onClose: () => setPackPreview(null), onInstall: installPack }),
       packRemove && h(ConfirmDialog, { title: '卸载插件包', message: `卸载「${packRemove.title}」？里面的 ${packRemove.skills.length} 项技能和 ${packRemove.mcp.length} 个 MCP 一起删掉，凭据库里这些 MCP 的密钥也删掉。要用可以再从“发现”里装。`, confirmLabel: '卸载', cancelLabel: t('cancel'), danger: true, busy, onCancel: () => setPackRemove(null), onConfirm: removePack }),
       marketEditor && h(MarketEditor, { busy: marketBusy, onClose: () => setMarketEditor(false), onAdd: addMarket }),
-      mcpShown && !mcpEditor && h(McpDrawer, { server: mcpShown, packTitle, busy, onClose: () => setMcpOpen(null), onEdit: () => setMcpEditor({ server: mcpShown }), onToggle: () => toggleMcp(mcpShown), onReconnect: () => reconnectMcp(mcpShown), onRemove: () => setMcpRemove(mcpShown), recommend: recommendFor(mcpShown) }),
-      mcpEditor && h(McpEditor, { key: mcpEditor.server?.name ?? mcpEditor.item?.id ?? 'custom', spec: mcpEditor, taken: mcpTaken, t, onClose: () => setMcpEditor(null), onSave: saveMcp }),
-      mcpRemove && h(ConfirmDialog, { title: '删除 MCP', message: `删除「${mcpRemove.title}」？连接会断开，DSH 凭据库里它的密钥也一起删掉；专家以后就用不了它的工具。`, confirmLabel: '删除', cancelLabel: t('cancel'), danger: true, busy, onCancel: () => setMcpRemove(null), onConfirm: removeMcp }),
+      mcpShown && !mcpEditor && h(McpDrawer, { server: mcpShown, packTitle, busy, onClose: () => setMcpOpen(null), onEdit: () => setMcpEditor({ server: mcpShown }), onToggle: () => toggleMcp(mcpShown), onReconnect: () => reconnectMcp(mcpShown), onRemove: () => setMcpRemove(mcpShown), onSecret: (field, value) => secretMcp(mcpShown, field, value), recommend: recommendFor(mcpShown) }),
+      mcpEditor && h(McpEditor, { key: mcpEditor.server?.name ?? mcpEditor.item?.id ?? 'custom', spec: mcpEditor, taken: mcpTaken, t, onClose: () => setMcpEditor(null), onSave: saveMcp, onProbe: probeMcp }),
+      mcpRemove && h(ConfirmDialog, { title: '删除 MCP', message: `删除「${mcpRemove.title}」？会从 DSH 配置里删掉，凭据库里它的密钥也一起删掉；专家以后就用不了它的工具。`, confirmLabel: '删除', cancelLabel: t('cancel'), danger: true, busy, onCancel: () => setMcpRemove(null), onConfirm: removeMcp }),
       teamEditor && h(TeamSkillEditor, { key: teamEditor.id, skill: teamEditor, t, onClose: () => setTeamEditor(null), onSave: content => saveTeamSkill(content).catch(reason => notify(reason.message || t('requestFailed'), { kind: 'error' })) }),
       skillEditor !== undefined && h(SkillEditor, { key: skillEditor?.id || 'new-skill', api, entry: skillEditor, t, notify, onClose: () => setSkillEditor(undefined), onSaved: async entry => { const value = await readAll(); adopt(value); setSkillEditor(undefined); setView('mine'); setSkill(entry); notify(t('skillSaved')); } }));
     return active ? body : null;

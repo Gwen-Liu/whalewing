@@ -114,6 +114,8 @@ export const css = [
   // 2026-11-02 补齐设计稿的点缀：技能页没选技能时的空卡、定时任务分栏的水印。
   skills.styles[2],
   skills.styles[3],
+  // 2026-11-15 MCP 改存 DSH 配置（0.2.2-rc.3.2）：状态一栏加宽、原因一行、密钥一块、试连结果、搬家提示。
+  skills.styles[4],
   automation.styles[6],
   // 2026-11-08 专家团改版：专家页查找筛选、名帖点开详情、详情抽屉。
   experts.styles[5],

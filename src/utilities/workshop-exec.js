@@ -4,6 +4,7 @@
  */
 import { decodeAudio, captureFrames } from './media-prep.js';
 import { modelFunctions } from './model-specs.js';
+import { officePdf, officeImagesRequest, officeUpgrade } from './office-items.js';
 import { utilityCatalog } from './catalog.js';
 
 const regionKeys = ['x', 'y', 'width', 'height'];
@@ -91,11 +92,10 @@ export function createExecutor({ workerSource, platform = globalThis, prepareAud
       return worker({ tool: 'audio-encode', files: [], text: '', options: { pcm: { sampleRate: pcm.sampleRate, channels: pcm.channels }, name: files[0].name } });
     }
     if (id === 'video-frame') return prepareFrames(files[0], String(options.times ?? '每 5 秒'), platform);
-    // Office 转 PDF 交给主机，用 DSH 自带的转换（2026-11-12）。
-    if (id === 'office-pdf') {
-      if (typeof services.officePdf !== 'function') throw new Error('办公工坊还没连上主机，转不了 PDF');
-      return services.officePdf(files[0]);
-    }
+    // 借 DSH 自带 Office 引擎的功能项交给主机：Office 转 PDF（2026-11-12）、Office 转图片和旧格式转新格式（2026-11-15）。
+    if (id === 'office-pdf') return officePdf(services, files[0]);
+    if (id === 'office-images') return worker(await officeImagesRequest(services, files[0], workerOptions('pdf-images', options)));
+    if (id === 'office-upgrade') return officeUpgrade(services, files);
     const prepared = workerOptions(id, options);
     if (id === 'excel-join') {
       const tables = await headers(files);

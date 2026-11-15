@@ -1,6 +1,7 @@
 /** 办公工坊只消费用户选件；下载与后台任务仅在当前挂载实例存活。 */
 import { utilityTools, searchUtilities, utilityGapsFor, unsupportedImageReason } from './catalog.js';
 import { decodeAudio, captureFrames } from './media-prep.js';
+import { officePdf, officeImagesRequest, officeUpgrade } from './office-items.js';
 import { createWorkshopView } from './workshop.js';
 import { createSortable, moveItem } from '../sortable.js';
 
@@ -288,7 +289,10 @@ export function createUtilityViews(React, workerSource, services = {}) {
       if (item.audio) return runner.current.prepare(() => decodeAudio(files[0], item.trim ? { start: settings.start, end: settings.end } : {}), pcm => ({ tool: 'audio-encode', files: [], text: '', options: { pcm: { sampleRate: pcm.sampleRate, channels: pcm.channels }, name: files[0].name } }));
       if (item.video) return runner.current.prepare(() => captureFrames(files[0], settings.times));
       // Office 转 PDF 用 DSH 自带的转换（2026-11-12）：文件交给主机，结果和其他功能项一样显示。
-      if (item.office) return runner.current.prepare(() => { if (typeof services.officePdf !== 'function') throw new Error('办公工坊还没连上主机，转不了 PDF'); return services.officePdf(files[0]); });
+      // 2026-11-15 加 Office 转图片（转成 PDF 后接“PDF 转图片”）、旧格式转新格式（一个一个交给主机），同样用 DSH 自带的转换。
+      if (item.id === 'office-images') return runner.current.prepare(() => officeImagesRequest(services, files[0], options), request => request);
+      if (item.id === 'office-upgrade') return runner.current.prepare(() => officeUpgrade(services, files));
+      if (item.office) return runner.current.prepare(() => officePdf(services, files[0]));
       ran.current = { files: chosenFiles, positions: override.positions || chosenFiles.map((_, i) => i) };
       runner.current.run({ tool: chosen || tool, files: chosenFiles, text, options }, { append: !!override.append });
     };
@@ -389,7 +393,7 @@ export function createUtilityViews(React, workerSource, services = {}) {
       item.id === 'image-watermark' && h('div', null, input('watermark', '水印文字', '如：仅供内部评审使用'), h('div', { className: 'ww-row' }, number('fontSize', '字号', 10, 200), number('opacity', '透明度', 0.1, 1, 0.1), select('position', '位置', [['top-left', '左上'], ['center', '居中'], ['bottom-right', '右下']]))),
       item.id === 'image-mosaic' && number('block', '马赛克方块大小（像素）', 2, 200),
       item.id === 'image-grid' && h('div', { className: 'ww-row' }, number('rows', '行数', 1, 10), number('gridColumns', '列数', 1, 10)),
-      ['pdf-split', 'pdf-rotate', 'pdf-number', 'pdf-watermark', 'pdf-images'].includes(item.id) && input('pages', '页码', '留空为全部；如 1,3-5,2（页面整理按此顺序输出）'),
+      ['pdf-split', 'pdf-rotate', 'pdf-number', 'pdf-watermark', 'pdf-images', 'office-images'].includes(item.id) && input('pages', '页码', '留空为全部；如 1,3-5,2（页面整理按此顺序输出）'),
       item.id === 'pdf-rotate' && select('angle', '顺时针旋转', [['90', '90°'], ['180', '180°'], ['270', '270°']]),
       item.id === 'pdf-watermark' && input('watermark', '水印文字', '1–60 字'),
       ['excel-dedupe', 'excel-filter', 'excel-sort'].includes(item.id) && input('columns', item.id === 'excel-dedupe' ? '关键列名称' : '列名称', item.id === 'excel-dedupe' ? '多列用英文逗号分隔' : '与表头一致'),

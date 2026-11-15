@@ -6,10 +6,26 @@ import { z } from 'zod';
 import { bindTypertRemote, RemoteError } from '@deepseek-ai/dsh-typert-protocol';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { registerBuiltin } from '../../src/features.js';
-import { pathEntryLimit, toolboxContract, toolboxNamespace } from './contract.js';
+import { officeUpgrades, pathEntryLimit, toolboxContract, toolboxNamespace } from './contract.js';
 import { ToolboxBroker, composeMessage, jobCommand, jobKey, jobProjection, jobTitle, parseJobMarker, workspaceTitle } from './jobs.js';
 import { toolboxTool, toolboxToolName } from './tool.js';
 import { applyToolboxHandoff } from './handoff.js';
+
+/** DSH Office 引擎的失败说成大白话（引擎原文是英文代码）；别的错照原样交给页面。 */
+const officeReasons = {
+  'invalid-document': '文件打不开：可能已经损坏、加了密码，或者其实不是这种格式',
+  'unsupported-format': '这种文件 DSH 的 Office 转换不认',
+  'input-too-large': '文件太大了，DSH 的 Office 转换最多收 50 MB',
+  'output-too-large': '转出来的文件太大了',
+  timeout: '转换超时了，文件可能太复杂；可以在 Office 里直接另存',
+  busy: 'DSH 的 Office 转换正忙，稍后再试',
+  unavailable: '这个 DSH 的 Office 转换用不了（引擎没装好）',
+  'source-changed': '文件在转换途中变了，请重新放进来',
+};
+function officeError(error) {
+  const reason = officeReasons[error?.code];
+  return new RemoteError(error?.code || error?.name || 'TOOLBOX', reason ?? error?.message ?? String(error), {});
+}
 
 const contract = toolboxContract(z);
 const fail = (code, message) => { throw Object.assign(new Error(message), { code }); };
@@ -149,7 +165,31 @@ export default class Toolbox extends Service {
       const digest = createHash('sha256').update(bytes).digest('hex');
       const result = await service.convert({ source: { key: `whalewing-toolbox:${digest}`, version: digest, bytes: bytes.byteLength, read: async () => ({ bytes, version: digest }) }, extension: parsed.extension, priority: 'foreground' }, signal);
       return { data: Buffer.from(result.pdf).toString('base64'), missingFonts: [...(result.missingFonts ?? [])].map(String).slice(0, 200) };
-    } catch (error) { throw new RemoteError(error.code || error.name || 'TOOLBOX', error.message, {}); }
+    } catch (error) { throw officeError(error); }
+  }
+
+  /**
+   * 旧格式转新格式（2026-11-15 用户定“按推荐做”：办公工坊借 DSH 自带的 Office 引擎加功能项）：.doc、.xls、.ppt 另存成
+   * .docx、.xlsx、.pptx。用 `officeKit.convertTo`，结果存在 DSH 的 Office 输出区（DSH 自己按时清理），读出来交给页面。
+   */
+  async officeConvert(input, signal) {
+    try {
+      const parsed = contract.officeConvertInput.parse(input);
+      const service = this.ctx.get('officeKit');
+      if (typeof service?.convertTo !== 'function') fail('TOOLBOX_OFFICE_UNAVAILABLE', '这个 DSH 没有开 Office 转换服务，转不了；可以先在 Word、Excel、PowerPoint 里“另存为”新格式');
+      const bytes = new Uint8Array(Buffer.from(parsed.data, 'base64'));
+      const digest = createHash('sha256').update(bytes).digest('hex');
+      const format = officeUpgrades[parsed.extension];
+      const base = parsed.name.replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').trim().slice(0, 100) || '文档';
+      const result = await service.convertTo({
+        source: { key: `whalewing-toolbox:${digest}`, version: digest, bytes: bytes.byteLength, read: async () => ({ bytes, version: digest }) },
+        extension: parsed.extension, format,
+        // 输出区里按内容指纹起名，两份同名文件同时转也不会互相覆盖；交给页面的用原文件名。
+        output: { owner: 'whalewing-toolbox', name: `${digest.slice(0, 12)}.${format}` },
+      }, signal);
+      const data = await readFile(result.path);
+      return { name: `${base}.${format}`, data: data.toString('base64'), missingFonts: [...(result.missingFonts ?? [])].map(String).slice(0, 200) };
+    } catch (error) { throw officeError(error); }
   }
 
   /**

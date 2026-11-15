@@ -114,7 +114,7 @@ async function save(page, dialog, name) {
 
 // 需求§办公工坊的功能项表：每个分类的功能项，按需求原文写（括号里的补充说明去掉）。
 const requiredTools = [
-  ['格式转换', ['Office 转 PDF', 'PDF 转 Word', '图片转 PDF', 'PDF 转图片', '图片转格式', 'Excel／CSV 互转', 'Excel 转 JSON', 'Word 转 TXT', '提取文档图片']],
+  ['格式转换', ['Office 转 PDF', 'Office 转图片', '旧格式转新格式', 'PDF 转 Word', '图片转 PDF', 'PDF 转图片', '图片转格式', 'Excel／CSV 互转', 'Excel 转 JSON', 'Word 转 TXT', '提取文档图片']],
   ['PDF 处理', ['合并', '拆分', '压缩', '页面整理', '旋转', '添加页码', '添加水印', '提取文字']],
   ['表格处理', ['合并表格', '拆分工作表', '按字段拆分', '按关键列关联', '数据去重', '两表核对', '条件筛选', '数据排序', '清理空白']],
   ['图片处理', ['压缩与转格式', '旋转翻转', '裁剪', '拼接长图', '宫格切图', '添加水印', '隐私打码', '去除水印']],
@@ -125,7 +125,7 @@ const requiredTools = [
 const squash = value => value.replace(/\s+/g, '').replace(/／/g, '/');
 
 // 需求§办公工坊（7 个分类、功能项表）；需求§办公工坊·怎么用（开始页放文件、说要求；“全部功能项”从右侧拉出抽屉，每个分类一行、默认收起，点一下展开功能项标签、再点收起）
-test('办公工坊开始页和“全部功能项”抽屉：7 个分类共 44 项，默认收起，点开后每个分类的功能项和需求的功能项表一致', async t => {
+test('办公工坊开始页和“全部功能项”抽屉：7 个分类共 46 项，默认收起，点开后每个分类的功能项和需求的功能项表一致', async t => {
   await withPage(browser, t, async ({ page, errors, external }) => {
     await openWhaleWing(page, dsh.url);
     await openTab(page, '办公工坊');
@@ -142,7 +142,7 @@ test('办公工坊开始页和“全部功能项”抽屉：7 个分类共 44 �
     const shelf = await openShelf(page);
     assert.equal(await textOf(shelf.locator('.ww-tool-shelf-head h2')), '全部功能项');
     const total = requiredTools.reduce((sum, [, functions]) => sum + functions.length, 0);
-    assert.equal(total, 44, '需求的功能项表合计 44 项');
+    assert.equal(total, 46, '需求的功能项表合计 46 项（2026-11-15 加了 Office 转图片、旧格式转新格式）');
     assert.match(await textOf(shelf.locator('.ww-tool-shelf-head p')), new RegExp(`^${total} 项 · `));
     // 抽屉贴着窗口右边，从上到下，不占满整页。
     const box = await shelf.boundingBox(), { width, height } = page.viewportSize();
@@ -346,6 +346,55 @@ test('反例：图片里没有二维码时说明没识别到，不出结果，�
 });
 
 // 需求§办公工坊·图片（转换格式保持原尺寸）；办公工坊说明（转 JPEG 时透明区域填白）
+// TOOL-31 需求§办公工坊（格式转换·旧格式转新格式：.doc、.xls、.ppt 用 DSH 自带的转换另存成新格式，2026-11-15 加）
+test('旧格式转新格式：Excel 97-2003 的 .xls 用 DSH 自带的转换另存成 .xlsx，工作表名、内容和公式都在；原件不变', async t => {
+  // 真正的 97-2003 格式（OLE 复合文档），由 e2e/fixtures/make-legacy-xls.py 用 xlwt 生成；改后缀的 CSV、HTML DSH 不认。
+  const original = files.file('legacy-sales.xls', fs.readFileSync(path.join(pluginRoot, 'e2e', 'fixtures', 'legacy-sales.xls')));
+  const hash = sha256(original);
+  await withPage(browser, t, { acceptDownloads: true }, async ({ page, errors, external }) => {
+    await openWhaleWing(page, dsh.url);
+    const dialog = await openTool(page, '格式转换', '旧格式转新格式');
+    await fileInput(dialog).setInputFiles(original);
+    await startButton(dialog).click();
+    await finished(dialog);
+    assert.match(await textOf(resultBox(dialog)), /已用 DSH 自带的转换另存成新格式，共 1 个/);
+    const output = await save(page, dialog, 'legacy-sales.xlsx');
+    const book = new ExcelJS.Workbook();
+    await book.xlsx.readFile(output);
+    const sheet = book.getWorksheet('销售');
+    assert.ok(sheet, '工作表名照旧');
+    assert.deepEqual(sheet.getRow(1).values.slice(1), ['月份', '地区', '金额']);
+    assert.deepEqual(sheet.getRow(3).values.slice(1), ['一月', '华南', 980]);
+    const total = sheet.getCell('C5').value;
+    assert.equal(String(total?.formula ?? '').replace(/^=/, ''), 'SUM(C2:C4)', '公式还在');
+    assert.equal(total?.result, 3530, '公式的结果也在');
+    assert.deepEqual(external, []); assert.deepEqual(errors, []);
+  });
+  assert.equal(sha256(original), hash, '原件没被改');
+});
+
+// TOOL-32 需求§办公工坊（格式转换·Office 转图片：先用 DSH 自带的转换转成 PDF，再每页导出 PNG，2026-11-15 加）
+test('Office 转图片：两张工作表的 Excel 先用 DSH 自带的转换转成 PDF，再每页导出一张 PNG，打包成一个压缩包', async t => {
+  const original = await workbook('季度表.xlsx', { 一季度: [['月份', '金额'], ['一月', 120], ['二月', 98]], 二季度: [['月份', '金额'], ['四月', 135]] });
+  await withPage(browser, t, { acceptDownloads: true }, async ({ page, errors, external }) => {
+    await openWhaleWing(page, dsh.url);
+    const dialog = await openTool(page, '格式转换', 'Office 转图片');
+    await fileInput(dialog).setInputFiles(original);
+    await dialog.getByRole('textbox', { name: '页码' }).waitFor();
+    await startButton(dialog).click();
+    await finished(dialog);
+    assert.match(await textOf(resultBox(dialog)), /已渲染 2 页 PNG/);
+    const output = await save(page, dialog, '季度表-图片.zip');
+    const entries = unzipSync(new Uint8Array(fs.readFileSync(output)));
+    assert.deepEqual(Object.keys(entries).sort(), ['季度表-1.png', '季度表-2.png'], '一页一张，两张工作表各一页');
+    for (const bytes of Object.values(entries)) {
+      const meta = await sharp(Buffer.from(bytes)).metadata();
+      assert.equal(meta.format, 'png'); assert.ok(meta.width > 300 && meta.height > 300, `图片够大：${meta.width}×${meta.height}`);
+    }
+    assert.deepEqual(external, []); assert.deepEqual(errors, []);
+  });
+});
+
 test('PNG 转 JPEG：宽高和原图相同，原来透明的地方是白色', async t => {
   const original = await image('alpha.png', { alpha: true });
   const hash = await sha256(original);

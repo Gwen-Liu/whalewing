@@ -95,7 +95,16 @@ export const styles = [
 .ww-page .ww-kit-inline{margin-left:8px;padding:0;border:0;background:transparent;min-height:0;font-size:12.5px;color:var(--ww-ink-2);text-decoration:underline;text-underline-offset:3px}.ww-page .ww-kit-inline:hover{color:var(--ww-ink)}.ww-page .ww-kit-shelf-actions{display:inline-flex;align-items:baseline;gap:14px}.ww-page .ww-kit-shelf h3 .ww-kit-hint{font-family:inherit;font-weight:400;font-size:12px;text-decoration:none}.ww-page dialog .ww-kit-items+.ww-kit-note,.ww-page dialog .ww-kit-paths+.ww-kit-note,.ww-page dialog .ww-kit-note+.ww-kit-note{margin-top:12px}
 .ww-page .ww-kit-mine>.ww-kit-group>h3{margin-left:2px}.ww-page .ww-kit-tiles{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px clamp(12px,2vw,28px)}.ww-page .ww-kit-tiles .ww-kit-row{grid-template-columns:2.25rem minmax(0,1fr) auto;border-bottom:0;border-radius:10px}.ww-page .ww-kit-tiles .ww-kit-row:hover:not(:disabled){border-radius:10px}.ww-page .ww-kit-tiles .ww-kit-main .ww-kit-type{display:inline;font-size:inherit;color:var(--ww-ink-3)}
 .ww-page .ww-kit-mine>.ww-kit-group>.ww-kit-more{margin-left:12px}.ww-page .ww-kit-chips{display:flex;gap:6px;overflow-x:auto;scrollbar-width:thin;margin:22px 0 4px;padding:2px 2px 8px;border-top:1px solid var(--ww-line);padding-top:16px}.ww-page .ww-kit-chips .ww-chip{flex:none}.ww-page .ww-kit-chips small{font-size:12px;color:var(--ww-ink-3)}
-@container ww-main (max-width:44rem){.ww-page .ww-kit-tiles{grid-template-columns:minmax(0,1fr)}}`
+@container ww-main (max-width:44rem){.ww-page .ww-kit-tiles{grid-template-columns:minmax(0,1fr)}}`,
+// MCP（0.2.2-rc.3.2）：状态一栏放得下“连不上 · 12 秒后第 4 次重试”和下面一行原因；密钥一块一项；试连的结果；升级后的搬家提示。
+`.ww-page .ww-kit-table[data-kind=mcp] .ww-kit-thead,.ww-page .ww-kit-table[data-kind=mcp] .ww-kit-row{grid-template-columns:2.25rem minmax(0,1fr) minmax(4.5rem,clamp(5rem,12%,8rem)) minmax(8rem,clamp(9rem,32%,22rem))}
+.ww-page .ww-kit-state{display:grid;gap:1px;min-width:0}.ww-page .ww-kit-state .ww-kit-status{overflow:hidden;text-overflow:ellipsis}.ww-page .ww-kit-state .ww-kit-why{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--ww-ink-3)}
+.ww-page .ww-kit-name .ww-tag{margin-left:6px;font-size:11px;vertical-align:1px}
+.ww-page .ww-kit-secret{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 12px;margin:0 0 8px;padding:8px 12px;border-radius:12px;background:var(--ww-surface-2)}.ww-page .ww-kit-secret .ww-kit-main{display:grid;min-width:0}.ww-page .ww-kit-secret .ww-kit-hint{overflow-wrap:anywhere}
+.ww-page .ww-kit-secret-edit{display:flex;flex-wrap:wrap;align-items:center;gap:6px;flex:1 1 16rem;justify-content:flex-end}.ww-page .ww-kit-secret-edit input{flex:1 1 10rem;min-width:0}.ww-page .ww-kit-secret-state{display:inline-flex;align-items:baseline;gap:4px}
+.ww-page .ww-kit-probe{display:grid;gap:4px}.ww-page .ww-kit-probe p{margin:0}.ww-page .ww-kit-probe[data-tone=ok] strong{color:var(--ww-ok)}
+.ww-page .ww-kit-moved{display:flex;align-items:center;gap:12px;margin:0 0 12px}.ww-page .ww-kit-moved p{flex:1;margin:0}.ww-page .ww-kit-moved small{color:var(--ww-ink-3)}
+@container ww-main (max-width:40rem){.ww-page .ww-kit-table[data-kind=mcp] .ww-kit-row{grid-template-columns:2.25rem minmax(0,1fr) minmax(0,auto)}.ww-page .ww-kit-state{justify-items:end;max-width:12rem}}`
 ];
 
 // 专属错误只解释本领域；输入原文与公共运输错误由共用呈现机制处理。

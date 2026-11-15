@@ -316,6 +316,62 @@ test('Office 转 PDF 交给 DSH 的转换服务：读回的版本和登记的一
   assert.equal(requests[0].extension, 'docx'); assert.equal(requests[0].priority, 'foreground');
   await assert.rejects(Toolbox.prototype.officePdf.call(self, { name: 'a.pdf', extension: 'pdf', data }), /Invalid/);
   await assert.rejects(Toolbox.prototype.officePdf.call({ ctx: { get: () => undefined } }, { name: 'a.docx', extension: 'docx', data }), /没有开 Office 转 PDF 服务/);
+  // DSH Office 引擎的英文错误代码说成大白话。
+  const broken = { ctx: { get: () => ({ convert: async () => { throw Object.assign(new Error('The document could not be loaded.'), { code: 'invalid-document' }); } }) } };
+  await assert.rejects(Toolbox.prototype.officePdf.call(broken, { name: 'a.docx', extension: 'docx', data }), { code: 'invalid-document', message: /文件打不开/ });
+});
+
+// 2026-11-15 用户定“按推荐做”：办公工坊借 DSH 自带的 Office 引擎加“旧格式转新格式”。
+test('旧格式转新格式交给 DSH 的 convertTo：.doc→.docx、.xls→.xlsx、.ppt→.pptx，读回存好的文件交给页面，文件名用原名', async () => {
+  const { default: Toolbox } = await import('../features/toolbox/host.js');
+  const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const dir = mkdtempSync(join(tmpdir(), 'ww-office-'));
+  try {
+    const requests = [];
+    const officeKit = { async convertTo(request, signal) {
+      requests.push(request);
+      const input = await request.source.read(signal, request.source.bytes);
+      assert.equal(input.version, request.source.version);
+      const file = join(dir, request.output.name);
+      writeFileSync(file, `converted ${request.extension}→${request.format}`);
+      return { path: file, bytes: 20, missingFonts: request.extension === 'doc' ? ['方正仿宋'] : [] };
+    } };
+    const self = { ctx: { get: name => (name === 'officeKit' ? officeKit : undefined) } };
+    const data = Buffer.from('legacy bytes').toString('base64');
+    for (const [name, extension, format] of [['合同 v2.doc', 'doc', 'docx'], ['销售.xls', 'xls', 'xlsx'], ['汇报.ppt', 'ppt', 'pptx']]) {
+      const value = await Toolbox.prototype.officeConvert.call(self, { name, extension, data });
+      assert.equal(value.name, `${name.replace(/\.[^.]+$/, '')}.${format}`);
+      assert.equal(Buffer.from(value.data, 'base64').toString(), `converted ${extension}→${format}`);
+      assert.equal(requests.at(-1).format, format); assert.equal(requests.at(-1).output.owner, 'whalewing-toolbox');
+      assert.match(requests.at(-1).output.name, new RegExp(`^[0-9a-f]{12}\\.${format}$`), '输出区里按内容指纹起名');
+    }
+    assert.deepEqual((await Toolbox.prototype.officeConvert.call(self, { name: '合同.doc', extension: 'doc', data })).missingFonts, ['方正仿宋']);
+    assert.equal((await Toolbox.prototype.officeConvert.call(self, { name: 'a/b:c?.xls', extension: 'xls', data })).name, 'a_b_c_.xlsx', '文件名里不能用的字符换掉');
+    await assert.rejects(Toolbox.prototype.officeConvert.call(self, { name: 'a.docx', extension: 'docx', data }), /Invalid/, '只收旧格式');
+    await assert.rejects(Toolbox.prototype.officeConvert.call({ ctx: { get: () => undefined } }, { name: 'a.doc', extension: 'doc', data }), /没有开 Office 转换服务/);
+    const timeout = { ctx: { get: () => ({ convertTo: async () => { throw Object.assign(new Error('Conversion timed out'), { code: 'timeout' }); } }) } };
+    await assert.rejects(Toolbox.prototype.officeConvert.call(timeout, { name: 'a.ppt', extension: 'ppt', data }), { message: /转换超时了/ });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('Office 转图片和旧格式转新格式：页面和小鲸的一单走同一套——先转 PDF 再交给“PDF 转图片”；旧格式一个一个转，缺字体合在一起说', async () => {
+  const { officeImagesRequest, officeUpgrade } = await import('../src/utilities/office-items.js');
+  const services = {
+    officePdf: async file => ({ summary: '已用 DSH 自带的转换生成 PDF', files: [{ name: `${file.name.replace(/\.[^.]+$/, '')}.pdf`, mime: 'application/pdf', bytes: new TextEncoder().encode('%PDF-1.7') }], listing: [] }),
+    officeConvert: async file => ({ name: file.name.replace(/\.(doc|xls|ppt)$/, '.$1x'), mime: 'x', bytes: new Uint8Array([1]), missingFonts: file.name.startsWith('合同') ? ['方正仿宋', '华文中宋'] : ['方正仿宋'] }),
+  };
+  const request = await officeImagesRequest(services, new File([new Uint8Array([1])], '季度汇报.pptx'), { pages: '2' });
+  assert.equal(request.tool, 'pdf-images'); assert.deepEqual(request.options, { pages: '2' });
+  assert.equal(request.files[0].name, '季度汇报.pdf'); assert.equal(request.files[0].type, 'application/pdf');
+  const result = await officeUpgrade(services, [new File([new Uint8Array([1])], '合同.doc'), new File([new Uint8Array([1])], '销售.xls')]);
+  assert.deepEqual(result.files.map(file => file.name), ['合同.docx', '销售.xlsx']);
+  assert.equal(result.summary, '已用 DSH 自带的转换另存成新格式，共 2 个；这台电脑缺这些字体，用相近的字体代替了：方正仿宋、华文中宋');
+  await assert.rejects(officeUpgrade({}, [new File([], 'a.doc')]), /还没连上主机/);
+  // 小鲸的用法表里两项都有，guide 能列出来。
+  assert.ok(functionIds.has('office-images') && functionIds.has('office-upgrade'));
+  assert.match(guideText('convert'), /office-upgrade 旧格式转新格式/);
 });
 
 test('转过来的那一单：标题从会话列表实时读，“回到对话”在专家团队页中间那栏打开（2026-11-12 真模型验收时发现）', async () => {

@@ -70,26 +70,36 @@ export function skillLibraryContract(z) {
     command: text.max(500).optional(), args: z.array(text.max(2000)).max(50).optional(), cwd: text.max(1000).optional(), url: text.max(4000).optional(), urlSecret: z.boolean().optional(),
     env: z.array(pair).max(50), headers: z.array(pair).max(50),
   });
-  const revision = z.number().int().nonnegative();
+  // 0.2.2-rc.3.2 起 MCP 存在 DSH 自己的配置里（插件包带的向 DSH 的 MCP 管理器登记）；修订号是那一条内容的指纹。
+  const revision = text.max(64);
+  const name = text.min(1).max(32);
   const mcpInput = z.discriminatedUnion('action', [
     z.strictObject({ action: z.literal('list') }),
     z.strictObject({ action: z.literal('save'), server, expectedRevision: revision.nullable() }),
-    z.strictObject({ action: z.literal('toggle'), name: text.min(1).max(32), enabled: z.boolean(), expectedRevision: revision }),
-    z.strictObject({ action: z.literal('reconnect'), name: text.min(1).max(32) }),
-    z.strictObject({ action: z.literal('remove'), name: text.min(1).max(32), expectedRevision: revision }),
+    z.strictObject({ action: z.literal('toggle'), name, enabled: z.boolean(), expectedRevision: revision }),
+    z.strictObject({ action: z.literal('reconnect'), name }),
+    z.strictObject({ action: z.literal('remove'), name, expectedRevision: revision }),
+    // 补上或换掉一个已经是引用的密钥；DSH 拿到新值自己重连。
+    z.strictObject({ action: z.literal('secret'), name, field: z.strictObject({ kind: z.enum(['env', 'header', 'url']), key: text.min(1).max(200).optional() }), value: text.min(1).max(8000) }),
+    // 试连一下：照填的连一下就断开，不保存。
+    z.strictObject({ action: z.literal('probe'), server }),
+    // 关掉升级后那条“已经搬过去”的提示。
+    z.strictObject({ action: z.literal('dismiss') }),
   ]);
-  const shownPair = z.strictObject({ name: text, secret: z.boolean(), value: text.optional() });
+  const shownPair = z.strictObject({ name: text, secret: z.boolean(), value: text.optional(), saved: z.boolean().optional(), ref: text.optional() });
   const serverView = z.strictObject({
-    name: text, title: text, catalogId: text.optional(), transport: z.enum(['stdio', 'streamable-http']), target: text,
-    command: text.optional(), args: z.array(text).optional(), url: text.optional(), urlSecret: z.boolean().optional(),
-    env: z.array(shownPair), headers: z.array(shownPair), enabled: z.boolean(), revision,
-    status: z.enum(['connecting', 'connected', 'failed', 'disabled']), error: text.optional(), tools: z.array(text),
-    pack: text.optional(), packOff: z.literal(true).optional(),
+    name: text, title: text, catalogId: text.optional(), source: z.enum(['mine', 'dsh', 'pack', 'plugin', 'static']), transport: z.enum(['stdio', 'streamable-http']), target: text,
+    command: text.optional(), args: z.array(text).optional(), url: text.optional(), urlSecret: z.boolean().optional(), urlRef: text.optional(), urlSaved: z.boolean().optional(),
+    env: z.array(shownPair), headers: z.array(shownPair), enabled: z.boolean(), revision, editable: z.boolean(),
+    status: z.enum(['connecting', 'connected', 'retrying', 'waiting', 'failed', 'disabled', 'external']),
+    toolCount: z.number().int().nonnegative().optional(), attempt: z.number().int().nonnegative().optional(), maxAttempts: z.number().int().nonnegative().optional(), nextRetryAt: z.number().optional(),
+    error: text.optional(), tools: z.array(text), pack: text.optional(), packOff: z.literal(true).optional(),
   });
   const mcpResult = z.union([
-    z.strictObject({ servers: z.array(serverView), profile: z.array(z.strictObject({ name: text, transport: z.enum(['stdio', 'streamable-http']), target: text, enabled: z.boolean() })), credentials: z.boolean() }),
+    z.strictObject({ servers: z.array(serverView), credentials: z.boolean(), manager: z.boolean(), issue: text.optional(), notice: z.strictObject({ moved: z.number().int().nonnegative(), adopted: z.array(text) }).optional() }),
     z.strictObject({ server: serverView }),
     z.strictObject({ removed: text }),
+    z.strictObject({ probe: z.strictObject({ ok: z.boolean(), server: z.strictObject({ name: text, version: text }).optional(), tools: z.array(text), truncated: z.boolean().optional(), ms: z.number().nonnegative(), error: text.optional() }) }),
   ]);
   // 插件包：装好的列表、发现页的市场、装前预览（市场里的或上传的）、安装、启用停用、卸载、看包里一项技能、加或移除市场。
   const packName = text.min(1).max(64);

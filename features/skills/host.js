@@ -6,7 +6,7 @@ import { skillLibraryContract } from './contract.js';
 import { apply as registerTool } from './tool.js';
 import { SkillMarket } from '../../src/skill-market.js';
 import { unpackUpload } from '../../src/skills.js';
-import { McpServers, mcpDomain, serverNamePattern } from '../../src/mcp-servers.js';
+import { McpServers, metaDomain, legacyDomain, serverNamePattern } from '../../src/mcp-servers.js';
 import { PackMarket } from '../../src/pack-market.js';
 import { composePackServer } from '../../src/plugin-packs.js';
 import { freeName } from './mcp-catalog.js';
@@ -37,16 +37,21 @@ export default class Skills extends Service {
     ctx.typert.register(contract.host);
     ctx.inject(['tools', 'sandboxPolicy'], scope => registerTool(scope));
     this.host.commands.handle('skill', (input, caller) => this.host.execute(input, caller));
-    // MCP：定义从 DSH 存储域读，打开的在后台逐个连上（不等它们连完）；存储域在才开，连接随这个作用域一起关。
+    // MCP（0.2.2-rc.3.2 起）：存在 DSH 自己的配置里，由 DSH 的 MCP 管理器连；鲸翼只记显示名称和插件包带的定义。
+    // 要 DSH 的 MCP 管理器、设置服务和存储服务都在才开；插件包带的登记随这个作用域一起撤回。
     this.mcpReady = new Promise(resolve => { this.resolveMcp = resolve; });
-    ctx.inject(['storageDomain'], async scope => {
-      const domain = await scope.storageDomain.open(mcpDomain);
-      // 插件包带的 MCP 只在包开着时连：先读一遍装了哪些包。
-      const mcp = new McpServers(scope, domain.table('servers'), { packEnabled: name => Boolean(this.packs.get(name)?.enabled) });
-      scope.effect(() => () => { mcp.close(); domain.close(); if (this.mcp === mcp) this.mcp = undefined; }, '鲸翼 MCP');
-      this.mcp = mcp; this.resolveMcp(mcp);
+    ctx.inject(['storageDomain', 'mcpManager', 'settings'], async scope => {
+      const directory = await this.host.profileDirectory();
+      const metaStore = await scope.storageDomain.open(metaDomain(directory));
+      const legacyStore = await scope.storageDomain.open(legacyDomain);
+      // 插件包带的 MCP 只在包开着时登记：先读一遍装了哪些包。
+      const mcp = new McpServers(scope, { meta: metaStore.table('meta'), notes: metaStore.table('notes'), legacy: legacyStore.table('servers'), packEnabled: name => Boolean(this.packs.get(name)?.enabled) });
+      scope.effect(() => () => { mcp.close(); metaStore.close(); legacyStore.close(); if (this.mcp === mcp) this.mcp = undefined; }, '鲸翼 MCP');
       await this.packs.load().catch(() => {});
-      mcp.startAll();
+      // 旧版自己存的 MCP 搬进 DSH 配置（只第一次有东西可搬）；搬不了的留着，下次启动再试。
+      await mcp.migrate().catch(error => scope.logger?.warn?.(`鲸翼 MCP 搬家没完成：${error.message}`));
+      mcp.startPacks();
+      this.mcp = mcp; this.resolveMcp(mcp);
     });
     ctx.effect(() => async () => {
       this.closing.abort(new Error('功能已卸载，当前操作停止'));
@@ -84,16 +89,20 @@ export default class Skills extends Service {
       const input = contract.mcpInput.parse(raw);
       signal = AbortSignal.any([this.closing.signal, AbortSignal.timeout(this.host.vault.limits.operationMs), ...(signal ? [signal] : [])]);
       const mcp = await this.mcpService();
-      if (input.action === 'save') {
+      if (input.action === 'save' || input.action === 'probe') {
         const server = input.server;
-        if (!serverNamePattern.test(server.name)) fail('MCP_NAME', '英文名只能用小写字母、数字和单个短横线，最长 32 个字符');
+        // 新加的英文名照鲸翼的规则；DSH 配置文件里手写的（可能有大写、下划线）改的时候不拦。
+        if (input.action === 'save' && input.expectedRevision === null && !serverNamePattern.test(server.name)) fail('MCP_NAME', '英文名只能用小写字母、数字和单个短横线，最长 32 个字符');
         if (server.transport === 'stdio' && !server.command?.trim()) fail('MCP_INPUT', '本机程序要填命令，比如 npx');
         if (server.transport === 'streamable-http' && !server.urlSecret && !/^https?:\/\//.test(server.url ?? '')) fail('MCP_INPUT', '远程服务要填 http:// 或 https:// 开头的地址');
       }
-      const result = input.action === 'list' ? mcp.list()
+      const result = input.action === 'list' ? await mcp.list()
         : input.action === 'save' ? await mcp.save(input)
         : input.action === 'toggle' ? await mcp.setEnabled(input.name, input.enabled, input.expectedRevision)
         : input.action === 'reconnect' ? await mcp.reconnect(input.name)
+        : input.action === 'secret' ? await mcp.setSecret(input.name, input.field, input.value)
+        : input.action === 'probe' ? await mcp.probe(input.server, signal)
+        : input.action === 'dismiss' ? await mcp.dismissNotice()
         : await mcp.remove(input.name, input.expectedRevision);
       return contract.mcpResult.parse(result);
     } catch (error) { throw new RemoteError(error.code || error.name || 'ERROR', error.message, {}); }
@@ -101,7 +110,7 @@ export default class Skills extends Service {
 
   /** MCP 挂载要等 DSH 的存储服务；十秒还没好就说明一句。 */
   async mcpService() {
-    return this.mcp ?? Promise.race([this.mcpReady, new Promise((_, reject) => setTimeout(() => reject(Object.assign(new Error('DSH 的存储服务还没准备好，MCP 暂时读不了，请稍后重试'), { code: 'MCP_CLOSED' })), 10000).unref?.())]);
+    return this.mcp ?? Promise.race([this.mcpReady, new Promise((_, reject) => setTimeout(() => reject(Object.assign(new Error('DSH 的 MCP 管理器还没准备好，MCP 暂时读不了，请稍后重试；MCP 要 DSH 0.2.2-rc.3 或更新的版本'), { code: 'MCP_CLOSED' })), 10000).unref?.())]);
   }
 
   async managePacks(raw, signal) {
@@ -182,7 +191,7 @@ export default class Skills extends Service {
     if (this.packs.get(pack.name)) fail('PACK_EXISTS', `已经装了「${pack.title}」；要换成新版，先卸载原来那个`);
     const wanted = pack.mcp.filter(plan => !plan.blocked && input.mcp.some(item => item.key === plan.key));
     const mcp = wanted.length ? await this.mcpService() : null;
-    const taken = new Set(mcp ? [...mcp.all().map(server => server.name), ...mcp.profileServers().map(server => server.name)] : []);
+    const taken = mcp ? mcp.takenNames() : new Set();
     const chosen = [], skippedMcp = [];
     for (const plan of pack.mcp) {
       const pick = input.mcp.find(item => item.key === plan.key);
@@ -202,7 +211,7 @@ export default class Skills extends Service {
     await this.packs.install(pack, record, signal);
     const done = [], failed = [];
     for (const { plan, server } of chosen) {
-      try { await mcp.save({ server, expectedRevision: null }, { pack: pack.name, wait: false }); done.push({ key: plan.key, server: server.name }); }
+      try { await mcp.save({ server, expectedRevision: null }, { pack: pack.name }); done.push({ key: plan.key, server: server.name }); }
       catch (error) { failed.push({ key: plan.key, reason: plain(error.message) }); }
     }
     const saved = await this.packs.update(pack.name, { mcp: done, skippedMcp: [...skippedMcp, ...failed] }, signal);

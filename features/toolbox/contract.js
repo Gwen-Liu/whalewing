@@ -8,6 +8,8 @@ export const toolboxActions = ['plan', 'run', 'read', 'ask', 'finish'];
 export const jobStatuses = ['queued', 'running', 'waiting', 'completed', 'error', 'interrupted', 'incomplete', 'unknown'];
 export const fileIdPattern = /^[fr]\d{1,4}(?:-\d{1,3})?$/;
 export const officeExtensions = ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'];
+/** 旧格式转新格式（2026-11-15 用户定，借 DSH 自带的 Office 引擎）：97-2003 格式另存成新格式。 */
+export const officeUpgrades = Object.freeze({ doc: 'docx', xls: 'xlsx', ppt: 'pptx' });
 // 单个文件最多 25 MiB，base64 后约 34 MB。
 export const officeLimit = Math.ceil(25 * 1024 * 1024 / 3) * 4;
 // 读文件夹时最多列多少项（文件和子文件夹一起算）。
@@ -45,6 +47,8 @@ export function toolboxContract(z) {
   // Office 转 PDF 用 DSH 自带的转换（2026-11-12 用户定）：页面把文件以 base64 交给主机，主机转好交回。
   const officeInput = z.strictObject({ name: text.min(1).max(limits.name), extension: z.enum(officeExtensions), data: text.max(officeLimit) });
   const officeOutput = z.strictObject({ data: text, missingFonts: z.array(text.max(200)).max(200) });
+  const officeConvertInput = z.strictObject({ name: text.min(1).max(limits.name), extension: z.enum(Object.keys(officeUpgrades)), data: text.max(officeLimit) });
+  const officeConvertOutput = z.strictObject({ name: text.min(1).max(limits.name), data: text, missingFonts: z.array(text.max(200)).max(200) });
   // 员工在输入框里贴的路径（2026-11-14 用户定：员工一般复制文件夹路径，不会拖文件夹）：主机列出这一层的文件给页面挑，
   // 再一个一个读给页面。只有办公工坊页面调得到，小鲸调不到；单个文件和拖进来的一样最多 25 MiB。
   const pathInput = z.strictObject({ path: text.min(3).max(1000) });
@@ -64,6 +68,7 @@ export function toolboxContract(z) {
     descriptor('claim', { parameters: [json('input', 'ToolboxClaim', () => claim)], result: { mode: 'strict', typeSymbol: `${packageName}#ToolboxClaimed`, create: () => accepted } }),
     descriptor('listPath', { parameters: [json('input', 'ToolboxPathInput', () => pathInput)], cancellation: { parameter: 'signal' }, result: { mode: 'strict', typeSymbol: `${packageName}#ToolboxPathListing`, create: () => pathListing } }),
     descriptor('readPathFile', { parameters: [json('input', 'ToolboxPathFileInput', () => pathFileInput)], cancellation: { parameter: 'signal' }, result: { mode: 'strict', typeSymbol: `${packageName}#ToolboxPathFile`, create: () => pathFile } }),
+    descriptor('officeConvert', { parameters: [json('input', 'ToolboxOfficeConvertInput', () => officeConvertInput)], cancellation: { parameter: 'signal' }, result: { mode: 'strict', typeSymbol: `${packageName}#ToolboxOfficeConvertOutput`, create: () => officeConvertOutput } }),
   ];
-  return { start, started, reply, request, job, frame, handoff, handoffs, claim, officeInput, officeOutput, pathInput, pathListing, pathFileInput, pathFile, fileMeta, host: { package: packageName, face: 'host', schemas: [], invocations: descriptors, model: { package: packageName, face: 'host' } }, client: { package: packageName, descriptors } };
+  return { start, started, reply, request, job, frame, handoff, handoffs, claim, officeInput, officeOutput, officeConvertInput, officeConvertOutput, pathInput, pathListing, pathFileInput, pathFile, fileMeta, host: { package: packageName, face: 'host', schemas: [], invocations: descriptors, model: { package: packageName, face: 'host' } }, client: { package: packageName, descriptors } };
 }

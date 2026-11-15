@@ -98,7 +98,9 @@ test('全栏改版后的双语词条与样式快照', () => {
   // 旧首页“书桌”一族的样式删掉。强调底色用天青点缀色（--ww-orn-2 / --ww-orn），不用品牌色铺底。
   // 同日小鲸只留气泡时，专家团队页中间那栏底部留出气泡的高度（.ww-workspace-bubble .ww-expert-conversation），输入框和审批框不被气泡挡住。
   // 同日勾选一项统一成 ww-choice：删掉 ww-check、ww-kit-check-label 两套样式，插件包挑技能那一列名字的加粗并进 .ww-page label.ww-choice strong。
-  assert.equal(hash(css), '8dd9ff18d0438cd1e375cbb2fb492f15d9322a00fb9b673d37f70bfab7397b90');
+  // 2026-11-15 MCP 改存 DSH 配置（0.2.2-rc.3.2）：MCP 列表的状态一栏加宽、状态下面一行原因（ww-kit-state）、名字后的来源小标签、
+  // 详情里一项一块的密钥（ww-kit-secret，填密钥时的输入行）、试连结果（ww-kit-probe）、升级后的搬家提示（ww-kit-moved）。
+  assert.equal(hash(css), '32427dd205383968caee25de4dfd56ea5553b618c365a3cd19427d11d77e5504');
   assert.ok(css.includes('.ww-book-scroll{--dsh-scrollbar-width:14px;--dsh-scrollbar-thumb-border:4px;'), '正文滚动条够宽好拖');
   assert.equal(zh.newsHeadline, '来源标题'); assert.equal(en.newsHeadline, 'Source headline'); assert.equal(zh.newsViewSource, '查看来源');
   assert.equal(zh.library, '书架'); assert.equal(zh.learningTip, 'AI 使用技巧'); assert.equal(zh.libraryAll, '全部'); assert.equal(zh.libraryDailyBadge, '常看');

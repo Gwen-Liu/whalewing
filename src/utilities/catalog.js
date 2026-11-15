@@ -6,6 +6,9 @@ const fn = (id, title, brief, accept, extra = {}) => ({ id, title, brief, accept
 export const utilityTools = Object.freeze([
   { id: 'convert', title: '格式转换', brief: 'Word、PDF、Excel、图片互相转换', icon: 'convert', color: '#2563eb', functions: [
     fn('office-pdf', 'Office 转 PDF', 'Word、Excel、PPT 转成 PDF', '.doc,.docx,.xls,.xlsx,.ppt,.pptx', { office: true, keywords: 'word转pdf excel转pdf ppt转pdf pptx docx xlsx 文档转pdf', description: '用 DSH 自带的转换（随包 LibreOffice），排版和原文件接近；Excel 按打印设置分页。和 Word、WPS 自己导出的 PDF 在分页、字体上可能略有不同。' }),
+    // 2026-11-15 用户定“按推荐做”：借 DSH 自带的 Office 引擎加两项（先用 DSH 的）。
+    fn('office-images', 'Office 转图片', 'Word、Excel、PPT 每页导出为 PNG', '.doc,.docx,.xls,.xlsx,.ppt,.pptx', { office: true, keywords: 'ppt转图片 pptx转图片 幻灯片导出图片 word转图片 excel转图片 每页一张 截图', description: '先用 DSH 自带的转换转成 PDF（和“Office 转 PDF”一样），再把每页导出为 PNG，打包成一个压缩包；页码按转出来的 PDF 算，Excel 按打印设置分页。' }),
+    fn('office-upgrade', '旧格式转新格式', '.doc、.xls、.ppt 转成 .docx、.xlsx、.pptx', '.doc,.xls,.ppt', { office: true, multiple: true, keywords: 'doc转docx xls转xlsx ppt转pptx 97-2003 兼容模式 旧版 老格式 另存为', description: '用 DSH 自带的转换（随包 LibreOffice）把 Word、Excel、PowerPoint 97-2003 格式另存成新格式，内容和排版尽量保持；宏、旧式控件和个别特殊排版可能丢失。' }),
     fn('pdf-word', 'PDF 转 Word', '文字型 PDF 转成可编辑文档', '.pdf', { description: '按页重建可编辑的文字，不恢复原排版、图片和表格。扫描件（图片 PDF）无法转换。' }),
     fn('images-pdf', '图片转 PDF', '多张截图、照片按顺序合成 PDF', images, { multiple: true }),
     fn('pdf-images', 'PDF 转图片', '每页导出为 PNG', '.pdf'),

@@ -182,7 +182,7 @@ test('真实生成Client自带严格校验器，各功能独立挂接且资源�
       if (service === 'whalewingToolbox') {
         // 办公工坊（2026-11-12 改版）：交给小鲸、订阅小鲸推过来的请求、交回结果，三个调用都带严格校验。
         // 2026-11-14 加 listPath、readPathFile：员工贴的文件夹路径由主机列出、一个一个读给页面。
-        assert.deepEqual(contribution.descriptors.map(item => item.method), ['start', 'watch', 'reply', 'handoffs', 'officePdf', 'claim', 'listPath', 'readPathFile']);
+        assert.deepEqual(contribution.descriptors.map(item => item.method), ['start', 'watch', 'reply', 'handoffs', 'officePdf', 'claim', 'listPath', 'readPathFile', 'officeConvert']);
         const start = descriptor.parameters[0].codec.create();
         assert.equal(start.safeParse({ text: '合成一个 PDF', files: [{ id: 'f1', name: 'a.pdf', type: 'pdf', size: 1 }] }).success, true);
         assert.equal(start.safeParse({ text: ' ', files: [] }).success, false, '没文件也没要求不交');

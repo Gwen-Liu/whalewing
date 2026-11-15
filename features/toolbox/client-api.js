@@ -52,6 +52,14 @@ export function createToolboxClient(bridge, experts) {
       const missing = value.missingFonts.length ? [`这台电脑缺这些字体，用相近的字体代替了：${value.missingFonts.join('、')}`] : [];
       return { summary: ['已用 DSH 自带的转换生成 PDF', ...missing].join('；'), files: [{ name: `${base}.pdf`, mime: 'application/pdf', bytes: fromBase64(value.data) }], listing: [] };
     },
+    /** 旧格式转新格式：一个 .doc、.xls、.ppt 交给主机，用 DSH 自带的转换另存成 .docx、.xlsx、.pptx；结果和 Worker 交回的一样。 */
+    async officeConvert(file, signal) {
+      const extension = (/\.([^.]+)$/.exec(file.name)?.[1] || '').toLowerCase();
+      const data = toBase64(new Uint8Array(await file.arrayBuffer()));
+      const value = unwrap(await featureRemote(toolboxNamespace).officeConvert({ name: file.name, extension, data }, signal));
+      const type = (/\.([^.]+)$/.exec(value.name)?.[1] || '').toLowerCase();
+      return { name: value.name, mime: mimeTypes[type] || 'application/octet-stream', bytes: fromBase64(value.data), missingFonts: value.missingFonts };
+    },
     /** 员工贴的路径：主机列出这一层的文件（子文件夹不进去），页面让员工挑。 */
     listPath: async (path, signal) => unwrap(await featureRemote(toolboxNamespace).listPath({ path }, signal)),
     /** 读列出来的一个文件，变成和拖进来一样的文件对象；as 是要显示的文件名（DSH 附件存的文件名是编号，用原文件名）。 */

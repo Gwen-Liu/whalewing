@@ -221,12 +221,12 @@ test('目录按分类分组，每个分类列出全部功能项入口；搜索�
     nodes(tree).find(node => node.props['data-tool-id'] === 'pdf').props.onClick(); tree = fixture.render();
     assert.equal(nodes(tree).filter(node => node.props.className === 'ww-tool-chip').length, 0);
     tree = expandAll(fixture);
-    assert.equal(nodes(tree).filter(node => node.props.className === 'ww-tool-chip').length, 44);
+    assert.equal(nodes(tree).filter(node => node.props.className === 'ww-tool-chip').length, 46);
     nodes(tree).find(node => node.props.type === 'search').props.onChange({ target: { value: 'Word' } }); tree = fixture.render();
     const hits = nodes(tree).filter(node => node.props.className === 'ww-tool-hit');
-    assert.deepEqual(hits.map(node => node.props.children[1].props.children[0]), ['Office 转 PDF', 'PDF 转 Word', 'Word 转 TXT', 'Word 版本对照', '提取文档图片']);
+    assert.deepEqual(hits.map(node => node.props.children[1].props.children[0]), ['Office 转 PDF', 'Office 转图片', 'PDF 转 Word', 'Word 转 TXT', 'Word 版本对照', '提取文档图片']);
     assert.equal(cards(tree).length, 0);
-    hits[3].props.onClick({ currentTarget: { focus() {} } }); tree = fixture.render();
+    hits[4].props.onClick({ currentTarget: { focus() {} } }); tree = fixture.render();
     assert.equal(nodes(tree).find(node => node.type === 'dialog').props['aria-label'], '文字处理');
     assert.equal(nodes(tree).find(node => node.props['aria-current'] === true).props.children[0], 'Word 版本对照');
   } finally { fixture.unmount(); }
@@ -245,7 +245,7 @@ test('搜索词序无关、可搜格式与别名，尚未内置的能力单独�
   // 员工习惯说“PDF 工具”“图片工具”：“工具”不当搜索词，分类里的功能项排在前面，别的分类里沾边的排在后面。
   const pdfGroup = ['合并 PDF', '拆分 PDF', '压缩 PDF', '页面整理', '旋转页面', '添加页码', '添加水印', '提取文字'];
   for (const query of ['PDF 工具', 'pdf工具']) { const found = titles(query); assert.deepEqual(found.slice(0, 2), ['合并 PDF', '拆分 PDF'], query); assert.ok(pdfGroup.every(title => found.indexOf(title) < found.indexOf('Office 转 PDF')), query); }
-  assert.ok(titles('图片工具').includes('裁剪')); assert.equal(titles('工具').length, 44);
+  assert.ok(titles('图片工具').includes('裁剪')); assert.equal(titles('工具').length, 46);
   assert.deepEqual(titles('不存在的功能'), []); assert.deepEqual(titles('   '), []);
   assert.deepEqual(utilityGapsFor('HEIC 转 JPG').length, 1); assert.match(utilityGapsFor('扫描件提字')[0], /OCR/); assert.deepEqual(utilityGapsFor('合并 PDF'), []);
   const fixture = reactFixture();

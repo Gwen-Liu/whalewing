@@ -315,7 +315,7 @@ async function fixture(overrides = {}) {
     skillLibraryContract(z).mcpInput.parse(input);
     calls.push(['mcp', input]);
     if (overrides.mcp) return overrides.mcp(input, signal);
-    if (input.action === 'list') return { ok: true, value: { servers: [], profile: [], credentials: true } };
+    if (input.action === 'list') return { ok: true, value: { servers: [], credentials: true, manager: true } };
     throw new Error('unexpected mcp action');
   };
   // 插件包：也是同一个远程服务；没给替身时“我的”是空的。

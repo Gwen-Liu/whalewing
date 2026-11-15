@@ -10,7 +10,7 @@ import { SkillLibrary } from '../src/skills.js';
 import { WhalewingSkillProvider } from '../src/skill-provider.js';
 import { readPack, planServer, composePackServer, filesFromZip, packArea } from '../src/plugin-packs.js';
 import { PackMarket, resolveSource, githubRepo, builtinMarkets } from '../src/pack-market.js';
-import { McpServers } from '../src/mcp-servers.js';
+import { makeMcp } from './mcp-fake-dsh.mjs';
 import { skillLibraryContract } from '../features/skills/contract.js';
 import { seedBundledSkills } from './skill-seed.mjs';
 
@@ -183,28 +183,24 @@ test('装插件包：预览暂存，只装看过的那一份；技能交给 DSH 
   await assert.rejects(fs.stat(installedDir), { code: 'ENOENT' });
 });
 
-test('插件包带的 MCP：包停用时不连，启用再连；卸载包时一起删，凭据库里的密钥也删', async () => {
-  const rows = new Map(), records = new Map(), mounted = [];
-  const table = { get: key => rows.get(key), entries: () => rows.entries(), put: async (key, value) => { rows.set(key, structuredClone(value)); }, delete: async key => { rows.delete(key); } };
-  const credentials = { readRecord: async key => records.get(key), modifyRecord: async (key, mutate) => { records.set(key, await mutate(records.get(key))); }, deleteRecord: async key => { records.delete(key); } };
-  const ctx = { get: name => ({ credentials, tools: { definitions: () => [] } })[name], emit() {}, plugin(client, config) { const item = { config, disposed: false }; mounted.push(item); return Object.assign(Promise.resolve(), { dispose() { item.disposed = true; } }); } };
+test('插件包带的 MCP：向 DSH 的 MCP 管理器登记；包停用就撤回，启用再登记；卸载包时一起删，凭据库里的密钥也删', async () => {
   let enabled = true;
-  const mcp = new McpServers(ctx, table, { loadClient: async () => ({}), packEnabled: () => enabled });
+  const h = makeMcp({ packOn: () => enabled });
   const server = { name: 'pack-map', title: 'map', transport: 'streamable-http', url: 'https://maps.example.com/mcp', headers: [{ name: 'Authorization', value: 'Bearer K', secret: true }], env: [] };
-  const saved = await mcp.save({ server, expectedRevision: null }, { pack: 'sample-pack', wait: false });
+  const saved = await h.mcp.save({ server, expectedRevision: null }, { pack: 'sample-pack' });
   assert.equal(saved.server.pack, 'sample-pack');
-  await new Promise(setImmediate);
-  assert.equal(mounted.filter(item => !item.disposed).length, 1);
-  enabled = false; mcp.setPack('sample-pack', false);
-  assert.equal(mounted.filter(item => !item.disposed).length, 0, '包停用就断开');
-  assert.deepEqual([mcp.list().servers[0].status, mcp.list().servers[0].packOff], ['disabled', true]);
-  await assert.rejects(mcp.reconnect('pack-map'), { code: 'MCP_DISABLED' });
-  mcp.startAll(); assert.equal(mounted.filter(item => !item.disposed).length, 0, '启动时也不连停用包的');
-  enabled = true; mcp.setPack('sample-pack', true); await new Promise(setImmediate);
-  assert.equal(mounted.filter(item => !item.disposed).length, 1);
-  assert.ok(records.has('whalewing/mcp-pack-map'));
-  assert.deepEqual(await mcp.removePack('sample-pack'), ['pack-map']);
-  assert.equal(rows.size, 0); assert.equal(records.size, 0); assert.equal(mounted.filter(item => !item.disposed).length, 0);
+  assert.equal(h.registered.size, 1); assert.deepEqual(h.state.user, {}, '不写进 DSH 配置');
+  enabled = false; h.mcp.setPack('sample-pack', false);
+  assert.equal(h.registered.size, 0, '包停用就撤回');
+  const view = (await h.mcp.list()).servers[0];
+  assert.deepEqual([view.status, view.packOff], ['disabled', true]);
+  await assert.rejects(h.mcp.reconnect('pack-map'), { code: 'MCP_DISABLED' });
+  h.mcp.startPacks(); assert.equal(h.registered.size, 0, '启动时也不登记停用包的');
+  enabled = true; h.mcp.setPack('sample-pack', true);
+  assert.equal(h.registered.size, 1);
+  assert.equal(h.credentials.values.size, 1);
+  assert.deepEqual(await h.mcp.removePack('sample-pack'), ['pack-map']);
+  assert.equal(h.meta.rows.size, 0); assert.equal(h.credentials.values.size, 0); assert.equal(h.registered.size, 0);
 });
 
 test('鲸翼精选的四个包都能读：每个都有技能，MCP 的要填项有中文名，密钥标成密钥', async t => {

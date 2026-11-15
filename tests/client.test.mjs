@@ -4718,27 +4718,53 @@ test('团队技能在“我的”里单列一组，能改的由维护人编辑�
   f.unmount();
 });
 
-// 2026-11-09 技能中心页的 MCP：我的列表、详情（密钥只显示圆点）、从精选加（只填密钥，拼好的配置交给 Host）。
-test('MCP：我的列出鲸翼加的和 DSH 配置里的，详情不显示密钥；从精选加高德只填 Key，拼好配置交给 Host', async () => {
-  const echo = { name: 'echo-test', title: '本机回声', transport: 'stdio', target: 'node echo.mjs', command: 'node', args: ['echo.mjs'], env: [{ name: 'TOKEN', secret: true }], headers: [], enabled: true, revision: 0, status: 'connected', tools: ['echo'] };
-  const saves = [];
+// 2026-11-15 用户选“方向三”（0.2.2-rc.3.2）：MCP 存在 DSH 自己的配置里；我的按来源分组，状态下面写原因；详情里补密钥；添加前可以试连。
+test('MCP：我的按来源分组、状态下面写原因，升级后有搬家提示；详情里补密钥、停用；从精选加高德只填 Key，试连和保存都交给 Host', async () => {
+  const echo = { name: 'echo-test', title: '本机回声', source: 'mine', transport: 'stdio', target: 'node echo.mjs', command: 'node', args: ['echo.mjs'], env: [{ name: 'TOKEN', secret: true, saved: true, ref: 'WHALEWING_MCP_ECHO_TEST_ENV_TOKEN' }], headers: [], enabled: true, revision: 'r1', editable: true, status: 'connected', toolCount: 1, tools: ['echo'] };
+  const github = { name: 'github', title: 'github', source: 'dsh', transport: 'streamable-http', target: 'https://api.githubcopilot.com/mcp/', url: 'https://api.githubcopilot.com/mcp/', urlSecret: false, env: [], headers: [{ name: 'Authorization', secret: true, saved: false, ref: 'GITHUB_PAT' }], enabled: true, revision: 'r2', editable: true, status: 'waiting', tools: [] };
+  const requests = [];
+  let notice = { moved: 2, adopted: [] };
   const f = await fixture({ mcp: async input => {
-    if (input.action === 'list') return { ok: true, value: { servers: [echo], profile: [{ name: 'github', transport: 'streamable-http', target: 'https://api.githubcopilot.com/mcp/', enabled: true }], credentials: true } };
-    if (input.action === 'save') { saves.push(input); return { ok: true, value: { server: { name: input.server.name, title: input.server.title, catalogId: input.server.catalogId, transport: 'streamable-http', target: 'https://mcp.amap.com/mcp?key=•••', url: '', urlSecret: true, env: [], headers: [], enabled: true, revision: 0, status: 'connected', tools: ['maps_geo'] } } }; }
+    requests.push(input);
+    if (input.action === 'list') return { ok: true, value: { servers: [echo, github], credentials: true, manager: true, ...(notice ? { notice } : {}) } };
+    if (input.action === 'dismiss') { notice = null; return { ok: true, value: { servers: [echo, github], credentials: true, manager: true } }; }
+    if (input.action === 'secret') return { ok: true, value: { server: { ...github, status: 'connecting', headers: [{ name: 'Authorization', secret: true, saved: true, ref: 'GITHUB_PAT' }] } } };
+    if (input.action === 'toggle') return { ok: true, value: { server: { ...echo, enabled: false, status: 'disabled', tools: [] } } };
+    if (input.action === 'probe') return { ok: true, value: { probe: { ok: true, server: { name: 'amap-maps', version: '1.0' }, tools: ['maps_geo'], truncated: false, ms: 400 } } };
+    if (input.action === 'save') return { ok: true, value: { server: { name: input.server.name, title: input.server.title, catalogId: input.server.catalogId, source: 'mine', transport: 'streamable-http', target: '（地址带密钥，已保存）', url: '', urlSecret: true, urlRef: 'WHALEWING_MCP_AMAP_URL', urlSaved: true, env: [], headers: [], enabled: true, revision: 'r3', editable: true, status: 'connecting', attempt: 0, tools: [] } } };
     assert.fail(`意外动作 ${input.action}`);
   } });
   await button(f.render(), '技能中心').props.onClick();
   const tab = nodes(f.render()).find(node => node.type === 'button' && node.props.role === 'tab' && node.props.children.includes('MCP'));
   tab.props.onClick();
   for (let i = 0; i < 3; i++) { f.render(); f.flushEffects(); await new Promise(setImmediate); }
-  assert.ok(skillRow(f.render(), 'ww:echo-test'), '鲸翼加的');
-  const types = nodes(f.render()).filter(node => node.props?.className === 'ww-kit-type').map(node => node.props.children[0]);
-  assert.deepEqual(types, ['本机程序', 'DSH 配置 · 远程服务']);
-  await skillRow(f.render(), 'ww:echo-test').props.onClick();
-  const drawerText = JSON.stringify(nodes(f.render()).filter(node => node.type === 'pre').map(node => node.props.children));
-  assert.match(drawerText, /TOKEN: ••••••（已保存）/);
-  assert.ok(button(f.render(), '断开')); assert.ok(button(f.render(), '编辑'));
-  // 去发现，点高德。
+  const group = nodes(f.render()).find(node => node.type === 'section' && node.props['aria-label'] === '我的 MCP');
+  assert.ok(group, '我的 MCP 一组'); assert.ok(skillRow(group, 'echo-test')); assert.ok(skillRow(group, 'github'), '配置文件里写的也在我的 MCP');
+  const types = nodes(f.render()).filter(node => node.props?.className === 'ww-kit-type').map(node => [node.props.children].flat()[0]);
+  assert.deepEqual(types, ['本机程序', '远程服务']);
+  const text = JSON.stringify(nodes(f.render()).filter(node => ['small', 'span', 'p'].includes(node.type)).map(node => node.props.children));
+  assert.match(text, /配置文件里写的/); assert.match(text, /等密钥/); assert.match(text, /凭据库里还没有它要的密钥，补上后自己连上/);
+  assert.match(text, /原来的 2 个已经搬过去/); assert.match(text, /要处理 1/);
+  await button(f.render(), '知道了').props.onClick();
+  for (let i = 0; i < 2; i++) { f.render(); f.flushEffects(); await new Promise(setImmediate); }
+  assert.ok(requests.some(item => item.action === 'dismiss'));
+  assert.doesNotMatch(JSON.stringify(nodes(f.render()).filter(node => node.type === 'p').map(node => node.props.children)), /已经搬过去/);
+  // 详情：密钥只说存没存、存在哪个名字下；配置文件里写的那条缺密钥，在这里补。
+  await skillRow(f.render(), 'github').props.onClick();
+  assert.match(JSON.stringify(nodes(f.render()).filter(node => node.type === 'small').map(node => node.props.children)), /凭据库里的名字：GITHUB_PAT/);
+  button(f.render(), '填密钥').props.onClick();
+  nodes(f.render()).find(node => node.type === 'input' && node.props['aria-label'] === '请求头 Authorization的值').props.onChange({ target: { value: 'ghp-new' } });
+  await button(f.render(), '保存').props.onClick();
+  await new Promise(setImmediate);
+  assert.deepEqual(requests.find(item => item.action === 'secret'), { action: 'secret', name: 'github', field: { kind: 'header', key: 'Authorization' }, value: 'ghp-new' });
+  nodes(f.render()).find(node => node.type === 'button' && node.props['aria-label'] === '关闭' && node.props.children.includes('×'))?.props.onClick();
+  await skillRow(f.render(), 'echo-test').props.onClick();
+  assert.match(JSON.stringify(nodes(f.render()).filter(node => ['small', 'span'].includes(node.type)).map(node => node.props.children)), /WHALEWING_MCP_ECHO_TEST_ENV_TOKEN/);
+  assert.ok(button(f.render(), '重新连接')); assert.ok(button(f.render(), '编辑'));
+  await button(f.render(), '停用').props.onClick();
+  await new Promise(setImmediate);
+  assert.deepEqual(requests.find(item => item.action === 'toggle'), { action: 'toggle', name: 'echo-test', enabled: false, expectedRevision: 'r1' });
+  // 去发现，点高德：先试连，再保存。
   nodes(f.render()).find(node => node.type === 'button' && node.props['aria-label'] === '关闭' && node.props.children.includes('×'))?.props.onClick();
   nodes(f.render()).find(node => node.type === 'button' && node.props.role === 'tab' && node.props.children.includes('发现')).props.onClick();
   const amap = nodes(f.render()).find(node => node.type === 'button' && node.props['aria-label'] === '高德地图');
@@ -4746,9 +4772,12 @@ test('MCP：我的列出鲸翼加的和 DSH 配置里的，详情不显示密钥
   amap.props.onClick();
   const editor = nodes(f.render()).find(node => node.type?.name === 'McpEditor');
   assert.ok(editor, '打开添加抽屉');
-  await editor.props.onSave({ name: 'amap', title: '高德地图', catalogId: 'amap', transport: 'streamable-http', url: 'https://mcp.amap.com/mcp?key=K', urlSecret: true, env: [], headers: [] }, null);
-  assert.deepEqual(saves[0].server.url, 'https://mcp.amap.com/mcp?key=K');
-  assert.equal(saves[0].expectedRevision, null);
+  const payload = { name: 'amap', title: '高德地图', catalogId: 'amap', transport: 'streamable-http', url: 'https://mcp.amap.com/mcp?key=K', urlSecret: true, env: [], headers: [] };
+  assert.deepEqual(await editor.props.onProbe(payload), { ok: true, server: { name: 'amap-maps', version: '1.0' }, tools: ['maps_geo'], truncated: false, ms: 400 });
+  assert.deepEqual(requests.find(item => item.action === 'probe'), { action: 'probe', server: payload });
+  await editor.props.onSave(payload, null);
+  const saved = requests.find(item => item.action === 'save');
+  assert.deepEqual([saved.server.url, saved.expectedRevision], ['https://mcp.amap.com/mcp?key=K', null]);
   f.unmount();
 });
 
@@ -4758,7 +4787,7 @@ const tripPack = (patch = {}) => ({
   source: { kind: 'curated', label: '鲸翼精选', market: 'whalewing', entry: 'trip-planner' }, skills: [{ name: 'trip-plan', description: '排行程' }],
   mcp: [{ key: 'amap', server: 'amap' }], skippedMcp: [{ key: 'variflight', reason: '安装时没勾选' }], skipped: { commands: 2, agents: 0, hooks: false, lsp: false }, issues: [], ...patch,
 });
-const amapServer = (patch = {}) => ({ name: 'amap', title: 'amap', pack: 'trip-planner', transport: 'streamable-http', target: 'https://mcp.amap.com/mcp?key=•••', url: '', urlSecret: true, env: [], headers: [], enabled: true, revision: 0, status: 'connected', tools: ['maps_geo'], ...patch });
+const amapServer = (patch = {}) => ({ name: 'amap', title: 'amap', source: 'pack', pack: 'trip-planner', transport: 'streamable-http', target: 'https://mcp.amap.com/mcp?key=•••', url: 'https://mcp.amap.com/mcp?key=•••', urlSecret: false, env: [], headers: [], enabled: true, revision: 'r', editable: false, status: 'connected', toolCount: 1, tools: ['maps_geo'], ...patch });
 const settle = async f => { for (let i = 0; i < 4; i++) { f.render(); f.flushEffects(); await new Promise(setImmediate); } };
 const tabButton = (f, label) => nodes(f.render()).find(node => node.type === 'button' && node.props.role === 'tab' && node.props.children.includes(label));
 
@@ -4773,7 +4802,7 @@ test('插件包：我的列出装好的包和来源，详情里看技能、MCP �
       if (input.action === 'remove') { current = null; return { ok: true, value: { removed: input.name, mcp: ['amap'] } }; }
       assert.fail(`意外动作 ${input.action}`);
     },
-    mcp: async input => input.action === 'list' ? { ok: true, value: { servers: current ? [amapServer({ ...(current.enabled ? {} : { status: 'disabled', packOff: true }) })] : [], profile: [], credentials: true } } : assert.fail(`意外动作 ${input.action}`),
+    mcp: async input => input.action === 'list' ? { ok: true, value: { servers: current ? [amapServer({ ...(current.enabled ? {} : { status: 'disabled', packOff: true }) })] : [], credentials: true, manager: true } } : assert.fail(`意外动作 ${input.action}`),
   });
   await button(f.render(), '技能中心').props.onClick();
   await settle(f);

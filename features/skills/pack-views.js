@@ -1,5 +1,7 @@
 // 技能中心页里“插件”这一类（2026-11-09 用户定，照 Claude 的插件包）：我的（装好的插件包）和发现（鲸翼精选、Anthropic 的插件包市场、自己加的市场）。
 // 一个插件包 = 一组技能 + 一组 MCP；DSH 自己的程序插件（鲸翼本身、终端等）不在这里列，到 DSH 的插件页管。页面外壳在 client.js。
+import { statusOf } from './mcp-views.js';
+
 const initial = name => [...String(name || '?').replace(/^[^\p{L}\p{N}]+/u, '')][0]?.toUpperCase() || '?';
 const transportText = transport => transport === 'stdio' ? '本机程序' : '远程服务';
 const dateText = value => { const date = new Date(value); return Number.isNaN(date.getTime()) ? '' : `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; };
@@ -46,11 +48,9 @@ export function createPackViews(kit) {
   /** 一个 MCP 现在的状态，写成一小段字。 */
   function mcpState(server) {
     if (!server) return { text: '找不到了（可能在 MCP 页删了）', tone: 'muted' };
-    if (server.packOff) return { text: '包已停用', tone: 'muted' };
-    if (server.status === 'connected') return { text: `已连上 · ${server.tools.length} 个工具`, tone: 'ok' };
-    if (server.status === 'connecting') return { text: '正在连', tone: 'muted' };
-    if (server.status === 'disabled') return { text: '已断开', tone: 'muted' };
-    return { text: server.error || '连不上', tone: 'error' };
+    // 和 MCP 页同一套说法（DSH 报的状态）；这里地方小，不写原因那一行。
+    const status = statusOf(server);
+    return { text: status.tone === 'error' && server.error ? `${status.text}：${server.error}` : status.text, tone: status.tone };
   }
 
   /** 装好的插件包：从哪来、里面的技能和 MCP（带连接状态）、没装的部分；底部卸载、停用或启用。 */

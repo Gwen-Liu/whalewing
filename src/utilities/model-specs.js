@@ -14,6 +14,8 @@ const pages = ['pages', '哪些页：空着是全部；否则写 1-3,5 这样的
 
 export const modelFunctions = Object.freeze({
   'office-pdf': { inputs: '1 个 Word、Excel 或 PPT（doc、docx、xls、xlsx、ppt、pptx）', options: [], makes: '一个 PDF；用 DSH 自带的转换，排版和原文件接近，Excel 按打印设置分页' },
+  'office-images': { inputs: '1 个 Word、Excel 或 PPT（doc、docx、xls、xlsx、ppt、pptx）', options: [pages], makes: '一个压缩包，每页一张 PNG；先用 DSH 自带的转换转成 PDF 再导出，页码按转出来的 PDF 算，Excel 按打印设置分页' },
+  'office-upgrade': { inputs: '1 到 20 个 Word、Excel 或 PPT 的旧格式文件（doc、xls、ppt）', options: [], makes: '每个一个新格式文件（docx、xlsx、pptx）；用 DSH 自带的转换，宏和旧式控件可能丢失' },
   'pdf-word': { inputs: '1 个文字型 PDF', options: [], makes: '一个 Word，只有文字、保留分页；扫描件转不了' },
   'images-pdf': { inputs: '1 到 20 张图片，按 inputs 的顺序每张一页 A4', options: [], makes: '一个 PDF' },
   'pdf-images': { inputs: '1 个 PDF', options: [pages], makes: '一个压缩包，每页一张 PNG' },
