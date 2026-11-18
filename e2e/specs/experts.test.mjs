@@ -9,6 +9,7 @@ import { startDsh, removeTree } from '../support/dsh.mjs';
 import { launchBrowser, withPage, openWhaleWing, openTab, resizeAndSettle, textOf, toast, drawer, modal, dialogButton, isCentered, isRed, scratchFiles, discardDrawer } from '../support/browser.mjs';
 import { png, pngSize, animatedGif, templateText, expertsFileText, storedExperts, storedByName, storedRoster } from '../support/experts-fixture.mjs';
 import { roles, expertTemplates } from '../../content/roles.js';
+import { skillTitles } from '../../src/skill-titles.js';
 
 // 需求§专家团队·内置专家：小鲸领头，其余九位依次排开。小鲸常驻右边的面板，专家库里是其余九位。
 const builtinNames = ['小鲸助手', '产品专家', '设计专家', '研发专家', '测试专家', '运维专家', '数据专家', '研究专家', '写作专家', '运营专家'];
@@ -169,9 +170,12 @@ const preview = editor => editor.locator('.ww-avatar-picker > .ww-avatar').first
 const skillSection = editor => editor.locator('details').filter({ has: editor.page().locator('summary', { hasText: 'Skills · 可选' }) });
 
 /** 抽屉里勾选的技能名。 */
-const checkedSkills = editor => skillSection(editor).locator('label.ww-choice').evaluateAll(labels => labels.filter(label => label.querySelector('input').checked).map(label => label.querySelector('span').firstChild.textContent));
+// 2026-11-18 起随包技能在抽屉里显示中文名：读回来的名字按对照表换回英文短名再比。
+const skillIds = new Map(Object.entries(skillTitles).map(([name, title]) => [title, name]));
+const skillId = shown => skillIds.get(shown) ?? shown;
+const checkedSkills = async editor => (await skillSection(editor).locator('label.ww-choice').evaluateAll(labels => labels.filter(label => label.querySelector('input').checked).map(label => label.querySelector('span').firstChild.textContent))).map(skillId);
 /** 抽屉里列出的、本机装了的技能名（没装的绑定会标“当前目录未发现”）。 */
-const installedSkills = editor => skillSection(editor).locator('label.ww-choice').evaluateAll(labels => labels.filter(label => !label.querySelector('small')?.textContent.includes('当前目录未发现')).map(label => label.querySelector('span').firstChild.textContent));
+const installedSkills = async editor => (await skillSection(editor).locator('label.ww-choice').evaluateAll(labels => labels.filter(label => !label.querySelector('small')?.textContent.includes('当前目录未发现')).map(label => label.querySelector('span').firstChild.textContent))).map(skillId);
 /** 按下状态的预置头像序号（没有为 0）。 */
 const pressedPreset = editor => editor.locator('.ww-avatar-presets button').evaluateAll(buttons => buttons.findIndex(button => button.getAttribute('aria-pressed') === 'true') + 1);
 

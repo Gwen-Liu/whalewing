@@ -99,7 +99,7 @@ export const zh = {
   "expertDetailRecent": "最近的任务",
   "expertDetailRecentNone": "还没有任务",
   "expertDetailUntitled": "未命名任务",
-  "expertMemoryHelp": "这位专家每次开工都会带上它的记忆，存在个人知识 {path}。一行一条，可以直接改、删；没写日期的，保存时补上今天。",
+  "expertMemoryHelp": "这位专家每次开工都会带上它的记忆，存在知识积累 {path}。一行一条，可以直接改、删；没写日期的，保存时补上今天。",
   "expertMemoryRules": "规矩",
   "expertMemoryRulesHelp": "你定下的做法和偏好",
   "expertMemoryProgress": "进度",

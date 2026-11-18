@@ -3,6 +3,7 @@ import { automationContract } from './contract.js';
 import { describeSchedule, nextRuns } from './schedule-rule.js';
 import { registerFeature, useFeature } from '../../src/shell/feature.js';
 import { createSplit } from '../../src/split.js';
+import { runErrorText } from './run-error.js';
 
 /** 本页持有自己的草稿、动作和恢复状态；切走时不把状态交给外壳。 */
 export function createView(kit) {
@@ -107,6 +108,13 @@ export function createView(kit) {
       const value = await api.automationRuns(task, { before }, operation.current?.controller.signal);
       return () => setTaskHistory({ task, ...value, runs: before ? [...taskHistory.runs, ...value.runs] : value.runs });
     });
+    // 现在跑一次：送达后刷新目录，上次运行变成“排队中/进行中”，跑完照常记结果。
+    const runTaskNow = task => run(async () => {
+      const signal = operation.current?.controller.signal;
+      await api.runAutomationNow(task, signal);
+      const catalog = await api.automationCatalog(signal);
+      return () => setAutomations(catalog);
+    }, 'taskRunSent');
     const toggleTask = task => run(async () => {
       const signal = operation.current?.controller.signal;
       const current = await api.automationRequest({ action: 'read', sessionId: task.sessionId, id: task.id }, signal);
@@ -163,6 +171,8 @@ export function createView(kit) {
       const taskActions = task => h(ActionMenu, { label: t('taskActions'), iconOnly: true },
         !task.legacy && automations.controls !== false && ['active', 'paused'].includes(task.status) && button(task.status === 'paused' ? 'taskResume' : 'taskPause', () => toggleTask(task), Boolean(taskDraft)),
         !task.legacy && task.purpose !== 'news' && task.purpose !== 'extension' && ['active', 'paused'].includes(task.status) && button('editTask', () => editTask(task), Boolean(taskDraft)),
+        // 扩展登记的任务由扩展管，员工只能暂停、恢复，不给“现在跑一次”。
+        !task.legacy && task.purpose !== 'extension' && task.status !== 'inactive' && button('taskRunNow', () => runTaskNow(task), Boolean(taskDraft)),
         button('openTaskSession', () => openTaskSession(task)),
         button('taskHistory', () => showTaskHistory(task)),
         !ownedTask(task) && button('cancelPlan', () => { setSelectedTask(taskKey(task)); setConfirm({ kind: 'automation', task }); }, Boolean(taskDraft)));
@@ -176,7 +186,9 @@ export function createView(kit) {
       const patchTask = (key, value, timing = false) => setTaskDraft(draft => ({ ...draft, [key]: value, ...(timing ? { changeTime: true, timeZone: 'Asia/Shanghai' } : {}) }));
       // 新版调度内建于宿主；刷新是共同恢复入口，插件页只用于旧版。
       body = h('section', { className: 'ww-schedules' },
-        h('header', { className: 'ww-pagehead' }, h('div', null, h('h2', null, t('schedule')), h('p', null, summary)), h('div', { className: 'ww-pagehead-actions' }, button('newTask', () => beginTask('custom'), locked || Boolean(pending) || Boolean(taskDraft), { className: 'ww-primary' }))),
+        h('header', { className: 'ww-pagehead' }, h('div', null, h('h2', null, t('schedule')), h('p', null, summary)), h('div', { className: 'ww-pagehead-actions' },
+          // 和专家团队、技能中心的“＋ 添加”同一个样子和叫法（2026-11-18）；读屏名仍说清是新增定时任务。
+          h('button', { type: 'button', className: 'ww-menu-trigger ww-add-menu ww-primary', title: t('newTask'), 'aria-label': t('newTask'), disabled: busy || locked || Boolean(pending) || Boolean(taskDraft), onClick: () => { notify(null); beginTask('custom'); } }, h(Glyph, { name: 'plus' }), t('taskAdd')))),
         automations.available === false && h('div', { className: 'ww-schedule-off', role: 'status' }, h('div', null, h('strong', null, t('taskUnavailableShort')), help('scheduleUnavailable')), row(button('retry', refreshTab, false, { className: 'ww-primary' }), button('legacyScheduleSettings', () => run(async () => api.openPlugins())))),
         api.automationCacheIssue() && h('p', { className: 'ww-notice ww-error', role: 'alert' }, api.automationCacheIssue()),
         automations.issues.length > 0 && h('details', { className: 'ww-notice' }, h('summary', null, t('newsDiagnostics')), ...automations.issues.map((issue, i) => h('p', { key: i, className: 'ww-error' }, issue.message))),
@@ -220,6 +232,10 @@ export function createView(kit) {
               h('div', { className: 'ww-task-facts' },
                 h('div', { className: 'ww-task-fact' }, h('small', null, t('taskTime')), h('strong', { title: selected.status === 'active' ? beijing(selected.scheduledAt) : undefined }, selected.status === 'active' ? short(selected.scheduledAt) : t(selected.status === 'paused' ? 'taskPaused' : 'taskInactive'))),
                 h('div', { className: `ww-task-fact ww-task-fact-${dotKind(lastRun)}` }, h('small', null, t('taskLastRun')), h('strong', null, statusDot(lastRun), lastRun ? t('runStatus_' + lastRun.status) : t('taskNeverRun')), lastRun && h('span', null, runText(lastRun)))),
+              // 上次出错：说清原因和怎么办，能直接打开原会话处理。
+              lastRun?.status === 'error' && (({ reason, fix, detail }) => h('div', { className: 'ww-schedule-off ww-task-failure', role: 'status' },
+                h('div', null, h('strong', null, reason), h('p', null, fix), detail && h('small', { className: 'ww-muted' }, detail)),
+                h('div', { className: 'ww-row' }, !selected.legacy && selected.purpose !== 'extension' && selected.status !== 'inactive' && button('taskRunNow', () => runTaskNow(selected), locked || Boolean(taskDraft), { className: 'ww-primary' }), button('openTaskSession', () => openTaskSession(selected)))))(runErrorText(lastRun.error)),
               // 内置任务的指令是给模型看的，员工只需要知道它做什么。
               selected.outdated && h('div', { className: 'ww-schedule-off', role: 'status' }, h('div', null, h('strong', null, t(selected.purpose === 'knowledge' ? 'taskOutdatedKnowledge' : 'taskOutdated')), help('taskOutdatedHelp')), button(selected.purpose === 'knowledge' ? 'taskUpgradeKnowledge' : 'taskUpgrade', () => upgradeTask(selected), locked || Boolean(taskDraft), { className: 'ww-primary' })),
               selected.purpose === 'knowledge' ? help('taskScopeHelp') : selected.purpose === 'thinking' ? help('thinkingTaskHelp') : selected.purpose === 'news' ? help('newsTaskFixed') : selected.purpose === 'extension' ? extensionHelp(selected) : h('p', { className: 'ww-task-prompt' }, selected.displayPrompt ?? selected.prompt),
@@ -231,7 +247,7 @@ export function createView(kit) {
             confirm?.kind === 'automation' && h(ConfirmDialog, { title: t('cancelPlan'), message: t('cancelPlanHelp'), confirmLabel: t('cancelPlan'), cancelLabel: t('cancel'), danger: true, busy, onCancel: () => setConfirm(null), onConfirm: () => cancelTask(confirm.task) }),
             taskHistory && h(Modal, { title: `${t('taskHistory')} · ${taskHistory.task.title || t('schedule')}`, busy, onClose: () => setTaskHistory(null), className: 'ww-confirm ww-task-history' },
               h('section', { className: 'ww-confirm-body', 'aria-label': t('taskHistory') }, help('historyHelp'),
-                taskHistory.runs.length ? h('ol', { className: 'ww-task-runs' }, taskHistory.runs.map(item => h('li', { key: item.id }, statusDot(item), h('p', { className: 'ww-task-run' }, runText(item))))) : help('noHistory'),
+                taskHistory.runs.length ? h('ol', { className: 'ww-task-runs' }, taskHistory.runs.map(item => h('li', { key: item.id }, statusDot(item), h('p', { className: 'ww-task-run' }, runText(item), item.status === 'error' ? h('small', { className: 'ww-muted' }, ` · ${runErrorText(item.error).reason}`) : null)))): help('noHistory'),
                 taskHistory.earlierRemoved && help('historyEarlier')),
               h('footer', { className: 'ww-dialog-actions' }, taskHistory.nextBefore && button('historyMore', () => showTaskHistory(taskHistory.task, taskHistory.nextBefore)), button('closePanel', () => setTaskHistory(null), false, { className: 'ww-primary' }))))));
 

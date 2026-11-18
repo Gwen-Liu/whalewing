@@ -38,7 +38,7 @@ const memoryActions = ['read', 'add', 'rewrite', 'add_global'];
 export function applyMemory(ctx) {
   ctx.tools.register(defineTool({
     name: 'whalewing_memory',
-    description: '鲸翼专家记忆。你自己的记忆每次开工都已经带在专家说明里，不用先读。员工说“记到你的记忆”“你记住”，或你觉得值得记、问过员工同意后，用 add 记一条：员工定下的做法和偏好记“规矩”，手上长期的事做到哪了记“进度”。条目过时、重复或太长时用 rewrite 整节重写。员工明说“记到全局记忆”时用 add_global，记进个人知识「关于我」的“怎样和我协作”，所有专家都看得到；别的时候不写关于我。只有小鲸能填 expertId 读写别的专家的记忆。不记密码、密钥和客户机密。',
+    description: '鲸翼专家记忆。你自己的记忆每次开工都已经带在专家说明里，不用先读。员工说“记到你的记忆”“你记住”，或你觉得值得记、问过员工同意后，用 add 记一条：员工定下的做法和偏好记“规矩”，手上长期的事做到哪了记“进度”。条目过时、重复或太长时用 rewrite 整节重写。员工明说“记到全局记忆”时用 add_global，记进知识积累「关于我」的“怎样和我协作”，所有专家都看得到；别的时候不写关于我。只有小鲸能填 expertId 读写别的专家的记忆。不记密码、密钥和客户机密。',
     parameters: {
       action: { type: 'string', enum: memoryActions, required: true },
       section: { type: 'string', enum: ['规矩', '进度'], description: 'add、rewrite 写哪一节。' },
@@ -67,7 +67,7 @@ export function applyMemory(ctx) {
       const routine = ctx.sessionProjections.stateOf(exec.agent.session, 'whalewingAutomation')?.purpose === 'custom';
       if (routine && targetId === self && args.section === '进度' && (args.action === 'add' || args.action === 'rewrite')) return write();
       const policy = ctx.sandboxPolicy.resolve({ session: exec.agent.session });
-      const where = args.action === 'add_global' ? '个人知识「关于我」的“怎样和我协作”' : `${expert.name}的记忆（知识库“00-系统/专家记忆”里的一篇）`;
+      const where = args.action === 'add_global' ? '知识积累「关于我」的“怎样和我协作”' : `${expert.name}的记忆（知识库“00-系统/专家记忆”里的一篇）`;
       await approveEscalation({ requestedMode: 'danger-full-access', effectiveMode: policy.mode, subject: '鲸翼专家记忆', justification: `${args.action === 'rewrite' ? '重写' : '写入'}${where}；只改这一篇笔记，不改变会话权限模式。` }, { approver: ctx.get('approval'), agent: exec.agent, callId: exec.callId, toolName: 'whalewing_memory', signal: exec.signal });
       return write();
       async function write() {

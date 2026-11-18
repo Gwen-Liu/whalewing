@@ -3788,7 +3788,8 @@ test('接着读：只有一本常看时下面列“接下来”几章，整行�
   assert.equal(nodes(reader).find(node => node.props?.className === 'ww-book-toggle').props['aria-expanded'], true, '“查看全部”打开即展开目录');
   assert.ok(nodes(reader).some(node => node.type === 'nav' && node.props.className === 'ww-book-toc'));
   if (previousWidth) Object.defineProperty(globalThis, 'innerWidth', previousWidth); else delete globalThis.innerWidth;
-  assert.equal(f.calls.slice(before).some(([kind]) => !['library', 'news', 'reading'].includes(kind)), false, '阅读不调用外站或模型');
+  // 首页重读时顺带读一次本机的定时目录（2026-11-18：看资讯任务今天跑得怎样），不算调外站或模型。
+  assert.equal(f.calls.slice(before).some(([kind, input]) => !['library', 'news', 'reading'].includes(kind) && !(kind === 'automation' && input?.action === 'catalog')), false, '阅读不调用外站或模型');
   f.unmount();
 });
 

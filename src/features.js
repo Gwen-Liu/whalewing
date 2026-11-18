@@ -65,7 +65,7 @@ export class FeatureRegistry {
     return { revision: this.revision, features, ...this.extras?.() };
   }
 
-  caller(ctx, purpose = '读取个人知识') {
+  caller(ctx, purpose = '读取知识积累') {
     if (this.closed || ctx.fiber.uid === null) fail('FEATURE_CLOSED', '调用功能已经卸载');
     for (let fiber = ctx.fiber; ; fiber = fiber.parent.fiber) {
       const entry = [...this.entries.values()].find(entry => entry.fiber === fiber);

@@ -157,11 +157,11 @@ export class WhalewingCore {
     const sources = this.dependencies.sources?.();
     // 以 @ 开头的路径是扩展提供的只读笔记；扩展自己调用时只碰个人知识。
     if (isSourceNotePath(args.path) && args.action !== 'submit') {
-      if (caller.kind === 'plugin') fail('EXTENSION_NOTE_PLUGIN', '扩展只能读取个人知识，不能读取其它扩展提供的笔记');
+      if (caller.kind === 'plugin') fail('EXTENSION_NOTE_PLUGIN', '扩展只能读取员工自己的知识库，不能读取其它扩展提供的笔记');
       // 维护人只能在知识积累里自己改团队笔记，模型不能替员工改；删除和恢复都交给提供它的扩展。
       if (args.action === 'write' && caller.kind !== 'human') fail('EXTENSION_NOTE_READ_ONLY', '这篇笔记由扩展提供，模型不能改；员工是维护人的话，可以在知识积累里打开它自己改');
       if (['remove', 'restore'].includes(args.action)) fail('EXTENSION_NOTE_READ_ONLY', '这篇笔记由扩展提供，在鲸翼里不能删除或恢复；要删请到提供它的扩展里删');
-      if (args.action === 'graph') fail('EXTENSION_NOTE_GRAPH', '扩展提供的笔记不在个人知识的关系图谱里');
+      if (args.action === 'graph') fail('EXTENSION_NOTE_GRAPH', '扩展提供的笔记不在知识积累的关系图谱里');
       if (!sources) fail('EXTENSION_SOURCE_CLOSED', '这篇笔记来自已关闭或卸载的扩展；请重新开启扩展后再打开');
       if (args.action === 'read') { const { absolutePath: _absolutePath, ...note } = await sources.readKnowledge(args.path, signal); return note; }
       if (args.action === 'document') return sourceDocument(await sources.readKnowledge(args.path, signal));

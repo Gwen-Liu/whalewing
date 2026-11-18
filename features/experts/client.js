@@ -4,6 +4,7 @@ import { expertContract } from './contract.js';
 import { parseExpertTemplate } from './template.js';
 import { registerFeature, useFeature } from '../../src/shell/feature.js';
 import { createSplit } from '../../src/split.js';
+import { skillTitle } from '../../src/skill-titles.js';
 import { createExpertDetail } from './detail.js';
 import { createTeam } from './team.js';
 import { expertActivity, rosterOf, sortInUse, daysAgo, defaultIdleDays } from './roster.js';
@@ -57,7 +58,7 @@ export function createView(kit) {
       const available = new Set((catalog?.skills || []).map(item => item.name));
       const skipped = template.skills.filter(name => !available.has(name));
       setDraft(current => ({ ...current, name: template.name, description: template.description, prompt: template.prompt, skills: template.skills.filter(name => available.has(name)), avatar: (template.avatar && avatarArt[template.avatar]) || null }));
-      notify(t(skipped.length ? 'expertTemplateSkipped' : 'expertTemplateApplied', { name: template.name, skills: skipped.join('、') }));
+      notify(t(skipped.length ? 'expertTemplateSkipped' : 'expertTemplateApplied', { name: template.name, skills: skipped.map(skillTitle).join('、') }));
     };
     const chooseTemplate = id => {
       setTemplateId(id);
@@ -125,7 +126,8 @@ export function createView(kit) {
       return h('details', { className: 'ww-section' }, h('summary', null, t(title), ` (${draft[kind].length})`), h('p', { className: 'ww-muted' }, t('catalogHelp')),
         ...[...available, ...draft[kind].filter(name => !available.some(item => item.name === name)).map(name => ({ name, missing: true }))].map(item => h('label', { className: 'ww-choice', key: item.name },
           h('input', { type: 'checkbox', checked: draft[kind].includes(item.name), disabled: busy, onChange: event => update(kind, event.target.checked ? [...draft[kind], item.name] : draft[kind].filter(name => name !== item.name)) }),
-          h('span', null, item.name, h('small', null, item.missing ? t('missingBinding') : item.description || item.tools?.join(' · '))))), !available.length && h('p', { className: 'ww-muted' }, t('emptyCatalog')));
+          // 随包技能显示中文名，英文短名跟在说明前面（2026-11-18，和技能中心一致）；MCP 照原名。
+          h('span', null, kind === 'skills' ? skillTitle(item.name) : item.name, h('small', null, [kind === 'skills' && skillTitle(item.name) !== item.name && item.name, item.missing ? t('missingBinding') : item.description || item.tools?.join(' · ')].filter(Boolean).join(' · '))))), !available.length && h('p', { className: 'ww-muted' }, t('emptyCatalog')));
     };
     const title = t(viewing ? 'viewExpert' : expert ? 'editExpert' : 'addExpert');
     return h(React.Fragment, null, h('dialog', { ref: modal, className: 'ww-editor ww-page', 'aria-label': title, onCancel: event => { event.preventDefault(); requestClose(); }, onClick: event => { if (event.target === event.currentTarget) requestClose(); } },
@@ -298,7 +300,7 @@ export function createView(kit) {
     const sourceNames = [...new Set(roster.filter(entry => entry.role.source).map(entry => labelText(entry.role.source.label)))];
     const kindOf = role => role.source ? `source:${labelText(role.source.label)}` : role.builtin ? 'builtin' : 'mine';
     const matchesFilter = (entry, value) => value === 'all' || (value === 'scheduled' ? scheduleOf(entry.role.id).length > 0 : kindOf(entry.role) === value);
-    const visible = roster.filter(entry => matchesFilter(entry, filter) && (!keyword || [entry.role.name, entry.role.description, ...(entry.role.skills || [])].some(value => String(value).toLowerCase().includes(keyword))));
+    const visible = roster.filter(entry => matchesFilter(entry, filter) && (!keyword || [entry.role.name, entry.role.description, ...(entry.role.skills || []), ...(entry.role.skills || []).map(skillTitle)].some(value => String(value).toLowerCase().includes(keyword))));
     const groups = [
       { id: 'builtin', label: t('teamSourceBuiltin'), note: t('teamGroupBuiltinNote') },
       { id: 'mine', label: t('teamSourceMine'), note: t('teamGroupMineNote') },

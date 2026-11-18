@@ -15,6 +15,10 @@ const liveHeat = 0.3;
 // 松手后的回拉每步固定是离家距离的 4.5%，不随冷却减弱（d3 的力会乘上逐步变小的 alpha，这里按 alpha 反过来放大），
 // 所以最后准确落回原位；约一秒滑回去。
 const homeStrength = Object.freeze({ dragging: 0.03, releasedPull: 0.045 });
+// 超过实时物理规模的大图：拖动时离被拖的点最近的这么多个邻居跟着挪，最近的挪拖动距离的 30%，越远越少（2026-11-18）。
+// 只多画这些点连着的线，枢纽笔记邻居再多也不拖慢。
+// 邻居连着的线加起来最多再多画 followEdges 条：连线很密的图跟着动的邻居就少一些，每帧的开销有上限。
+export const followLimit = 48, followPull = 0.3, followEdges = 1000;
 
 /**
  * 按层上色，照发起者第二大脑 2026-10-30 的 Obsidian 图谱分组和颜色：从上往下取第一组对上的。
@@ -269,7 +273,8 @@ export function createGraphCanvas(React) {
         layer.width = Math.max(1, Math.round(width * density)); layer.height = Math.max(1, Math.round(height * density));
         ctx.setTransform(density, 0, 0, density, 0, 0);
         ctx.strokeStyle = palette.edge; ctx.lineWidth = lineWidth();
-        building = { layer, ctx, camera: base, width, height, next: 0, omit: drag?.moved && drag.node >= 0 ? drag.node : -1 };
+        // 拖动中被挪的点（被拖的和跟着动的邻居）连着的线不进缓存，每帧单独画。
+        building = { layer, ctx, camera: base, width, height, next: 0, omit: drag?.moved && drag.node >= 0 ? new Set([drag.node, ...(drag.followers ?? []).map(item => item.i)]) : null };
         setSettling(true); setPainted(0); schedule();
       };
       const paintEdges = () => {
@@ -280,7 +285,7 @@ export function createGraphCanvas(React) {
         cache.ctx.beginPath();
         for (let i = cache.next; i < end; i++) {
           const [a, b] = edges[i];
-          if (a === cache.omit || b === cache.omit) continue;
+          if (cache.omit && (cache.omit.has(a) || cache.omit.has(b))) continue;
           cache.ctx.moveTo(x[a] * base.k + base.x, y[a] * base.k + base.y);
           cache.ctx.lineTo(x[b] * base.k + base.x, y[b] * base.k + base.y);
         }
@@ -357,12 +362,18 @@ export function createGraphCanvas(React) {
           context.globalAlpha = 1;
         }
         // 聚焦与拖动复用同一无向邻居投影，不另解释方向或重复引用。
-        const moving = cache?.omit ?? -1;
-        for (const node of born ? [] : new Set([moving, emphasized])) {
+        const moving = cache?.omit ?? null;
+        if (!born && moving) {
+          // 大图拖动时被挪的点连着的线：两头都在挪的只画一次。
+          context.lineWidth = 0.6 * display.lineSize; context.strokeStyle = palette.edge; context.globalAlpha = 0.2;
+          strokeEach(context, [...moving].flatMap(node => Array.from(neighbors[node], other => [node, other]).filter(([a, b]) => !moving.has(b) || a < b)));
+          context.globalAlpha = 1;
+        }
+        for (const node of born ? [] : [emphasized]) {
           if (node < 0) continue;
-          context.lineWidth = (node === emphasized ? 1 : 0.6) * display.lineSize;
-          context.strokeStyle = node === emphasized ? palette.accent : palette.edge;
-          context.globalAlpha = node === emphasized ? 0.7 * glow : 0.2;
+          context.lineWidth = display.lineSize;
+          context.strokeStyle = palette.accent;
+          context.globalAlpha = 0.7 * glow;
           // 枢纽笔记可能有上百个邻居，同样逐条描；线都从本节点出发，重叠只落在随后绘制的节点圆内。
           strokeEach(context, Array.from(neighbors[node], other => [node, other]));
           context.globalAlpha = 1;
@@ -553,8 +564,10 @@ export function createGraphCanvas(React) {
           simulation.alphaTarget(0);
           schedule();
         } else if (ended.moved && ended.node >= 0) {
-          // 超出实时物理规模的大图：松手和取消都把点放回原处。
-          x[ended.node] = ended.origin.x; y[ended.node] = ended.origin.y; geometry++;
+          // 超出实时物理规模的大图：松手和取消都把点和跟着动的邻居放回原处。
+          x[ended.node] = ended.origin.x; y[ended.node] = ended.origin.y;
+          for (const item of ended.followers ?? []) { x[item.i] = item.x; y[item.i] = item.y; }
+          geometry++;
           labelSelection = null; beginEdges(); schedule();
         } else if (cancel && ended.moved) { Object.assign(camera, ended.camera); schedule(); }
         if (ended.moved && ended.node < 0) beginEdges();
@@ -604,7 +617,13 @@ export function createGraphCanvas(React) {
             drag.moved = true; running = false;
             if (drag.node >= 0 && liveCapable) { drag.live = true; startLive(); }
             else if (drag.node >= 0) {
-              // 大图仅越过拖动阈值才丢弃含旧端点的层；随后每帧只更新一跳连线。
+              // 大图不跑整图物理，但离得最近的一圈邻居被连线拉着跟过来一些（2026-11-18，原来只动被拖的那个点）。
+              const own = drag.node;
+              let budget = followEdges;
+              drag.followers = Array.from(neighbors[own], i => ({ i, x: x[i], y: y[i], d: Math.hypot(x[i] - x[own], y[i] - y[own]) }))
+                .sort((a, b) => a.d - b.d).filter(item => (budget -= neighbors[item.i].size) >= 0).slice(0, followLimit)
+                .map((item, rank) => ({ ...item, w: followPull * (1 - rank / (followLimit * 2)) }));
+              // 大图仅越过拖动阈值才丢弃含旧端点的层；随后每帧只更新被挪的点连着的线。
               releaseLayer(edgeCache); edgeCache = null; beginEdges();
             } else if (!edgeCache && !building) beginEdges();
           }
@@ -614,7 +633,11 @@ export function createGraphCanvas(React) {
               // 被拖的点钉在指针处，画面上立刻跟手；其余的点下一帧按力跟着动。
               const node = layout.nodes[drag.node];
               x[drag.node] = node.fx = drag.origin.x + dx / camera.k; y[drag.node] = node.fy = drag.origin.y + dy / camera.k; geometry++;
-            } else if (drag.node >= 0) { x[drag.node] = drag.origin.x + dx / camera.k; y[drag.node] = drag.origin.y + dy / camera.k; labelSelection = null; geometry++; }
+            } else if (drag.node >= 0) {
+              x[drag.node] = drag.origin.x + dx / camera.k; y[drag.node] = drag.origin.y + dy / camera.k;
+              for (const item of drag.followers ?? []) { x[item.i] = item.x + dx / camera.k * item.w; y[item.i] = item.y + dy / camera.k * item.w; }
+              labelSelection = null; geometry++;
+            }
             else { camera.x = drag.camera.x + dx; camera.y = drag.camera.y + dy; }
             touched = true; schedule();
           }

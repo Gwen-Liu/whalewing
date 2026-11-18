@@ -294,7 +294,7 @@ export class ExpertMemory {
     const entry = freshEntry(text);
     await this.ensureVault(signal);
     const written = await this.update(aboutMePath, content => {
-      if (content === null) fail('MEMORY_GLOBAL', `个人知识里找不到 ${aboutMePath}；请员工先在个人知识里建好“关于我”，再记全局记忆`);
+      if (content === null) fail('MEMORY_GLOBAL', `知识积累里找不到 ${aboutMePath}；请员工先在知识积累里建好“关于我”，再记全局记忆`);
       if (!sectionLines(frontmatter(content).body, '怎样和我协作')) fail('MEMORY_GLOBAL', '“关于我”里没有“怎样和我协作”这一节；请员工先加上这一节，再记全局记忆');
       return touch(appendEntry(content, '怎样和我协作', entry));
     }, signal);

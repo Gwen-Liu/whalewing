@@ -320,7 +320,7 @@ export function createView(kit) {
     const [confirm, setConfirm] = useState(null);
     const [newsSettings, setNewsSettings] = useState(false);
     const [newsData, setNewsData] = useState(null);
-    const [newsHome, setNewsHome] = useState(null);
+    const [newsHome, setNewsHome] = useState(null), [newsTask, setNewsTask] = useState(null);
     const [newsItem, setNewsItem] = useState(null);
     const [newsExpanded, setNewsExpanded] = useState({});
     const [newsRun, setNewsRun] = useState(null);
@@ -440,6 +440,16 @@ export function createView(kit) {
       else showNotice(value.learning.notice, false);
     };
     // 划线和阅读设置读不出来时首页照常能看，页头写明没读出来；存一条、回顾这几样先不能用。
+    // 资讯任务上次跑得怎么样：首页据此说“今天这期没生成出来”或“正在整理”；读不出来就当不知道。
+    const loadNewsTask = () => api.newsTask().then(setNewsTask, () => setNewsTask(null));
+    // 现在生成一期：发给资讯任务的会话，跑完首页刷新（DSH 里跑一期要几分钟，先显示“正在整理”）。
+    const generateNews = () => run(async () => {
+      const current = newsTask?.task ?? (await api.newsTask())?.task;
+      if (!current) throw new Error(t('homeNewsNoTask'));
+      await api.runNewsNow(current, operation.current?.controller.signal);
+      const value = await api.newsTask();
+      return () => setNewsTask(value);
+    }, 'homeNewsGenerating');
     const loadReading = () => api.readingRequest({ action: 'home' }).then(value => { setReadingHome(value.home); return value.home; }, () => { setReadingHome(null); return null; });
     const loadMarks = book => { marksBook.current = book; return api.readingRequest({ action: 'highlights', book }).then(value => { if (marksBook.current === book) setMarks({ book, list: value.highlights }); }, () => { if (marksBook.current === book) setMarks({ book, list: [] }); }); };
     const toKnowledge = { label: t('homeToKnowledge'), run: () => api.showKnowledge() };
@@ -694,7 +704,7 @@ export function createView(kit) {
       });
     };
     // 首页数据每换一次（刷新、关掉阅读器、改了常看），划线和设置跟着重读一次。
-    useEffect(() => { if (newsHome) loadReading(); }, [newsHome]);
+    useEffect(() => { if (newsHome) { loadReading(); loadNewsTask(); } }, [newsHome]);
     bind({ refresh: refreshTab, onError: reason => { if (reason.sessionId) return false; setError(reason.message || t('requestFailed')); return true; } });
     // 任何前台操作开始时，作废还在路上的后台重读（关闭阅读器后的那次）。
     useEffect(() => { if (busy) stamp.current++; }, [busy]);
@@ -949,8 +959,8 @@ export function createView(kit) {
       const viewing = page === 'tips' ? 'tips' : page === 'library' && library ? 'library' : newsSettings ? 'settings' : 'home';
       body = h('section', { ref: root, className: `ww-news ww-cards${serifOff ? ' ww-serif-off' : ''}` },
         viewing === 'home' && (newsHome
-          ? h(HomeBoard, { t, busy, button, home: newsHome, reading: readingHome, loadImage, opening, assistant: workbench.internal?.assistantName?.().short ?? '小鲸',
-            format: { date: learningDate, short: shortDate, when, day: dayOf, minutes, accent: monoColor },
+          ? h(HomeBoard, { t, busy, button, home: newsHome, reading: readingHome, newsRun: newsTask?.lastRun ?? null, newsReady: Boolean(newsTask), loadImage, opening, assistant: workbench.internal?.assistantName?.().short ?? '小鲸',
+            format: { date: learningDate, short: shortDate, when, day: dayOf, minutes, accent: monoColor, time: value => new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value)) },
             actions: {
               info: text => notify(text, { kind: 'info' }), fail: failed, reload: () => refreshTab(),
               openItem: ({ report, item, index, total }) => setNewsItem({ item, index, total, fieldName: report.fieldName, report }),
@@ -958,6 +968,7 @@ export function createView(kit) {
               showSaved: capture => notify(t('homeSavedAt', { name: capture.name }), { kind: 'info', action: toKnowledge }),
               openMe: report => setMeDraft({ report, text: '' }),
               runDetails: report => setNewsRun(report), history: field => readNewsHistory(field),
+              generateNews, openNewsSession: () => newsTask && run(async () => { await api.openAutomation(newsTask.task.sessionId, newsTask.task); }),
               loadReports: fieldId => api.newsRequest({ action: 'reports', fieldId }).then(value => value.reports),
               tryTip: tip => openAssistant(t('homeTryPrompt', { title: tip.title, brief: tip.brief })), openTips, editTipSources, usageGo,
               openLibrary, openPins, setPinned, removeBook: book => setConfirm({ kind: 'bookRemove', book: { ...book, daily: true } }),

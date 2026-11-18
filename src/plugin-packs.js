@@ -249,6 +249,41 @@ export class PluginPacks {
     }, signal);
   }
 
+  /**
+   * 原地更新到新的一份（2026-11-18 起，原来要先卸载）。包的文件夹不整个挪走：Windows 上 DSH 发现技能时盯着它，
+   * 挪会报 EPERM。做法是新版先写进一个临时文件夹（点开头，load 不认）核对好，旧的另备一份，再在原文件夹里
+   * 删掉旧文件、拷进新文件；包自己的数据（.data）不动。中途出错就照备份拷回去。
+   */
+  async replace(pack, record, signal) {
+    await this.library.ensureReady(signal);
+    return this.files.locked(async () => {
+      await this.load(signal);
+      if (!this.records.has(pack.name)) fail('PACK_MISSING', '这个插件包已经卸载了，请刷新');
+      const list = [...pack.files.filter(file => file.path !== packRecord && !file.path.startsWith('.data/')), { path: packRecord, bytes: Buffer.from(`${JSON.stringify(record, null, 2)}\n`) }];
+      let snapshot;
+      try { snapshot = this.files.snapshotFromList(list); }
+      catch (error) { if (error.code === 'SKILL_SIZE') fail('PACK_SIZE', '插件包里的文件太多或太大（最多约 500 个文件、32 MB）'); throw error; }
+      const stamp = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+      const current = this.absolute(pack.name), stagingDir = `${packArea}/.${pack.name}-new-${stamp}`;
+      const staging = path.join(this.files.root, ...stagingDir.split('/')), backup = path.join(path.dirname(current), `.${pack.name}-old-${stamp}`);
+      const entries = async dir => (await fs.readdir(dir)).filter(name => name !== '.data');
+      const fill = async (from, to) => { for (const name of await entries(from)) await fs.cp(path.join(from, name), path.join(to, name), { recursive: true, force: true }); };
+      const clear = async dir => { for (const name of await entries(dir)) await fs.rm(path.join(dir, name), { recursive: true, force: true }); };
+      try {
+        await this.files.install(stagingDir, snapshot, signal);
+        await fs.cp(current, backup, { recursive: true });
+        try { await clear(current); await fill(staging, current); }
+        catch (error) { await clear(current).catch(() => {}); await fill(backup, current).catch(() => {}); throw error; }
+      } finally {
+        await fs.rm(staging, { recursive: true, force: true }).catch(() => {});
+        await fs.rm(backup, { recursive: true, force: true }).catch(() => {});
+      }
+      await fs.mkdir(path.join(current, '.data'), { recursive: true }).catch(() => {});
+      await this.load(signal);
+      return this.records.get(pack.name);
+    }, signal);
+  }
+
   async update(name, patch, signal) {
     return this.files.locked(async () => {
       await this.load(signal);

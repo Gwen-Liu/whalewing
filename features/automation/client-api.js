@@ -10,7 +10,7 @@ const lateMs = 5 * 60 * 1000;
 export function taskRun(task, record) {
   if (!record) return null;
   const scheduled = Date.parse(record.scheduledAt), delivered = Date.parse(record.deliveredAt);
-  return { id: record.messageId, scheduledAt: record.scheduledAt, deliveredAt: record.deliveredAt, status: runStatuses.includes(record.status) ? record.status : 'unknown', sessionId: task.sessionId, late: delivered - scheduled > lateMs };
+  return { id: record.messageId, scheduledAt: record.scheduledAt, deliveredAt: record.deliveredAt, status: runStatuses.includes(record.status) ? record.status : 'unknown', sessionId: task.sessionId, late: delivered - scheduled > lateMs, ...(record.status === 'error' && record.error ? { error: record.error } : {}) };
 }
 /** 领域状态与读回只在本模块持有，宿主机制通过显式桥接消费。 */
 export function createAutomationClient(bridge, t, z, directory) {
@@ -115,8 +115,15 @@ export function createAutomationClient(bridge, t, z, directory) {
       return { runs: value.records.map(record => taskRun(task, record)), nextBefore: value.nextBefore, earlierRemoved: Boolean(value.earlierRecordsUnavailable || value.earlierRecordsPruned) };
     }
 
+    /** 现在跑一次：不挪动下一次到点；跑完的结果照常记在运行记录里。 */
+    async function runAutomationNow(task, signal) {
+      const value = await automationRequest({ action: 'run', sessionId: task.sessionId, id: task.id }, signal);
+      if (value.id !== task.id || value.ran !== true) throw failure(t('badReply'), 'bad_reply');
+      return value;
+    }
+
   return {
-    automationRequest, automationCatalog, createAutomation, recoverAutomation, automationRuns,
+    automationRequest, automationCatalog, createAutomation, recoverAutomation, automationRuns, runAutomationNow,
     // 目录已附带上次运行的结果；只有送达回执、没有结果时按未知给出。
     lastRun: task => taskRun(task, task.lastRun ?? (task.lastDelivery && { ...task.lastDelivery, status: 'unknown' })),
     pendingAutomation: () => pendingAutomation && { ...pendingAutomation }, automationCacheIssue: () => automationCacheIssue,

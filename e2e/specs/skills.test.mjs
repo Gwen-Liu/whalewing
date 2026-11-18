@@ -7,6 +7,7 @@ import { zipSync, strToU8 } from 'fflate';
 import { startDsh, removeTree } from '../support/dsh.mjs';
 import { launchBrowser, withPage, openWhaleWing, openTab, textOf, toast, drawer, modal, dialogButton, isCentered, isRed, discardDrawer } from '../support/browser.mjs';
 import { bundledRoot, bundledSkills, skillsRoot, builtinFile, userSkillFile, skillText, seeded, seedSkills, userSkills, sessionIds, normalized } from '../support/skills-fixture.mjs';
+import { skillTitle, skillTitles } from '../../src/skill-titles.js';
 
 // 需求§技能：随包技能共 94 项（2026-11-12 办公工坊改版加了 whalewing-toolbox，2026-11-13 需求对齐）。
 const shippedCount = 94;
@@ -20,8 +21,11 @@ const library = page => page.locator('section.ww-kit-page');
 // “已安装”一栏列全部技能（下面按分类再列一遍，不重复数）。
 const installed = page => library(page).locator('section[aria-label="已安装"]');
 const rows = page => installed(page).locator('.ww-kit-row');
+// 2026-11-18 起随包技能（内置、改过的内置）在界面上显示中文名，英文短名写在类型后面（“内置 · whalewing-writing”）、详情里另有一行。
+// 测试照旧用英文短名指认技能：名字一列认中文名或英文短名，类型一列认“类型”或“类型 · 英文短名”。
+const shownName = name => new RegExp(`^(${escape(name)}|${escape(skillTitle(name))})$`);
 /** 列表里名字正好是 name 的那一行；kind 是“类型”一列（个人、内置、内置 · 改过……）。 */
-const row = (page, name, kind) => rows(page).filter({ has: page.locator('.ww-kit-name', { hasText: new RegExp(`^${escape(name)}$`) }) }).filter(kind ? { has: page.locator('.ww-kit-type', { hasText: new RegExp(`^${escape(kind)}$`) }) } : {});
+const row = (page, name, kind) => rows(page).filter({ has: page.locator('.ww-kit-name', { hasText: shownName(name) }) }).filter(kind ? { has: page.locator('.ww-kit-type', { hasText: new RegExp(`^${escape(kind)}( · ${escape(name)})?$`) }) } : {});
 /** 点开一项技能后右侧的详情抽屉（里面有技能全文）。 */
 const detail = page => page.locator('dialog.ww-editor[open]').filter({ has: page.locator('pre.ww-kit-content') });
 const searchBox = page => library(page).getByRole('searchbox', { name: '搜索' });
@@ -48,11 +52,15 @@ async function openCreate(page) {
 }
 const identifier = editor => editor.locator('label', { hasText: '技能标识' }).locator('input');
 const primary = editor => editor.locator('footer button.ww-primary');
-/** 每一行：名字、类型、用途、所在分组。 */
-const rowInfo = page => rows(page).evaluateAll(items => items.map(item => ({
-  name: item.querySelector('.ww-kit-name').textContent, kind: item.querySelector('.ww-kit-type').textContent,
+/** 每一行：名字（英文短名）、界面上显示的名字、类型（去掉后面的英文短名）、用途、所在分组。 */
+const titled = new Map(Object.entries(skillTitles).map(([name, title]) => [title, name]));
+const rowInfo = async page => (await rows(page).evaluateAll(items => items.map(item => ({
+  title: item.querySelector('.ww-kit-name').textContent, kind: item.querySelector('.ww-kit-type').textContent,
   description: item.querySelector('.ww-kit-main small')?.getAttribute('title') ?? '', group: item.querySelector('.ww-kit-type').textContent.split(' · ')[0],
-})));
+})))).map(item => {
+  const id = titled.get(item.title), tail = id && ` · ${id}`;
+  return id && item.kind.endsWith(tail) ? { ...item, name: id, kind: item.kind.slice(0, -tail.length) } : { ...item, name: item.title };
+});
 
 /** 反复读到期望值为止（界面重绘是异步的），超时就按最后一次读到的值报错。 */
 async function settled(read, expected, message, timeout = 5_000) {
@@ -98,7 +106,7 @@ async function openSkills(page) {
 async function selectSkill(page, name, kind) {
   await searchBox(page).fill(name);
   await row(page, name, kind).click();
-  await detail(page).locator('header h2', { hasText: new RegExp(`^${escape(name)}$`) }).waitFor();
+  await detail(page).locator('header h2', { hasText: shownName(name) }).waitFor();
 }
 
 // SKL-01 需求§技能中心（页签和页标题叫“技能中心”；顶上一行分段、搜索、筛选、排序、添加；“我的”按个人、内置分组；点一行右侧抽屉看全文；随包 94 项）
@@ -143,7 +151,8 @@ test('按名字或用途查找技能', async t => {
     await openSkills(page);
     const all = await rowInfo(page);
     for (const query of ['测试', 'web-testing']) {
-      const expected = all.filter(item => `${item.name} ${item.description}`.toLowerCase().includes(query.toLowerCase())).map(item => item.name);
+      // 中文名、英文短名和用途都搜（2026-11-18 起随包技能有中文名）。
+      const expected = all.filter(item => `${item.name} ${item.title} ${item.description}`.toLowerCase().includes(query.toLowerCase())).map(item => item.name);
       assert.ok(expected.length > 0, `有名字或用途含“${query}”的技能`);
       await searchBox(page).fill(query);
       await settled(async () => (await rowInfo(page)).map(item => item.name), expected, `查“${query}”`);

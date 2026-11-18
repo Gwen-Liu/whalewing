@@ -3,6 +3,7 @@ import { mkdir, realpath, writeFile } from 'node:fs/promises';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import { approveEscalation } from '@deepseek-ai/dsh-sandbox';
 import { providerProfile } from '../../src/llm-profiles.js';
+import { isImageModel } from '../../src/image-models.js';
 
 /**
  * 鲸翼生图（2026-11-17 用户定：鲸翼自带生图工具）。DSH 本身没有生图工具，模型只会出文字；
@@ -11,15 +12,21 @@ import { providerProfile } from '../../src/llm-profiles.js';
  * 再由模型用 DSH 的 present 把文件交给员工。生图模型就是员工在 DSH 模型设置里给渠道加的型号（如 gpt-image-2），
  * 鲸翼不另设一套模型配置。渠道里没有生图模型时工具不出现，免得模型以为能画。
  * 不用 ChatGPT 登录凭证去调 ChatGPT 后端：那是没公开的内部接口，违反服务条款。
+ *
+ * 2026-11-18 用户问“配了其他的生图模型也可以接进来吗”，接法扩成两种：
+ * - 生图接口（images）：OpenAI 官方、xAI、Together 这几个 DSH 自带渠道，Google 的 OpenAI 兼容地址（Imagen），
+ *   以及员工自己加的 OpenAI 兼容渠道（中转站、火山方舟 Seedream、智谱 CogView、硅基流动等）。
+ * - 对话接口出图（chat）：OpenRouter，以及 Gemini 出图模型（Nano Banana 一类）——它们是对话模型顺带出图，
+ *   走 /chat/completions，图在回复里。
+ * 走别的协议的（阿里百炼原生的异步任务、Midjourney）接不了，请求会如实报错。
  */
 
 export const imageToolName = 'whalewing_image';
 export const imageLimits = Object.freeze({ prompt: 32000, references: 4, referenceBytes: 20 * 1024 * 1024, resultBytes: 64 * 1024 * 1024, timeoutMs: 10 * 60 * 1000 });
 const fail = (code, message) => { throw Object.assign(new Error(message), { code }); };
 
-/** 型号名看得出是生图模型的：GPT Image、DALL·E 和中转站常见的几家；只按名字认，接口不支持时请求会如实报错。 */
-const imagePattern = /gpt-image|chatgpt-image|dall-e|seedream|imagen|flux|cogview|wanx|kolors|qwen-image|hunyuan-image|recraft|ideogram|(^|[-_/.])image($|[-_/.])/i;
-export const isImageModel = id => typeof id === 'string' && imagePattern.test(id);
+// 型号名看得出是生图模型的：和模型世界共用 src/image-models.js。
+export { isImageModel };
 
 /** 挑默认用哪个：GPT Image 优先，版本高的优先，同版本不带后缀的优先（gpt-image-2.6 先于 gpt-image-2.6-flare）。 */
 export function rankImageModels(list) {
@@ -42,11 +49,68 @@ export function channelOf(services, provider) {
   const profile = providerProfile(services, provider);
   const api = typeof profile.api === 'string' ? profile.api : null;
   const baseURL = typeof profile.baseURL === 'string' && profile.baseURL ? profile.baseURL : info?.defaultBaseURL ?? null;
-  // 只认 OpenAI 兼容的渠道：自己声明了 openai 协议的中转站，或者 OpenAI 官方渠道。用 ChatGPT 账号登录的渠道不算。
-  const openai = api ? /^openai-(completions|responses)$/.test(api) : provider === 'openai';
+  // 能生图的渠道：自己声明了 openai 协议的（中转站和各家的兼容地址），或者下面几个 DSH 自带渠道。
+  // 用 ChatGPT 账号登录的渠道（openai-codex）不算。
+  const style = api ? (/^openai-(completions|responses)$/.test(api) ? 'openai' : api === 'google-generative-ai' ? 'google' : null) : builtinStyles[provider] ?? null;
   const keys = typeof profile.apiKeyEnv === 'string' && profile.apiKeyEnv ? [profile.apiKeyEnv] : [...(info?.nativeAuth?.env ?? [])];
   const headers = profile.headers && typeof profile.headers === 'object' ? Object.fromEntries(Object.entries(profile.headers).filter(([, value]) => typeof value === 'string')) : {};
-  return { provider, api, baseURL, openai, keys, headers };
+  // Google 的 OpenAI 兼容接口在原生地址后面加 /openai。
+  const root = baseURL ? baseURL.replace(/\/+$/, '') + (style === 'google' && !/\/openai$/.test(baseURL.replace(/\/+$/, '')) ? '/openai' : '') : null;
+  return { provider, api, baseURL, root, style, openai: Boolean(style), keys, headers };
+}
+
+/** DSH 自带渠道里能生图的：值是接法的风格，见 imageMethod。 */
+const builtinStyles = Object.freeze({ openai: 'openai', xai: 'openai', together: 'openai', google: 'google', openrouter: 'openrouter' });
+
+/**
+ * 这个型号走哪种接口：Gemini 出图模型（Nano Banana 一类）和 OpenRouter 上的都是对话模型顺带出图，走对话接口；
+ * 其余走 OpenAI 的生图接口。
+ */
+export const imageMethod = (channel, model) => channel.style === 'openrouter' || /gemini[^/]*image|nano-?banana/i.test(model) ? 'chat'
+  // 阿里百炼的万相、通义千问生图只有原生的异步任务接口（OpenAI 兼容地址不管生图）：渠道地址在百炼的就走原生接口（2026-11-18）。
+  : dashscopeHost(channel.baseURL) && /wanx|wan2\.\d+-t2i|qwen-image/i.test(model) ? 'dashscope' : 'images';
+
+/** 渠道地址是阿里百炼的（国内、国际站）：返回原生接口的根地址，不是返回 null。 */
+function dashscopeHost(baseURL) {
+  try { const url = new URL(baseURL); return /^dashscope(-intl)?\.aliyuncs\.com$/i.test(url.hostname) ? `${url.origin}/api/v1` : null; } catch { return null; }
+}
+const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * 百炼原生生图：先提交异步任务（X-DashScope-Async），再每 2 秒查一次结果，最多等到工具超时。
+ * 尺寸写成“宽*高”；接口给的是图片链接，下载交给 bytesOf。
+ */
+async function dashscopeImage(channel, key, chosen, request, fetcher, signal, sleep = pause) {
+  const root = dashscopeHost(channel.baseURL), headers = { ...channel.headers, authorization: `Bearer ${key}`, 'content-type': 'application/json' };
+  const call = async (url, init) => {
+    let response;
+    try { response = await fetcher(url, { ...init, signal }); }
+    catch (error) { if (signal.aborted) throw error; fail('IMAGE_NETWORK', `连不上渠道 ${chosen.provider} 的百炼生图接口：${String(error?.message ?? error).slice(0, 200)}`); }
+    const text = await response.text();
+    if (!response.ok) failure(response.status, text);
+    try { return JSON.parse(text); } catch { fail('IMAGE_FAILED', '百炼生图接口返回的不是 JSON'); }
+  };
+  const size = request.size && request.size !== 'auto' ? request.size.replace('x', '*') : undefined;
+  const submitted = await call(`${root}/services/aigc/text2image/image-synthesis`, { method: 'POST', headers: { ...headers, 'x-dashscope-async': 'enable' }, body: JSON.stringify({ model: chosen.model, input: { prompt: request.prompt }, parameters: { n: 1, ...(size ? { size } : {}) } }) });
+  const task = submitted?.output?.task_id;
+  if (typeof task !== 'string' || !task) fail('IMAGE_FAILED', `百炼没有接下这个生图任务${submitted?.message ? `：${String(submitted.message).slice(0, 200)}` : ''}`);
+  for (const deadline = Date.now() + imageLimits.timeoutMs - 30000; Date.now() < deadline;) {
+    await sleep(2000);
+    signal.throwIfAborted();
+    const value = await call(`${root}/tasks/${encodeURIComponent(task)}`, { method: 'GET', headers });
+    const status = value?.output?.task_status;
+    if (status === 'SUCCEEDED') {
+      const result = (value.output.results ?? []).find(item => typeof item?.url === 'string');
+      if (!result) fail('IMAGE_FAILED', `百炼的生图任务完成了，但没有给出图片${value.output.results?.[0]?.message ? `：${String(value.output.results[0].message).slice(0, 200)}` : ''}`);
+      return { url: result.url, ...(typeof result.actual_prompt === 'string' ? { revisedPrompt: result.actual_prompt } : {}) };
+    }
+    if (['FAILED', 'CANCELED', 'UNKNOWN'].includes(status)) {
+      const reason = String(value.output.message ?? value.output.code ?? '').slice(0, 300);
+      if (/DataInspection|inappropriate|敏感|违规/i.test(reason)) fail('IMAGE_REFUSED', `生图服务拒绝了这个提示词：${reason}。换个说法再试，不要绕过`);
+      fail('IMAGE_FAILED', `百炼的生图任务没有成功（${status}）${reason ? `：${reason}` : ''}`);
+    }
+  }
+  fail('IMAGE_FAILED', '百炼的生图任务等了太久还没出结果，稍后再试');
 }
 
 /** DSH 里配好的、能走生图接口的生图模型。 */
@@ -69,7 +133,7 @@ export async function pickImageModel(services, wanted, signal) {
   const list = await imageModels(services, signal);
   const text = typeof wanted === 'string' ? wanted.trim() : '';
   if (!text) {
-    if (!list.length) fail('IMAGE_NO_MODEL', 'DSH 的模型设置里还没有生图模型。请员工在 DSH 设置的“模型”里，给 OpenAI 兼容的渠道加上生图模型（比如 gpt-image-2），加好后再来');
+    if (!list.length) fail('IMAGE_NO_MODEL', 'DSH 的模型设置里还没有生图模型。请员工在 DSH 设置的“模型”里，给 OpenAI 兼容的渠道加上生图模型（比如 gpt-image-2、doubao-seedream、cogview、flux，或者 OpenRouter 上的 Gemini 出图模型），加好后再来');
     return list[0];
   }
   const slash = text.indexOf('/');
@@ -81,7 +145,7 @@ export async function pickImageModel(services, wanted, signal) {
     const known = (services.llm?.listProviders?.() ?? []).find(item => item.id === provider);
     const channel = known && channelOf(services, provider);
     if (channel?.openai && channel.baseURL) return { provider, providerName: known.name || provider, model, name: model };
-    fail('IMAGE_MODEL_MISSING', known ? `渠道 ${provider} 不是 OpenAI 兼容的接口，生不了图` : `DSH 里没有 ${provider} 这条渠道`);
+    fail('IMAGE_MODEL_MISSING', known ? `渠道 ${provider} 不是 OpenAI 兼容的接口，鲸翼接不了它的生图。可以在 DSH 里用这家的 OpenAI 兼容地址另加一条渠道` : `DSH 里没有 ${provider} 这条渠道`);
   }
   fail('IMAGE_MODEL_MISSING', list.length ? `没有 ${model} 这个生图模型。能用的有：${list.map(item => `${item.provider}/${item.model}`).join('、')}` : 'DSH 的模型设置里还没有生图模型');
 }
@@ -90,6 +154,8 @@ const sizePattern = /^(auto|\d{3,4}x\d{3,4})$/;
 const enums = { quality: ['auto', 'low', 'medium', 'high'], background: ['auto', 'transparent', 'opaque'], format: ['png', 'jpeg', 'webp'] };
 const mediaTypes = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' };
 const extensionOf = format => (format === 'jpeg' ? '.jpg' : `.${format}`);
+/** 看文件头认格式：PNG、JPEG、WebP；认不出返回 null。 */
+const sniff = bytes => bytes[0] === 0x89 && bytes[1] === 0x50 ? 'png' : bytes[0] === 0xff && bytes[1] === 0xd8 ? 'jpeg' : bytes.subarray(0, 4).toString('latin1') === 'RIFF' && bytes.subarray(8, 12).toString('latin1') === 'WEBP' ? 'webp' : null;
 
 /** 调用参数先全部校验，不合规的直接告诉模型怎么改，不花钱发请求。 */
 export function imageRequest(args) {
@@ -175,6 +241,31 @@ async function reference(services, cwd, file, signal) {
   return `data:${mediaTypes[path.extname(file).toLowerCase()]};base64,${Buffer.from(bytes).toString('base64')}`;
 }
 
+/**
+ * 对话接口出图的请求：提示词和参考图放进一条用户消息，要求回复里带图。
+ * 尺寸、质量这些对话接口没有统一的字段，写进提示词里让模型照着画。
+ */
+function chatBody(model, request, images) {
+  const wishes = [request.size && request.size !== 'auto' && `尺寸 ${request.size}`, request.background === 'transparent' && '透明背景'].filter(Boolean);
+  const text = `${request.prompt}${wishes.length ? `\n\n（${wishes.join('，')}）` : ''}`;
+  return {
+    model, modalities: ['image', 'text'], stream: false,
+    messages: [{ role: 'user', content: images.length ? [{ type: 'text', text }, ...images.map(url => ({ type: 'image_url', image_url: { url } }))] : text }],
+  };
+}
+
+/** 从对话接口的回复里找第一张图：OpenRouter 放在 message.images，有的放在 content 的图片段，中转站常在文字里给 Markdown 图片。 */
+function chatImage(value) {
+  const message = value?.choices?.[0]?.message;
+  const asItem = url => (typeof url !== 'string' ? null : url.startsWith('data:image/') ? { b64_json: url.slice(url.indexOf(',') + 1) } : { url });
+  for (const entry of Array.isArray(message?.images) ? message.images : []) { const hit = asItem(entry?.image_url?.url ?? entry?.url); if (hit) return hit; }
+  const parts = Array.isArray(message?.content) ? message.content : [];
+  for (const part of parts) { const hit = part?.type === 'image_url' ? asItem(part.image_url?.url) : part?.type === 'image' && typeof part.data === 'string' ? { b64_json: part.data } : null; if (hit) return hit; }
+  const text = typeof message?.content === 'string' ? message.content : parts.filter(part => part?.type === 'text').map(part => part.text).join('\n');
+  const markdown = /!\[[^\]]*\]\((data:image\/[a-z]+;base64,[A-Za-z0-9+/=]+|https?:\/\/[^)\s]+)\)/.exec(text ?? '');
+  return markdown ? asItem(markdown[1]) : null;
+}
+
 /** 拿到图片字节：接口给 base64 就直接解，给链接就下载（限大小）。 */
 async function bytesOf(item, fetcher, signal) {
   if (typeof item?.b64_json === 'string' && item.b64_json) return Buffer.from(item.b64_json, 'base64');
@@ -203,22 +294,36 @@ export async function generateImage(services, request, exec, options = {}) {
     if (hit?.value) { key = hit.value; break; }
   }
   if (!key) fail('IMAGE_AUTH', `渠道 ${chosen.provider} 没有配 key，或者 key 是空的。请员工在 DSH 设置的“模型”里给这条渠道填上 key`);
+  const method = imageMethod(channel, chosen.model);
+  // 百炼原生生图只接文生图；参考图改图是另一套接口，没接。发请求和审批之前就说清，不白花钱。
+  if (method === 'dashscope' && request.images.length) fail('IMAGE_INPUT', `${chosen.model} 走的是百炼原生生图接口，鲸翼还不支持带参考图改图；去掉 images 只按描述出图，或者换一个生图模型`);
   // 会话是只读权限时，往工作目录里存图要员工点头；能写工作区的会话直接存。
   const policy = services.sandboxPolicy.resolve({ session: agent.session });
   if (policy?.mode === 'read-only') {
     await approveEscalation({ requestedMode: 'workspace-write', effectiveMode: policy.mode, subject: '鲸翼生图', justification: `把生成的图片存进工作目录${request.path ? `（${request.path}）` : '的“图片”文件夹'}；只新建这一个文件，不改别的。` }, { approver: services.approval, agent, callId: exec.callId, toolName: imageToolName, signal: exec.signal });
   }
   const place = await destination(cwd, request.path, now());
+  const started = Date.now();
+  if (method === 'dashscope') {
+    const item = await dashscopeImage(channel, key, chosen, request, fetcher, exec.signal, options.sleep);
+    const bytes = await bytesOf(item, fetcher, exec.signal);
+    const saved = await save(place, extensionOf(sniff(bytes) ?? 'png'), bytes);
+    return {
+      path: saved, relative: path.relative(place.root, saved).split(path.sep).join('/'), model: `${chosen.provider}/${chosen.model}`,
+      ...(request.size ? { size: request.size } : {}), seconds: Math.round((Date.now() - started) / 1000), bytes: bytes.byteLength,
+      ...(item.revisedPrompt ? { revisedPrompt: item.revisedPrompt.slice(0, 2000) } : {}),
+      next: '图已经存好。用 present 把这个文件交给员工；能看图的话先打开看一眼，文字错了、糊了就重新生成，不在原图上涂改。',
+    };
+  }
   const images = [];
   for (const file of request.images) images.push(await reference(services, cwd, file, exec.signal));
-  const body = {
+  const body = method === 'chat' ? chatBody(chosen.model, request, images) : {
     model: chosen.model, prompt: request.prompt, n: 1,
     ...(request.size ? { size: request.size } : {}), ...(request.quality ? { quality: request.quality } : {}),
     ...(request.background ? { background: request.background } : {}), ...(request.format ? { output_format: request.format } : {}),
     ...(images.length ? { images: images.map(url => ({ image_url: url })) } : {}),
   };
-  const endpoint = `${channel.baseURL.replace(/\/+$/, '')}/images/${images.length ? 'edits' : 'generations'}`;
-  const started = Date.now();
+  const endpoint = `${channel.root}/${method === 'chat' ? 'chat/completions' : `images/${images.length ? 'edits' : 'generations'}`}`;
   let response;
   try {
     response = await fetcher(endpoint, { method: 'POST', headers: { ...channel.headers, authorization: `Bearer ${key}`, 'content-type': 'application/json' }, body: JSON.stringify(body), signal: exec.signal });
@@ -230,9 +335,10 @@ export async function generateImage(services, request, exec, options = {}) {
   if (!response.ok) failure(response.status, text);
   let value;
   try { value = JSON.parse(text); } catch { fail('IMAGE_FAILED', '生图接口返回的不是 JSON'); }
-  const item = value?.data?.[0];
+  const item = method === 'chat' ? chatImage(value) : value?.data?.[0] ?? value?.images?.[0];
   const bytes = await bytesOf(item, fetcher, exec.signal);
-  const format = request.format ?? (typeof value?.output_format === 'string' && enums.format.includes(value.output_format) ? value.output_format : 'png');
+  // 扩展名跟着图片的真实格式走：对话接口和不少中转站不管 output_format，PNG 的内容不起 .jpg 的名字。
+  const format = (method === 'chat' || !request.format ? sniff(bytes) : null) ?? request.format ??(typeof value?.output_format === 'string' && enums.format.includes(value.output_format) ? value.output_format : 'png');
   const saved = await save(place, extensionOf(format), bytes);
   return {
     path: saved, relative: path.relative(place.root, saved).split(path.sep).join('/'), model: `${chosen.provider}/${chosen.model}`,
@@ -244,7 +350,7 @@ export async function generateImage(services, request, exec, options = {}) {
 }
 
 const description = [
-  '鲸翼生图：用 DSH 里配好的生图模型（如 GPT Image）画一张图，存进当前工作目录。',
+  '鲸翼生图：用 DSH 里配好的生图模型（GPT Image、Seedream、Imagen、Gemini 出图、FLUX、CogView 等）画一张图，存进当前工作目录。',
   '只在员工要一张真的图片（插画、海报底图、照片风格的画面、封面）时用；每次调用都要花钱，一次一张，不要为了试试多画。',
   '中文字多、数字多、要排得很准的图，让它出无字底图，文字另用 HTML 排上去。',
   'generate：prompt 写完整的画面描述（主体、场景、风格、配色、构图、要不要文字）；带 images（工作目录里的参考图路径，最多 4 张）就是照着参考图改。',

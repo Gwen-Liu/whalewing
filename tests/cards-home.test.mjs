@@ -44,6 +44,36 @@ async function open(overrides) {
   return { f, tree: await settle(f) };
 }
 
+test('今天这一期没生成出来：照实说原因，能现在重新生成一期；发出去以后显示正在整理', async () => {
+  const delivery = { scheduledAt: '2026-10-12T00:00:00.000Z', deliveredAt: '2026-10-12T00:00:01.000Z', messageId: 'm1' };
+  const task = status => ({ id: 'news-1', kind: 'daily', title: '每日资讯', prompt: '每日资讯', scheduledAt: '2026-10-13T00:00:00.000Z', time: '08:00:00', timeZone: 'Asia/Shanghai', sessionId: 'whalewing-news-1', status: 'active', purpose: 'news', displayPrompt: '每日资讯', lastDelivery: delivery,
+    lastRun: { ...delivery, status, ...(status === 'error' ? { error: { code: 'QUOTA', message: 'Insufficient balance', status: 402 } } : {}) } });
+  let state = 'error';
+  const ran = [];
+  const { f, tree } = await open({ news: async input => ok(input.action === 'home' ? home() : { fields: [] }), reading: async () => ok({ home: readingHome() }), automation: async input => {
+    if (input.action === 'catalog') return ok({ available: true, tasks: [task(state)], legacyTasks: [], issues: [] });
+    if (input.action === 'run') { ran.push(input); state = 'waiting'; return ok({ id: input.id, ran: true }); }
+    throw new Error('unexpected automation action ' + input.action);
+  } });
+  const notice = classed(tree, 'ww-read-today')[0];
+  assert.ok(textOf(notice).includes('今天这一期没生成出来：模型的余额或额度用完了'), textOf(notice));
+  assert.equal(textOf(notice).includes('尚未生成'), false, '失败了不再写“尚未生成”');
+  await byText(notice, 'button', '现在生成一期').props.onClick();
+  const after = await settle(f);
+  assert.deepEqual(ran, [{ action: 'run', sessionId: 'whalewing-news-1', id: 'news-1' }]);
+  assert.ok(textOf(classed(after, 'ww-read-today')[0]).includes('正在整理今天这一期'));
+  f.unmount();
+  // 新装当天还没跑过：照旧说几点整理，也能手动生成一期。
+  const fresh = await open({ news: async input => ok(input.action === 'home' ? home() : { fields: [] }), reading: async () => ok({ home: readingHome() }), automation: async input => {
+    if (input.action === 'catalog') { const { lastDelivery: _d, lastRun: _r, ...rest } = task('error'); return ok({ available: true, tasks: [rest], legacyTasks: [], issues: [] }); }
+    throw new Error('unexpected automation action ' + input.action);
+  } });
+  const blank = classed(fresh.tree, 'ww-read-today')[0];
+  assert.ok(textOf(blank).includes('今日日报尚未生成'));
+  byText(blank, 'button', '现在生成一期');
+  fresh.f.unmount();
+});
+
 test('首页排法：照员工情况挑的一期把第一条写了关联的提到最前，其余顺序不变；不是的保持原样；超过 8 条只留前 8 条', () => {
   const personal = report({ items: 5, personal: true, related: [2, 4] });
   assert.deepEqual(arrange(personal).map(item => item.title), [3, 1, 2, 4, 5].map(n => `AI 与科技 第 ${n} 条`));

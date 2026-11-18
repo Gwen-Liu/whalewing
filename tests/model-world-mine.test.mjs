@@ -55,6 +55,13 @@ test('摊平目录：手动对应优先于按名字对；账本里的渠道型�
   assert.equal(usedWorld({ provider: 'gone', model: 'nothing' }, items, models), null);
 });
 
+test('生图模型单独标出来：不对模型世界的型号，手动对应也不算，账本里也不对', () => {
+  const mine = { defaultModel: null, mapping: { 'p\ngpt-image-2.6': 'openai/gpt-6.1-sol' }, groups: [{ id: 'p', name: '渠道', kind: 'relay', host: 'h', models: [{ id: 'gpt-image-2.6', name: 'gpt-image-2.6' }, { id: 'gpt-6.1-sol', name: 'gpt-6.1-sol' }, { id: 'x1', name: 'Seedream 4.0' }] }] };
+  const items = mineItems(mine, models);
+  assert.deepEqual(items.map(item => [item.model, item.image, item.world?.id ?? null, item.mapped]), [['gpt-image-2.6', true, null, false], ['gpt-6.1-sol', false, 'openai/gpt-6.1-sol', false], ['x1', true, null, false]], '显示名认得出也算');
+  assert.equal(usedWorld({ provider: 'gone', model: 'gpt-image-2' }, items, models), null);
+});
+
 test('可以试试：同家更划算的、这一家新出的、开低一档就够的', () => {
   const sol = world('openai/sol', 'Sol', { overall: 52, date: '2026-06-01', efforts: [{ effort: 'max', index: 52, cost: 100 }, { effort: 'high', index: 51, cost: 40 }, { effort: 'low', index: 30, cost: 5 }] });
   const fresh = world('openai/next', 'Next', { date: '2026-11-01' }), old = world('openai/old', 'Old', { date: '2026-01-01' });

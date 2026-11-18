@@ -130,9 +130,11 @@ export function createPackViews(kit) {
     if (!preview) return h(Drawer, { title, busy: true, onClose }, h('p', { className: 'ww-kit-empty', role: 'status' }, '正在下载和读取这个插件包…'));
     const usable = preview.mcp.filter(item => !item.blocked);
     const nothing = !preview.skills.length && !usable.length;
+    // 装过同名的包：能原地更新到这一份（2026-11-18）；一模一样的不用更新。
+    const update = preview.update, same = Boolean(update?.same), blockedInstall = preview.installed && !update;
     const install = () => {
       setError('');
-      const chosen = usable.filter(item => picked[item.key]);
+      const chosen = usable.filter(item => !item.kept && picked[item.key]);
       for (const item of chosen) {
         const missing = item.fields.filter(field => field.required && !String(values[item.key]?.[field.id] ?? '').trim()).map(field => field.label);
         if (missing.length) return setError(`MCP「${item.title}」还没填：${missing.join('、')}；不想现在填就取消勾选它`);
@@ -143,7 +145,7 @@ export function createPackViews(kit) {
       preview.homepage && h('a', { key: 'home', className: 'ww-kit-link', href: preview.homepage, target: '_blank', rel: 'noreferrer' }, '主页', h(Glyph, { name: 'external', size: 14 })),
       h('span', { key: 'gap', className: 'ww-grow' }),
       h('button', { key: 'cancel', type: 'button', disabled: busy, onClick: requestClose }, '取消'),
-      h('button', { key: 'install', type: 'button', className: 'ww-primary', disabled: busy || preview.installed || nothing, onClick: install }, preview.installed ? '已安装' : busy ? '正在装…' : '安装'),
+      h('button', { key: 'install', type: 'button', className: 'ww-primary', disabled: busy || blockedInstall || same || nothing, onClick: install }, same ? '已是这一版' : blockedInstall ? '已安装' : busy ? (update ? '正在更新…' : '正在装…') : update ? '更新到这一版' : '安装'),
     ].filter(Boolean);
     const conflicts = preview.skills.filter(skill => skill.conflict);
     return h(React.Fragment, null, h(Drawer, { title, busy, onClose: requestClose, footer },
@@ -152,15 +154,18 @@ export function createPackViews(kit) {
         h('dt', null, '来源'), h('dd', null, sourceDetail(preview), repoUrl(preview.source) && h('a', { href: repoUrl(preview.source), target: '_blank', rel: 'noreferrer' }, preview.source.repo)),
         preview.author && h(React.Fragment, null, h('dt', null, '作者'), h('dd', null, preview.author)),
         preview.version && h(React.Fragment, null, h('dt', null, '版本'), h('dd', null, preview.version))),
-      preview.installed && h('p', { className: 'ww-notice', role: 'status' }, '已经装了这个包；要换成这一份，先在“我的”里卸载原来那个。'),
+      same && h('p', { className: 'ww-notice', role: 'status' }, '装的就是这一份，不用更新。'),
+      update && !same && h('p', { className: 'ww-notice', role: 'status' }, `已经装了这个包${update.version ? `（${update.version}）` : ''}。更新后包里的技能换成这一份；原来装好的 MCP 沿用原来的设置和密钥，这一份里没有的会撤掉；开没开照旧。`),
+      blockedInstall && h('p', { className: 'ww-notice', role: 'status' }, '已经装了这个包；要换成这一份，先在“我的”里卸载原来那个。'),
       nothing && h('p', { className: 'ww-notice ww-warn', role: 'status' }, '这个包里没有 DSH 能用的技能或 MCP，装了也用不上。'),
       preview.skills.length > 0 && h(React.Fragment, null, h('h3', { className: 'ww-kit-subhead' }, `技能（${preview.skills.length}）`),
         h('ul', { className: 'ww-kit-items' }, ...preview.skills.map(skill => h('li', { key: skill.name }, h('div', null, h('strong', null, skill.name, skill.conflict && h('span', { className: 'ww-tag ww-tag-warn' }, '同名')), h('small', null, skill.description)))))),
       conflicts.length > 0 && h('p', { className: 'ww-notice ww-warn', role: 'status' }, `你已经有叫「${conflicts.map(skill => skill.name).join('」「')}」的技能；装上后同名的两项只有一项生效。`),
       usable.length > 0 && h('h3', { className: 'ww-kit-subhead' }, `MCP（${usable.length}）`),
       usable.length > 0 && h('ul', { className: 'ww-kit-picks' }, ...usable.map(item => h('li', { key: item.key },
-        h('label', { className: 'ww-choice' }, h('input', { type: 'checkbox', checked: Boolean(picked[item.key]), disabled: busy, onChange: event => setPicked(current => ({ ...current, [item.key]: event.target.checked })) }), h('strong', null, item.title), h('small', null, transportText(item.transport))),
+        h('label', { className: 'ww-choice' }, h('input', { type: 'checkbox', checked: Boolean(item.kept || picked[item.key]), disabled: Boolean(busy || item.kept), onChange: event => setPicked(current => ({ ...current, [item.key]: event.target.checked })) }), h('strong', null, item.title), h('small', null, transportText(item.transport))),
         h('small', { className: 'ww-kit-target', title: item.target }, item.target),
+        item.kept && h('small', { className: 'ww-kit-why' }, '已经装好，沿用原来的设置和密钥'),
         item.hint && h('small', { className: 'ww-kit-why', 'data-tone': 'warn' }, item.hint),
         picked[item.key] && item.fields.map(field => h('label', { key: field.id }, `${field.label}${field.required ? '' : '（可不填）'}`,
           h('input', { type: field.secret ? 'password' : 'text', value: values[item.key]?.[field.id] ?? '', disabled: busy, autoComplete: 'off', onChange: event => setValues(current => ({ ...current, [item.key]: { ...current[item.key], [field.id]: event.target.value } })) }),

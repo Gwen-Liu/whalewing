@@ -183,6 +183,32 @@ test('装插件包：预览暂存，只装看过的那一份；技能交给 DSH 
   await assert.rejects(fs.stat(installedDir), { code: 'ENOENT' });
 });
 
+test('插件包原地更新：文件换成新的一份，包自己的数据（.data）和开没开都留着；没装过的不能更新；新版装不上时旧的原样留着', async t => {
+  // 2026-11-18 用户要把已知问题“插件包更新需先卸载再安装新版”解决掉。
+  const { library } = await makeLibrary(t);
+  const v1 = readPack(samplePack('remote-pack'));
+  const recordOf = (pack, extra = {}) => ({ name: pack.name, title: pack.title, version: pack.version, hash: pack.hash, source: { kind: 'upload', label: '上传' }, enabled: false, skills: pack.skills, mcp: [], skippedMcp: [], skipped: pack.skipped, issues: pack.issues, ...extra });
+  await assert.rejects(library.packs.replace(v1, recordOf(v1), AbortSignal.timeout(5000)), { code: 'PACK_MISSING' }, '没装过的不能更新');
+  await library.packs.install(v1, recordOf(v1), AbortSignal.timeout(5000));
+  const dir = path.join(library.root, ...packArea.split('/'), 'remote-pack');
+  await fs.writeFile(path.join(dir, '.data', 'cache.json'), '{"kept":true}');
+  const files = samplePack('remote-pack').map(item => item.path === 'skills/route-plan/SKILL.md' ? file(item.path, skill('route-plan', '新版的说明')) : item.path === 'server.mjs' ? file(item.path, 'console.log(2)') : item);
+  const v2 = readPack([...files, file('skills/day-trip/SKILL.md', skill('day-trip'))]);
+  assert.notEqual(v2.hash, v1.hash);
+  const updated = await library.packs.replace(v2, recordOf(v2, { version: '1.3.0' }), AbortSignal.timeout(5000));
+  assert.equal(updated.version, '1.3.0'); assert.equal(updated.enabled, false, '开没开照旧（记录由调用方带过来）');
+  assert.deepEqual(updated.skills.map(item => item.name), ['day-trip', 'route-plan'], '新版加的技能也在');
+  assert.equal(await fs.readFile(path.join(dir, 'server.mjs'), 'utf8'), 'console.log(2)', '包的文件换成新版');
+  assert.match((await library.packs.readSkill('remote-pack', 'route-plan')).content, /新版的说明/);
+  assert.equal(await fs.readFile(path.join(dir, '.data', 'cache.json'), 'utf8'), '{"kept":true}', '包自己的数据留着');
+  assert.deepEqual((await fs.readdir(path.dirname(dir))).filter(name => name.startsWith('.')), [], '挪到一边的旧文件夹删掉了');
+  // 新版太大装不上：旧的原样留着。
+  const tooBig = { ...v2, files: [...v2.files, ...Array.from({ length: 3 }, (_, i) => ({ path: `big-${i}.bin`, bytes: Buffer.alloc(15 * 1024 * 1024) }))] };
+  await assert.rejects(library.packs.replace(tooBig, recordOf(v2), AbortSignal.timeout(20000)));
+  assert.equal(await fs.readFile(path.join(dir, 'server.mjs'), 'utf8'), 'console.log(2)');
+  assert.equal((await library.packs.load()).length, 1);
+});
+
 test('插件包带的 MCP：向 DSH 的 MCP 管理器登记；包停用就撤回，启用再登记；卸载包时一起删，凭据库里的密钥也删', async () => {
   let enabled = true;
   const h = makeMcp({ packOn: () => enabled });

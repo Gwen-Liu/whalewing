@@ -159,6 +159,82 @@ test('接口给的是链接也能存；接口报错翻成员工看得懂的话',
   await assert.rejects(run({ action: 'generate', prompt: 'x' }), /没有返回图片/);
 });
 
+test('别家的生图模型：Seedream、FLUX、Imagen、Gemini 出图都认得；DSH 自带的 xAI、Together、Google、OpenRouter 渠道也能接', async t => {
+  assert.ok(['doubao-seedream-4-0-250828', 'black-forest-labs/FLUX.1-schnell', 'imagen-4.0-generate-001', 'google/gemini-2.5-flash-image', 'gemini-3-pro-image-preview', 'cogview-4', 'Kwai-Kolors/Kolors', 'grok-2-image', 'wanx2.1-t2i-turbo', 'nano-banana'].every(isImageModel));
+  const { channelOf, imageMethod } = await import('../features/experts/image.js');
+  const services = { llm: { listConfigurableProviders: () => [
+    { provider: 'xai', defaultBaseURL: 'https://api.x.ai/v1', nativeAuth: { env: ['XAI_API_KEY'] } },
+    { provider: 'google', defaultBaseURL: 'https://generativelanguage.googleapis.com/v1beta', nativeAuth: { env: ['GEMINI_API_KEY'] } },
+    { provider: 'openrouter', defaultBaseURL: 'https://openrouter.ai/api/v1', nativeAuth: { env: ['OPENROUTER_API_KEY'] } },
+    { provider: 'deepseek', defaultBaseURL: 'https://api.deepseek.com', nativeAuth: { env: ['DEEPSEEK_API_KEY'] } },
+  ] }, settings: { describe: () => [] } };
+  assert.equal(channelOf(services, 'xai').root, 'https://api.x.ai/v1');
+  assert.equal(channelOf(services, 'google').root, 'https://generativelanguage.googleapis.com/v1beta/openai', 'Google 走它的 OpenAI 兼容地址');
+  assert.equal(channelOf(services, 'deepseek').openai, false, '没有生图接口的渠道不算');
+  assert.equal(imageMethod(channelOf(services, 'google'), 'imagen-4.0-generate-001'), 'images');
+  assert.equal(imageMethod(channelOf(services, 'google'), 'gemini-2.5-flash-image'), 'chat');
+  assert.equal(imageMethod(channelOf(services, 'openrouter'), 'black-forest-labs/flux-1.1-pro'), 'chat', 'OpenRouter 只有对话接口');
+  assert.equal(imageMethod(channelOf(services, 'xai'), 'grok-2-image'), 'images');
+});
+
+test('对话接口出图：Gemini 出图模型走 /chat/completions，参考图放进消息，图从回复里取，按真实格式存', async t => {
+  const { cwd, calls, run, setReply } = await setup(t, { models: { relay: ['gemini-2.5-flash-image'] }, providers: [{ id: 'relay', name: '中转站' }] });
+  await fs.writeFile(path.join(cwd, '参考.png'), Buffer.from(pixel, 'base64'));
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16]);
+  setReply(() => new Response(JSON.stringify({ choices: [{ message: { role: 'assistant', content: '画好了', images: [{ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${jpeg.toString('base64')}` } }] } }] }), { status: 200 }));
+  const result = await run({ action: 'generate', prompt: '照这张改成夜景', size: '1536x1024', images: ['参考.png'] });
+  assert.equal(calls[0].url, 'https://relay.example/chat/completions');
+  assert.deepEqual(calls[0].body.modalities, ['image', 'text']);
+  assert.match(calls[0].body.messages[0].content[0].text, /照这张改成夜景[\s\S]*尺寸 1536x1024/);
+  assert.match(calls[0].body.messages[0].content[1].image_url.url, /^data:image\/png;base64,/);
+  assert.equal(result.relative, '图片/20261117-163005.jpg', '回的是 JPEG 就存成 .jpg');
+  assert.deepEqual(await fs.readFile(path.join(cwd, result.relative)), jpeg);
+  // 中转站常把图写成 Markdown 链接。
+  setReply(url => url.startsWith('https://cdn.example/') ? new Response(Buffer.from(pixel, 'base64'), { status: 200 })
+    : new Response(JSON.stringify({ choices: [{ message: { content: '好的 ![图](https://cdn.example/x.png)' } }] }), { status: 200 }));
+  assert.equal((await run({ action: 'generate', prompt: 'x' })).relative, '图片/20261117-163005.png');
+  setReply(() => new Response(JSON.stringify({ choices: [{ message: { content: '我画不了图' } }] }), { status: 200 }));
+  await assert.rejects(run({ action: 'generate', prompt: 'x' }), /没有返回图片/);
+});
+
+test('百炼的万相、通义千问生图走原生异步任务：提交、查结果、下载存好；带参考图在发请求前就说不支持', async t => {
+  const { cwd, services, exec } = await setup(t, { models: { relay: ['wanx2.1-t2i-turbo', 'qwen-image'] }, providers: [{ id: 'relay', name: '百炼' }] });
+  services.settings.describe = () => [{ ns: 'llm-pi-ai', value: { providers: { relay: { apiKeyEnv: 'RELAY_API_KEY', api: 'openai-completions', baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1' } } } }];
+  const calls = [];
+  let polls = 0, finalStatus = 'SUCCEEDED';
+  const fetch = async (url, init = {}) => {
+    calls.push({ url, init, body: init.body ? JSON.parse(init.body) : undefined });
+    if (url.startsWith('https://oss.example/')) return new Response(Buffer.from(pixel, 'base64'), { status: 200 });
+    if (url.endsWith('/image-synthesis')) return new Response(JSON.stringify({ output: { task_id: 't-1', task_status: 'PENDING' } }), { status: 200 });
+    polls += 1;
+    if (polls < 2) return new Response(JSON.stringify({ output: { task_id: 't-1', task_status: 'RUNNING' } }), { status: 200 });
+    return new Response(JSON.stringify(finalStatus === 'SUCCEEDED' ? { output: { task_status: 'SUCCEEDED', results: [{ url: 'https://oss.example/a.png', actual_prompt: '一只小蓝鲸，水彩' }] } } : { output: { task_status: 'FAILED', code: 'DataInspectionFailed', message: 'Input data may contain inappropriate content.' } }), { status: 200 });
+  };
+  const tool = imageDefinition(services, { fetch, now: () => new Date('2026-11-17T08:30:05Z'), sleep: async () => {} });
+  const run = async args => JSON.parse(await tool.execute(args, exec));
+  const result = await run({ action: 'generate', prompt: '一只小蓝鲸', model: 'wanx2.1-t2i-turbo', size: '1024x1024' });
+  assert.equal(calls[0].url, 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis');
+  assert.equal(calls[0].init.headers['x-dashscope-async'], 'enable');
+  assert.deepEqual(calls[0].body, { model: 'wanx2.1-t2i-turbo', input: { prompt: '一只小蓝鲸' }, parameters: { n: 1, size: '1024*1024' } });
+  assert.equal(calls[1].url, 'https://dashscope.aliyuncs.com/api/v1/tasks/t-1', '提交后按任务号查结果');
+  assert.equal(calls.length, 4, '提交、查两次、下载');
+  assert.equal(result.relative, '图片/20261117-163005.png'); assert.equal(result.revisedPrompt, '一只小蓝鲸，水彩');
+  assert.deepEqual(await fs.readFile(path.join(cwd, result.relative)), Buffer.from(pixel, 'base64'));
+  polls = 1; finalStatus = 'FAILED';
+  await assert.rejects(run({ action: 'generate', prompt: 'x', model: 'qwen-image' }), /拒绝了这个提示词/);
+  await fs.writeFile(path.join(cwd, '参考.png'), Buffer.from(pixel, 'base64'));
+  const before = calls.length;
+  await assert.rejects(run({ action: 'generate', prompt: 'x', model: 'qwen-image', images: ['参考.png'] }), /不支持带参考图改图/);
+  assert.equal(calls.length, before, '不支持的请求不发');
+});
+
+test('生图接口回的是 images 列表（硅基流动这类）也能存', async t => {
+  const { cwd, run, setReply } = await setup(t, { models: { relay: ['Kwai-Kolors/Kolors'] }, providers: [{ id: 'relay', name: '中转站' }] });
+  setReply(url => url.startsWith('https://cdn.example/') ? new Response(Buffer.from(pixel, 'base64'), { status: 200 }) : new Response(JSON.stringify({ images: [{ url: 'https://cdn.example/k.png' }] }), { status: 200 }));
+  const result = await run({ action: 'generate', prompt: 'x' });
+  assert.deepEqual(await fs.readFile(path.join(cwd, result.relative)), Buffer.from(pixel, 'base64'));
+});
+
 test('没配 key、没有生图模型时说清楚怎么补', async t => {
   const noKey = await setup(t, { key: null });
   await assert.rejects(noKey.run({ action: 'generate', prompt: 'x' }), /渠道 relay 没有配 key/);

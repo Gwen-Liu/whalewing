@@ -38,6 +38,30 @@ test('运行结果按轮次结束原因折叠：完成、出错、中断、未�
   assert.equal(running.runs[0].receivedAt, delivered.time); assert.equal(running.runs[0].seq, delivered.seq);
 });
 
+test('出错的那次记下原因：代码、截短的原文和 HTTP 状态；页面翻成原因和怎么办', async () => {
+  const { runResult } = await import('../features/automation/runs.js');
+  const { runErrorText } = await import('../features/automation/run-error.js');
+  const l = log();
+  const state = fold([l.insert(0, scheduled('s1')), l.claim(0, 1), l.at('turn/end', { turn: 1, reason: { kind: 'error', error: { code: 'QUOTA', message: `Insufficient   balance ${'x'.repeat(400)}`, status: 402 } } })]);
+  assert.equal(state.runs[0].state, 'error');
+  assert.equal(state.runs[0].error.code, 'QUOTA'); assert.equal(state.runs[0].error.status, 402);
+  assert.ok(state.runs[0].error.message.startsWith('Insufficient balance x') && state.runs[0].error.message.length === 300, '空白合并、截到 300 字');
+  assert.ok(runsProjection.stateSchema.safeParse(state).success);
+  const projection = { asOfSeq: 3, values: { [runsKey]: state.runs } };
+  assert.deepEqual(runResult(projection, 's1').error.code, 'QUOTA');
+  assert.deepEqual(runResult(projection, 'other'), { status: 'unknown' });
+  const done = fold([l.insert(0, scheduled('s2')), l.claim(0, 1), l.end('completed')]);
+  assert.equal(done.runs[0].error, undefined, '没出错的不带原因');
+  assert.match(runErrorText(state.runs[0].error).reason, /余额或额度用完/);
+  assert.match(runErrorText({ code: 'HTTP_401', message: 'bad key', status: 401 }).fix, /key/);
+  assert.match(runErrorText({ code: 'CONTEXT_WINDOW_EXCEEDED', message: '' }).fix, /压缩/);
+  assert.equal(runErrorText({ code: 'SOMETHING_NEW', message: '奇怪的错' }).reason, '出错了：奇怪的错', '没归类的照原文说');
+  assert.match(runErrorText(undefined).reason, /没有留下原因/, '旧记录没有原因时也有话说');
+  // 合同允许带原因的运行结果。
+  const contract = automationContract(z);
+  assert.ok(contract.result.safeParse({ id: 'x', records: [{ scheduledAt: 'a', deliveredAt: 'b', messageId: 'm', status: 'error', error: { code: 'QUOTA', message: 'm', status: 402 } }], earlierRecordsUnavailable: false, earlierRecordsPruned: false, retention: { days: 30, records: 50 } }).success);
+});
+
 test('只认定时消息：人工消息不记运行，部分领取、撤下、退回收件箱和资讯跳过说明都对到原消息', () => {
   let l = log();
   // 人工消息和定时消息排在一起，只领取了前面的人工消息：定时消息仍在排队。

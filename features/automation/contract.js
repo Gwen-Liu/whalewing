@@ -54,7 +54,8 @@ export function automationContract(z) {
       z.strictObject({ action: z.literal('catalog') }),
       z.strictObject({ action: z.literal('directory') }),
       ...['pause', 'resume'].map(action => z.strictObject({ action: z.literal(action), sessionId: id, id, expected: record, expectedStatus: z.enum(['active', 'paused']) })),
-      ...['read', 'delete'].map(action => z.strictObject({ action: z.literal(action), sessionId: id, id })),
+      // run：现在跑一次，不挪动下一次到点（2026-11-18）。
+      ...['read', 'delete', 'run'].map(action => z.strictObject({ action: z.literal(action), sessionId: id, id })),
       z.strictObject({ action: z.literal('history'), sessionId: id, id, limit: z.number().int().min(1).max(100), before: text.max(150).optional() }),
       z.strictObject({ action: z.literal('update'), sessionId: id, id, expected: record, expectedStatus: z.enum(['active', 'paused']), title: text.trim().min(1).max(120).optional(), prompt: text.trim().min(1).max(32000).optional(), change: change.optional(), workspaceScope: workspaceScope.optional() }),
     ]),
@@ -63,7 +64,9 @@ export function automationContract(z) {
   const delivery = z.strictObject({ scheduledAt: text, deliveredAt: text, messageId: text });
   // 运行结果只在目录与历史的返回里附加，不进入 expected 记录，也不写回原生任务。
   const runStatus = z.enum(runStatuses);
-  const entry = record.extend({ sessionId: text, status: z.enum(['active', 'paused', 'inactive']), lastDelivery: delivery.optional(), lastRun: delivery.extend({ status: runStatus }).optional() });
+  // 出错的那次带上 DSH 给的原因（代码、原文、HTTP 状态），页面据此说清楚怎么办。
+  const runError = z.strictObject({ code: text.max(80), message: text.max(300), status: z.number().int().optional() });
+  const entry = record.extend({ sessionId: text, status: z.enum(['active', 'paused', 'inactive']), lastDelivery: delivery.optional(), lastRun: delivery.extend({ status: runStatus, error: runError.optional() }).optional() });
   const presentation = { workspaceScope: workspaceScope.optional(), displayPrompt: text };
   // 扩展登记的任务：哪个扩展、现在开没开（没开时到点跳过）、给员工看的说明、读不读会话和从什么时候起读。
   const owner = z.strictObject({
@@ -76,9 +79,10 @@ export function automationContract(z) {
     z.strictObject({ available: z.boolean(), controls: z.boolean().optional(), tasks: z.array(managed), legacyTasks: z.array(entry), issues: z.array(z.strictObject({ sessionId: text, message: text })) }),
     z.strictObject({ task: z.union([record, managed]), recovered: z.boolean() }),
     z.strictObject({ task: record, purpose, status: z.enum(['active', 'paused', 'inactive']), ...presentation, extension: owner.optional() }), z.strictObject({ task: record, legacy: z.literal(true), status: z.enum(['active', 'paused', 'inactive']) }),
-    z.strictObject({ id: text, records: z.array(delivery.extend({ prompt: text.optional(), status: runStatus.optional() })), earlierRecordsUnavailable: z.boolean(), earlierRecordsPruned: z.boolean(), retention: z.strictObject({ days: z.number(), records: z.number() }), nextBefore: text.optional() }),
+    z.strictObject({ id: text, records: z.array(delivery.extend({ prompt: text.optional(), status: runStatus.optional(), error: runError.optional() })), earlierRecordsUnavailable: z.boolean(), earlierRecordsPruned: z.boolean(), retention: z.strictObject({ days: z.number(), records: z.number() }), nextBefore: text.optional() }),
     z.strictObject({ id: text, updated: z.boolean(), record: record.optional(), code: text.optional() }),
     z.strictObject({ id: text, deleted: z.boolean(), code: text.optional() }),
+    z.strictObject({ id: text, ran: z.literal(true), deliveredAt: text.optional(), messageId: text.optional() }),
     z.strictObject({ directory: text }),
     z.strictObject({ id: text.optional(), code: text, message: text.optional() }),
   ]);

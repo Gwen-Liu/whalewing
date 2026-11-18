@@ -138,14 +138,18 @@ export default class Skills extends Service {
     if (input.action === 'preview' || input.action === 'upload') {
       const { stage, pack, source } = await this.packMarket.preview(input.action === 'upload' ? { upload: input } : { entry: input.entry }, signal);
       await packs.load(signal);
-      const taken = await this.skillNames(pack.name, signal);
+      const taken = await this.skillNames(pack.name, signal), old = packs.get(pack.name);
+      // 原来就装好的 MCP（按包里的 key 认）：更新时沿用，不再填。
+      const kept = new Set((old?.mcp ?? []).map(item => item.key));
       return { preview: {
-        stage, hash: pack.hash, name: pack.name, title: pack.title, description: pack.description, version: pack.version, author: pack.author, homepage: pack.homepage, source, installed: Boolean(packs.get(pack.name)),
+        stage, hash: pack.hash, name: pack.name, title: pack.title, description: pack.description, version: pack.version, author: pack.author, homepage: pack.homepage, source, installed: Boolean(old),
+        ...(old ? { update: { version: old.version ?? '', same: old.hash === pack.hash } } : {}),
         skills: pack.skills.map(skill => ({ name: skill.name, description: skill.description, ...(taken.has(skill.name) ? { conflict: true } : {}) })), skipped: pack.skipped, issues: pack.issues,
         // 本机程序装好就会在员工电脑上运行：鲸翼精选以外的都提醒一句，市场里的默认不勾。
         mcp: pack.mcp.map(plan => {
           const runs = plan.transport === 'stdio' && source.kind !== 'curated';
           const hint = plan.hint || (runs ? '装好后会在你的电脑上运行这条命令；不认识作者的话先看看包里的内容' : '');
+          if (!plan.blocked && kept.has(plan.key)) return { key: plan.key, title: plan.title, transport: plan.transport, target: plan.target, fields: [], ready: true, kept: true };
           return {
             key: plan.key, title: plan.title, transport: plan.transport, target: plan.target,
             fields: plan.fields.map(({ fallback, ...field }) => ({ ...field, ...(fallback !== undefined && !field.help ? { help: fallback ? `不填就用 ${fallback}` : '可以不填' } : {}) })),
@@ -188,15 +192,20 @@ export default class Skills extends Service {
   async installPack(input, signal) {
     const { pack, source } = this.packMarket.staged(input.stage, input.expectedHash);
     await this.packs.load(signal);
-    if (this.packs.get(pack.name)) fail('PACK_EXISTS', `已经装了「${pack.title}」；要换成新版，先卸载原来那个`);
-    const wanted = pack.mcp.filter(plan => !plan.blocked && input.mcp.some(item => item.key === plan.key));
-    const mcp = wanted.length ? await this.mcpService() : null;
+    // 装过同名的包：原地更新到这一份（2026-11-18 起；原来要先卸载）。
+    const old = this.packs.get(pack.name);
+    if (old && old.hash === pack.hash) fail('PACK_SAME', `装的已经是这一份「${pack.title}」了，不用更新`);
+    // 原来就装好、新版里还在的 MCP 沿用原来的设置和密钥；新版去掉了的撤掉。
+    const keptMcp = (old?.mcp ?? []).filter(item => pack.mcp.some(plan => plan.key === item.key && !plan.blocked));
+    const droppedMcp = (old?.mcp ?? []).filter(item => !keptMcp.includes(item));
+    const wanted = pack.mcp.filter(plan => !plan.blocked && !keptMcp.some(item => item.key === plan.key) && input.mcp.some(item => item.key === plan.key));
+    const mcp = wanted.length || droppedMcp.length || keptMcp.length ? await this.mcpService() : null;
     const taken = mcp ? mcp.takenNames() : new Set();
     const chosen = [], skippedMcp = [];
     for (const plan of pack.mcp) {
       const pick = input.mcp.find(item => item.key === plan.key);
       // DSH 连不了的（浏览器授权、老式 SSE）不装，也不记进“没装的 MCP”：用不了的不写（2026-11-09 用户定）。
-      if (plan.blocked) continue;
+      if (plan.blocked || keptMcp.some(item => item.key === plan.key)) continue;
       if (!pick) { skippedMcp.push({ key: plan.key, reason: '安装时没勾选' }); continue; }
       const name = freeName(plan.key, taken); taken.add(name);
       const composed = composePackServer(plan, pick.values, { name, title: plan.title });
@@ -206,17 +215,25 @@ export default class Skills extends Service {
     if (mcp && !mcp.credentials && chosen.some(({ server }) => server.urlSecret || server.env.some(row => row.secret) || server.headers.some(row => row.secret))) fail('MCP_NO_CREDENTIALS', 'DSH 的凭据库没有加载，带密钥的 MCP 暂时存不了；可以先不勾这些 MCP');
     const record = {
       name: pack.name, title: pack.title, description: pack.description, version: pack.version, author: pack.author, homepage: pack.homepage, source,
-      enabled: true, installedAt: new Date().toISOString(), hash: pack.hash, skills: pack.skills, mcp: [], skippedMcp, skipped: pack.skipped, issues: pack.issues,
+      // 更新时开没开、什么时候装的照旧，另记一个更新时间。
+      enabled: old ? Boolean(old.enabled) : true, installedAt: old?.installedAt ?? new Date().toISOString(), ...(old ? { updatedAt: new Date().toISOString() } : {}),
+      hash: pack.hash, skills: pack.skills, mcp: keptMcp, skippedMcp, skipped: pack.skipped, issues: pack.issues,
     };
-    await this.packs.install(pack, record, signal);
+    if (old) {
+      // 换文件前先停掉这个包的 MCP（本机程序可能正用着包里的文件），换完按包开没开再登记回去。
+      mcp?.setPack(pack.name, false);
+      try { await this.packs.replace(pack, record, signal); }
+      finally { mcp?.setPack(pack.name, Boolean(old.enabled)); }
+    } else await this.packs.install(pack, record, signal);
+    const removedMcp = droppedMcp.length && mcp ? await mcp.removePack(pack.name, droppedMcp.map(item => item.server)) : [];
     const done = [], failed = [];
     for (const { plan, server } of chosen) {
       try { await mcp.save({ server, expectedRevision: null }, { pack: pack.name }); done.push({ key: plan.key, server: server.name }); }
       catch (error) { failed.push({ key: plan.key, reason: plain(error.message) }); }
     }
-    const saved = await this.packs.update(pack.name, { mcp: done, skippedMcp: [...skippedMcp, ...failed] }, signal);
+    const saved = await this.packs.update(pack.name, { mcp: [...keptMcp, ...done], skippedMcp: [...skippedMcp, ...failed] }, signal);
     this.packMarket.forget(input.stage);
-    return { pack: packView(saved), failed };
+    return { pack: packView(saved), failed, ...(old ? { updated: true, removedMcp } : {}) };
   }
 
   /** 上传的压缩包或 SKILL.md：摊开后装成“我的”里的个人技能。 */

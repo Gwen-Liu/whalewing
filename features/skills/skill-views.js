@@ -1,9 +1,13 @@
 import { isSkillIdentifier } from './contract.js';
+import { skillTitle } from '../../src/skill-titles.js';
 
 // 技能中心页里“技能”这一类：我的（个人、共用、团队、插件包、内置、各项目）和发现（skills.sh）。页面外壳在 client.js。
 const marketPage = id => `https://skills.sh/${id.split('/').map(encodeURIComponent).join('/')}`;
 export const installsText = count => count >= 10000 ? `${(count / 10000).toFixed(count >= 1000000 ? 0 : 1).replace(/\.0$/, '')} 万次安装` : `${count} 次安装`;
 const initial = name => [...String(name || '?').replace(/^whalewing-/, '')][0]?.toUpperCase() || '?';
+// 随包技能（内置、改过的内置）在界面上用中文名，英文短名放在类别后面，专家和 DSH 仍按英文短名加载。
+const titled = item => item.origin === 'builtin' || item.origin === 'override';
+const titleOf = item => titled(item) ? skillTitle(item.name) : item.name;
 
 export function createSkillViews(kit, { labelText }) {
   const { React, ConfirmDialog, useDiscard, Drawer, Glyph } = kit;
@@ -128,7 +132,7 @@ ${item.hash}`))), ...extensions.flatMap(extension => extension.skills.map(item =
     return h(React.Fragment, null,
       h('ul', { className: 'ww-kit-tiles' }, ...(folded ? items.slice(0, limit) : items).map(render)),
       !all && rest.length > 0 && h('button', { type: 'button', className: 'ww-kit-more', 'aria-expanded': open, onClick: () => setOpen(!open) },
-        open ? '收起' : `查看 ${rest.slice(0, 2).map(item => item.name).join('、')}${rest.length > 2 ? `，另有 ${rest.length - 2} 项` : ''}`,
+        open ? '收起' : `查看 ${rest.slice(0, 2).map(titleOf).join('、')}${rest.length > 2 ? `，另有 ${rest.length - 2} 项` : ''}`,
         h(Glyph, { name: open ? 'back' : 'chevron', size: 14 })));
   }
 
@@ -142,15 +146,15 @@ ${item.hash}`))), ...extensions.flatMap(extension => extension.skills.map(item =
   function MineSkills({ rows, filter, query, sortDown, t, busy, onOpen, empty }) {
     const [picked, setPicked] = useState(null);
     const keyword = query.trim().toLowerCase();
-    const shown = rows.filter(item => matches(item, filter) && (!keyword || `${item.name} ${item.description}`.toLowerCase().includes(keyword)))
-      .sort((a, b) => rank(a) - rank(b) || (sortDown ? -1 : 1) * a.name.localeCompare(b.name));
+    const shown = rows.filter(item => matches(item, filter) && (!keyword || `${item.name} ${titleOf(item)} ${item.description}`.toLowerCase().includes(keyword)))
+      .sort((a, b) => rank(a) - rank(b) || (sortDown ? -1 : 1) * titleOf(a).localeCompare(titleOf(b), 'zh'));
     if (!rows.length) return empty;
     if (!shown.length) return h('p', { className: 'ww-kit-empty', role: 'status' }, '没有匹配的技能，换个词或筛选试试');
     const tile = item => {
       const status = statusOf(item, t);
       return h('li', { key: item.id }, h('button', { type: 'button', className: 'ww-kit-row', disabled: busy, onClick: () => onOpen(item) },
-        h('span', { className: 'ww-kit-icon', 'data-tone': groupOf(item).startsWith('ext:') ? 'team' : ['pack', 'agents'].includes(groupOf(item)) || groupOf(item).startsWith('proj:') ? 'market' : groupOf(item), 'aria-hidden': true }, initial(item.name)),
-        h('span', { className: 'ww-kit-main' }, h('span', { className: 'ww-kit-name' }, item.name), h('small', { title: item.description }, h('span', { className: 'ww-kit-type' }, typeText(item)), ' · ', item.description || '没有说明')),
+        h('span', { className: 'ww-kit-icon', 'data-tone': groupOf(item).startsWith('ext:') ? 'team' : ['pack', 'agents'].includes(groupOf(item)) || groupOf(item).startsWith('proj:') ? 'market' : groupOf(item), 'aria-hidden': true }, initial(titleOf(item))),
+        h('span', { className: 'ww-kit-main' }, h('span', { className: 'ww-kit-name' }, titleOf(item)), h('small', { title: item.description }, h('span', { className: 'ww-kit-type' }, titled(item) && titleOf(item) !== item.name ? `${typeText(item)} · ${item.name}` : typeText(item)), ' · ', item.description || '没有说明')),
         h('span', { className: 'ww-kit-status', 'data-tone': status.tone, title: status.title }, status.tone === 'ok' ? h(Glyph, { name: 'check', size: 16 }) : status.text)));
     };
     const extensionsShown = [...new Map(rows.filter(item => item.origin === 'extension').map(item => [item.extension.id, item.extension])).values()];
@@ -186,8 +190,9 @@ ${item.hash}`))), ...extensions.flatMap(extension => extension.skills.map(item =
     else if (skill.actions?.includes('update') || skill.editable) footer.push(h('button', { key: 'edit', type: 'button', className: 'ww-primary', disabled: busy, onClick: onEdit }, t('editSkill')));
     else if (skill.origin === 'pack' && onOpenPack) footer.push(h('button', { key: 'pack', type: 'button', onClick: onOpenPack }, '查看插件包'));
     else footer.push(h('button', { key: 'close', type: 'button', onClick: onClose }, '关闭'));
-    return h(Drawer, { title: skill.name, busy, onClose, footer },
+    return h(Drawer, { title: titleOf(skill), busy, onClose, footer },
       h('dl', { className: 'ww-kit-facts' },
+        titled(skill) && titleOf(skill) !== skill.name && h(React.Fragment, null, h('dt', null, '技能名'), h('dd', null, h('code', null, skill.name))),
         h('dt', null, '说明'), h('dd', null, skill.description || '没有说明'),
         h('dt', null, '类型'), h('dd', null, typeText(skill), skill.source?.kind === 'skills.sh' && h('a', { href: marketPage(skill.source.id), target: '_blank', rel: 'noreferrer' }, ` · ${skill.source.id}`)),
         h('dt', null, '状态'), h('dd', { title: status.title }, status.tone === 'ok' ? '可以用' : status.text)),

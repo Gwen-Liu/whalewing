@@ -290,9 +290,12 @@ export class McpServers {
     }
   }
 
-  /** 卸载插件包：它带的 MCP 撤回、记录删掉，凭据库里鲸翼给它们存的密钥也删。 */
-  async removePack(pack) {
-    const names = [...this.meta.entries()].filter(([, meta]) => meta.pack === pack).map(([name]) => name);
+  /**
+   * 卸载插件包：它带的 MCP 撤回、记录删掉，凭据库里鲸翼给它们存的密钥也删。
+   * only 给了名字时只撤这几个（插件包更新到新版、新版去掉了某个 MCP，2026-11-18）。
+   */
+  async removePack(pack, only) {
+    const names = [...this.meta.entries()].filter(([name, meta]) => meta.pack === pack && (!only || only.includes(name))).map(([name]) => name);
     for (const name of names) {
       const meta = this.meta.get(name);
       this.unregister(name);

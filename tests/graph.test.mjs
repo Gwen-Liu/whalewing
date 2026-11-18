@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Vault } from '../src/vault.js';
 import { knowledgeContract } from '../features/knowledge/contract.js';
-import { createGraphCanvas, createGraphLayout, graphLayer, graphLayers, liveLimits } from '../src/graph-canvas.js';
+import { createGraphCanvas, createGraphLayout, graphLayer, graphLayers, liveLimits, followEdges, followLimit } from '../src/graph-canvas.js';
 import { z } from 'zod';
 import { forceSimulation, forceLink as nativeLink, forceManyBody as nativeManyBody, forceCollide as nativeCollide } from 'd3-force';
 
@@ -483,6 +483,26 @@ test('松手后逐帧柔和地滑回原位，不一下跳回；系统要求减�
   quiet.unmount();
 });
 
+test('超过实时物理规模的大图：拖动时最近的一圈邻居跟着挪一些，别的点不动；松手后都回到原处', t => {
+  // 2026-11-18 用户要把已知问题“大库拖动节点只移动该节点”解决掉。
+  const count = liveLimits.nodes + 100, hub = 60;
+  const nodes = Array.from({ length: count }, (_, i) => ({ path: `${i}`, title: `笔记${i}`, degree: i === 0 ? hub : 1 }));
+  const edges = [...Array.from({ length: hub }, (_, i) => ({ source: '0', target: `${i + 1}` })), ...Array.from({ length: count - hub - 2 }, (_, i) => ({ source: `${hub + 1 + i}`, target: `${hub + 2 + i}` }))];
+  const h = harness(t, { nodes, edges }, { reduced: true }); h.flush();
+  const before = h.geometry().arcs.map(point => ({ ...point })), at = before[0];
+  h.element.fire('pointerdown', { button: 0, isPrimary: true, pointerId: 1, clientX: at.x, clientY: at.y });
+  h.element.fire('pointermove', { pointerId: 1, clientX: at.x + 100, clientY: at.y }); h.flush(1);
+  const held = h.geometry().arcs;
+  const moved = held.map((point, i) => distance(point, before[i]));
+  const followers = moved.slice(1, hub + 1).filter(value => value > 1);
+  assert.ok(distance(held[0], { x: at.x + 100, y: at.y }) < 1e-6, '被拖的点跟手');
+  assert.equal(followers.length, followLimit, `最近的 ${followLimit} 个邻居跟着挪`);
+  assert.ok(followers.every(value => value <= 30 + 1e-6 && value > 10), '邻居挪拖动距离的一部分（最多 30%）');
+  assert.ok(moved.slice(hub + 1).every(value => value < 1e-9), '不连着的点不动');
+  h.element.fire('pointerup', { pointerId: 1 }); h.flush();
+  assert.ok(h.geometry().arcs.every((point, i) => distance(point, before[i]) < 1e-6), '松手后都回到原处');
+});
+
 test('高密度拖节点只重建一次排除层，逐帧有界且松开恢复全部20万边', t => {
   const count = 1000;
   const nodes = Array.from({ length: count }, (_, i) => ({ path: `${i}`, title: `笔记${i}`, degree: count - 1 }));
@@ -495,7 +515,8 @@ test('高密度拖节点只重建一次排除层，逐帧有界且松开恢复�
     h.element.fire('pointermove', { pointerId: 1, clientX: at.x + 10 + i, clientY: at.y + i / 3 });
     assert.equal(h.geometry().lines, before, 'pointermove本身不扫描绘制全部边');
     h.flush(1);
-    assert.ok(h.geometry().lines - before <= 4096 + count, '单帧只处理一个背景批次和一跳邻居');
+    // 2026-11-18 起跟着动的邻居连着的线也每帧画，最多再多 followEdges 条。
+    assert.ok(h.geometry().lines - before <= 4096 + count + followEdges, '单帧只处理一个背景批次、一跳邻居和跟着动的邻居的线');
     assert.equal(h.edgeLayers.length, layerCount + 1);
     assert.equal(h.geometry().layersDrawn.includes(oldLayer), false);
   }

@@ -3,7 +3,7 @@ import { observeAutomation, automationIdentity, automationClaim } from '../../sr
 import { z } from 'zod';
 import { abort, fail } from '../../src/vault.js';
 import { workspaceScopeContract } from './contract.js';
-import { runStatus } from './runs.js';
+import { runResult } from './runs.js';
 
 const scopeSchema = workspaceScopeContract(z);
 const scopeMarker = '\n\n工作区处理范围：仅处理以下已选工作区，逐一核对其结果；会话工作目录仅为执行锚点，不表示只有该目录。知识来源以 sources 工具实际返回为准。\n<whalewing-workspaces>\n';
@@ -143,7 +143,7 @@ export class Automation {
   async runCatalog(signal) {
     const seen = new Map();
     const catalog = await this.catalog(signal, seen);
-    const attach = task => task.lastDelivery ? { ...task, lastRun: { ...task.lastDelivery, status: runStatus(seen.get(task.sessionId), task.lastDelivery.messageId) } } : task;
+    const attach = task => task.lastDelivery ? { ...task, lastRun: { ...task.lastDelivery, ...runResult(seen.get(task.sessionId), task.lastDelivery.messageId) } } : task;
     return { ...catalog, tasks: catalog.tasks.map(attach), legacyTasks: catalog.legacyTasks.map(attach) };
   }
 
@@ -271,7 +271,20 @@ export class Automation {
         let projection = null;
         try { projection = await observeAutomation(() => this.dependencies.projections(input.sessionId, signal), signal); }
         catch { abort(signal); }
-        return { ...page, records: page.records.map(record => ({ ...record, status: runStatus(projection, record.messageId) })) };
+        return { ...page, records: page.records.map(record => ({ ...record, ...runResult(projection, record.messageId) })) };
+      }
+      if (input.action === 'run') {
+        if (typeof schedule.run !== 'function') fail('SCHEDULE_RUN_UNAVAILABLE', '当前 DSH 版本不支持现在就跑，等下一次到点会自动运行');
+        const result = await schedule.run({ sessionId: input.sessionId, id: input.id }, signal);
+        if (result.ran) return { id: input.id, ran: true, ...(result.delivery ? { deliveredAt: result.delivery.deliveredAt, messageId: result.delivery.messageId } : {}) };
+        const reasons = {
+          schedule_execution_pending: ['SCHEDULE_RUN_PENDING', '这个任务正在跑或刚送达，等这一次跑完再试'],
+          schedule_run_unavailable: ['SCHEDULE_RUN_UNAVAILABLE', '当前 DSH 版本不支持现在就跑，等下一次到点会自动运行'],
+          schedule_ended: ['SCHEDULE_ENDED', '计划已结束，不能再跑'],
+          'schedule/target-archived': ['SCHEDULE_ARCHIVED', '任务的会话已经归档，取消归档后再试'],
+        };
+        const [code, message] = reasons[result.code] ?? ['SCHEDULE_NOT_FOUND', '原会话中没有此计划；请回读当前目录'];
+        fail(code, message);
       }
       if (input.action === 'delete') {
         if (purpose === 'extension' && !internal && await this.dependencies.extensionRegistered?.(owner)) fail('EXTENSION_TASK_OWNED', '这个任务由扩展登记，扩展开着时不能取消；不想让它运行可以暂停');

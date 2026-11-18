@@ -77,6 +77,22 @@ export function sessionSchedule(native) {
     },
     pause: (request, signal) => toggle(request, false, signal),
     resume: (request, signal) => toggle(request, true, signal),
+    /**
+     * 现在跑一次（2026-11-18：出错后“再跑一次”、每日阅读“现在生成一期”）。DSH 的 run 不占用、不挪动下一次到点；
+     * 上一次还没跑完或刚送达时它不收，返回 schedule_execution_pending。老版本 DSH 没有 run。
+     */
+    async run({ sessionId, id }, signal) {
+      if (typeof native.run !== 'function') return { id, ran: false, code: 'schedule_run_unavailable' };
+      const current = await owned(sessionId, id);
+      if (!current) return { id, ran: false, code: 'schedule_not_found' };
+      if (current.status === 'ended') return { id, ran: false, code: 'schedule_ended' };
+      let result;
+      // 会话已归档时 DSH 直接抛 schedule/target-archived，转成和别的不收一样的回执。
+      try { result = await native.run({ id }, signal); }
+      catch (error) { if (typeof error?.code === 'string' && error.code.startsWith('schedule/')) return { id, ran: false, code: error.code }; throw error; }
+      if (!result || result.code) return { id, ran: false, code: result?.code ?? 'schedule_not_found' };
+      return { id, ran: true, ...(result.lastDelivery ? { delivery: receipt(result.lastDelivery) } : {}) };
+    },
     async history({ sessionId, id, limit, before }) {
       if (!await owned(sessionId, id)) return { id, code: 'schedule_not_found' };
       const page = await native.history({ id, limit, ...(before === undefined ? {} : { before }) });

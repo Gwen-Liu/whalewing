@@ -1,5 +1,6 @@
 import { tipIndex } from './tip-index.js';
 import { usageOfDay } from './usage-tips.js';
+import { runErrorText } from '../automation/run-error.js';
 
 /**
  * 每日阅读首页（2026-11-14 改版）：每天一期，占满一屏、不整页滚动。
@@ -57,7 +58,7 @@ export function createHomeBoard(kit, { BookCover }) {
   const bookmark = () => h('svg', { viewBox: '0 0 16 16', 'aria-hidden': true }, h('path', { d: 'M4 2.5h8v11.2L8 10.9l-4 2.8z' }));
   const grow = () => h('span', { className: 'ww-read-grow' });
 
-  return function HomeBoard({ t, busy, button, home, reading, loadImage, opening, format, assistant, actions }) {
+  return function HomeBoard({ t, busy, button, home, reading, newsRun = null, newsReady = false, loadImage, opening, format, assistant, actions }) {
     const root = useRef(null);
     const [form, setForm] = useState('board'), [tab, setTab] = useState('news');
     const [fieldId, setFieldId] = useState(null), [past, setPast] = useState(null), [loading, setLoading] = useState(false);
@@ -151,8 +152,26 @@ export function createHomeBoard(kit, { BookCover }) {
       personal && item.relevance && h('span', { className: 'ww-tag ww-read-tag-me' }, t('homeRelated')), statusTag(item),
       h('span', { className: 'ww-read-q-s' }, format.when(item.sources[0]?.publishedAt)), saveControl(newsKey(shown, item), captureOf(item), true));
 
+    // 今天这一期还没有时，照资讯任务今天那次的结果说清楚（2026-11-18 走查：失败了还写“尚未生成，08:00 整理”）。
+    const todayState = () => {
+      if (back || (shown && isToday)) return null;
+      const ran = newsRun && format.day(newsRun.scheduledAt) === today ? newsRun : null;
+      if (ran?.status === 'error') return { kind: 'failed', ...runErrorText(ran.error) };
+      if (ran && ['waiting', 'running'].includes(ran.status)) return { kind: 'working' };
+      if (ran && ran.status !== 'skipped') return { kind: 'missing', time: format.time(ran.scheduledAt) };
+      return { kind: 'none' };
+    };
+    const todayNotice = state => {
+      const generate = newsReady && h('button', { type: 'button', className: 'ww-read-btn ww-primary', disabled: busy, onClick: actions.generateNews }, t('homeNewsGenerate'));
+      const why = newsReady && h('button', { type: 'button', className: 'ww-read-btn', disabled: busy, onClick: actions.openNewsSession }, t('homeNewsWhy'));
+      const lines = state.kind === 'failed' ? [h('strong', { key: 'r' }, t('homeNewsFailed', { reason: state.reason })), h('span', { key: 'f' }, t('homeNewsFailedFix', { fix: state.fix }))]
+        : state.kind === 'working' ? [t('homeNewsWorking')] : state.kind === 'missing' ? [t('homeNewsMissing', { time: state.time })] : [t('homeNewsNone')];
+      const buttons = state.kind === 'working' ? [h('button', { key: 'w', type: 'button', className: 'ww-read-btn', disabled: busy, onClick: actions.reload }, t('homeNewsRefresh'))]
+        : state.kind === 'none' ? [generate] : [generate, why];
+      return h('div', { className: 'ww-read-today', role: 'status', 'data-kind': state.kind }, h('p', { className: 'ww-read-blank' }, ...lines), h('div', { className: 'ww-read-row' }, ...buttons.filter(Boolean)));
+    };
     const newsPane = () => {
-      const picks = shown?.week?.picks ?? [], week = picks.length > 0 && newsTab === 'week';
+      const picks = shown?.week?.picks ?? [], week = picks.length > 0 && newsTab === 'week', today$ = todayState();
       return h('section', { className: 'ww-read-pane ww-read-news' },
         h('header', { className: 'ww-read-head' },
           h('h3', null, t(week ? 'homeWeek' : 'homeNews')), h('small', null, week ? t('homeWeekMeta', { count: picks.length }) : shown ? t('homeCount', { count: items.length }) : ''),
@@ -168,9 +187,9 @@ export function createHomeBoard(kit, { BookCover }) {
               h('span', { className: 'ww-read-q-n', 'aria-hidden': true }, index + 1),
               h('div', { className: 'ww-read-q-m' }, h('span', { className: 'ww-read-q-t' }, pick.title)), h('span', { className: 'ww-read-q-s' }, format.short(pick.date)), sourceLink(pick.link)))),
             h('p', { className: 'ww-read-wkme' }, t('homeWeekMine', { captures: reading?.lastWeek.captures ?? 0, marks: reading?.lastWeek.highlights ?? 0 }), ' ', h('button', { type: 'button', className: 'ww-read-link', disabled: busy, onClick: actions.weekNote }, t('homeWeekNote'))))
-          : !shown ? h('p', { className: 'ww-read-blank' }, t('homeNewsNone'))
-            : !items.length ? h('p', { className: 'ww-read-blank' }, t('homeNewsEmpty'))
-              : h(React.Fragment, null, leadCard(items[0]), items.length > 1 && h('ul', { className: 'ww-read-quick', style: { '--n': items.length - 1 } }, ...items.slice(1).map((item, index) => quickRow(item, index + 1))))));
+          : !shown ? todayNotice(today$)
+            : !items.length ? h(React.Fragment, null, today$ && today$.kind !== 'none' && todayNotice(today$), h('p', { className: 'ww-read-blank' }, t('homeNewsEmpty')))
+              : h(React.Fragment, null, today$ && today$.kind !== 'none' && todayNotice(today$), leadCard(items[0]), items.length > 1 && h('ul', { className: 'ww-read-quick', style: { '--n': items.length - 1 } }, ...items.slice(1).map((item, index) => quickRow(item, index + 1))))));
     };
 
     // 今日一招：AI 技巧和鲸翼的用法两页；换成页签那种窄排法时两张都显示。

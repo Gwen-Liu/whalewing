@@ -1,5 +1,6 @@
 import { worldNameKey } from './model-world-index.js';
 import { isDomesticVendor, worldCnyPrice } from './model-world-cny-prices.js';
+import { isImageEntry } from './image-models.js';
 
 /**
  * 我的模型：把员工在 DSH 里配好的模型对上模型世界的型号，按天按模型记用量，按官网价估算花费，给出“可以试试”。
@@ -141,15 +142,18 @@ export function mineAdvice(items, models, today) {
 
 /**
  * 把 DSH 的模型目录摊平成一项一个型号，并对上模型世界的型号：员工手动对应的优先，其次按名字对。
- * 每项：{ key, provider, providerName, kind, host, model, name, efforts, defaultEffort, world, mapped, exact, isDefault }。
+ * 每项：{ key, provider, providerName, kind, host, model, name, efforts, defaultEffort, world, mapped, exact, image, isDefault }。
+ * image 为真的是生图模型：不对型号、不能开对话、不进测智和对决，专家和小鲸要图时用它。
  */
 export function mineItems(mine, models) {
   const byId = new Map(models.map(model => [model.id, model])), items = [];
   for (const group of mine?.groups ?? []) for (const model of group.models) {
-    const key = `${group.id}\n${model.id}`, mapped = byId.get(mine.mapping?.[key]) ?? null, guess = mapped ? null : matchWorldModel(model, models);
+    const key = `${group.id}\n${model.id}`, image = isImageEntry(model);
+    // 生图模型不对模型世界的型号：模型世界只收对话模型，硬对会对到同名的对话模型上。
+    const mapped = image ? null : byId.get(mine.mapping?.[key]) ?? null, guess = mapped || image ? null : matchWorldModel(model, models);
     items.push({
       key, provider: group.id, providerName: group.name, kind: group.kind, host: group.host, model: model.id, name: model.name, efforts: model.efforts, defaultEffort: model.defaultEffort,
-      world: mapped ?? (guess ? byId.get(guess.id) ?? null : null), mapped: Boolean(mapped), exact: mapped ? true : guess?.exact ?? false,
+      world: mapped ?? (guess ? byId.get(guess.id) ?? null : null), mapped: Boolean(mapped), exact: mapped ? true : guess?.exact ?? false, image,
       isDefault: mine.defaultModel?.provider === group.id && mine.defaultModel?.model === model.id,
     });
   }
@@ -159,6 +163,7 @@ export function mineItems(mine, models) {
 export function usedWorld(row, items, models) {
   const item = items.find(entry => entry.provider === row.provider && entry.model === row.model);
   if (item) return item.world;
+  if (isImageEntry({ id: row.model })) return null;
   const guess = matchWorldModel({ id: row.model, name: row.model }, models);
   return guess ? models.find(model => model.id === guess.id) ?? null : null;
 }

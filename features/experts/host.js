@@ -543,8 +543,8 @@ export async function apply(ctx, config) {
       registry.memory.context(role).catch(() => ({ path: '00-系统/专家记忆', text: '', empty: true })),
     ]);
     const about = global
-      ? `【关于员工】个人知识「关于我」（${global.path}）里员工自己写的：\n${global.text}`
-      : '【关于员工】个人知识「关于我」还没写“我是谁”“怎样和我协作”。';
+      ? `【关于员工】知识积累「关于我」（${global.path}）里员工自己写的：\n${global.text}`
+      : '【关于员工】知识积累「关于我」还没写“我是谁”“怎样和我协作”。';
     const mine = `【你的记忆】（${own.path}）\n${own.empty ? '还没有记过。' : own.text}${own.over ? '\n（记忆超过 4000 字，上面只带了前面一部分；这次干完活先用 whalewing_memory 的 rewrite 把旧条目合并精简。）' : ''}`;
     // 定时任务（2026-11-08）：员工建这个任务就是让专家一直跟下去，跑完直接更新进度，不用每次问。
     const task = routine ? '\n\n【这是员工给你的定时任务】到点时按任务指令做，结果写清楚，员工会在这个任务的会话里看。做完用 whalewing_memory 把这次的进度记进你的记忆“进度”一节（条目多了用 rewrite 合并成最新状态），不用先问员工；下一次接着上次往下做，不重复已经报过的内容。' : '';

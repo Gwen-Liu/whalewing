@@ -144,11 +144,14 @@ export function createModelWorldPages(React, kit) {
     const mounted = useRef(true), request = useRef(null), probing = useRef(null), trigger = useRef(null), fallback = useRef(null), cache = useRef({ mine: null, world: null, items: [] });
 
     const models = world?.models ?? [], byId = new Map(models.map(model => [model.id, model]));
+    // 榜首的综合分：“我的模型”里综合条上的竖线，告诉员工离最强的差多少。
+    const topOverall = models.reduce((top, model) => Math.max(top, typeof model.rating?.overall === 'number' ? model.rating.overall : 0), 0) || null;
     const vendorName = model => { const vendor = world?.vendors.find(item => item.id === model.vendorId); return vendor?.nameZh || vendor?.name || model.vendorId; };
     const roleTitle = id => { const vendorId = roleVendor(id), vendor = world?.vendors.find(item => item.id === vendorId) ?? modelWorldVendors.find(item => item.id === vendorId); return roleName(id, vendorId, vendor?.nameZh || vendor?.name || vendorId); };
     // 员工配好的型号对到模型世界：目录或模型数据变了才重算。
     if (cache.current.mine !== mine || cache.current.world !== world) cache.current = { mine, world, items: mine?.groups && world?.available ? mineItems(mine, models) : [] };
-    const items = cache.current.items, mineIds = new Set(items.filter(item => item.world).map(item => item.world.id)), itemOf = model => items.find(item => item.world?.id === model.id) ?? null;
+    // chatItems：能对话的那些；生图模型只在“我的模型”里列出来，测智和对决不用它。
+    const items = cache.current.items, chatItems = items.filter(item => !item.image), imageCount = items.length - chatItems.length, mineIds = new Set(items.filter(item => item.world).map(item => item.world.id)), itemOf = model => items.find(item => item.world?.id === model.id) ?? null;
     const usedRows = (mine?.used ?? []).map(row => ({ ...row, world: usedWorld(row, items, models) }));
     // 相遇：用哪个角色的模型聊过（有用量记录）就点亮；只配好没聊过的是“已配好”。
     const met = {};
@@ -212,11 +215,17 @@ export function createModelWorldPages(React, kit) {
     const today = usage?.today ?? dayOf(Date.now());
     const spentOf = () => { const days = usage?.days ?? [], total = days.reduce((sum, day) => addUsage(sum, day), emptyUsage()); return { days, total, ...worldSpend((usage?.rows ?? []).filter(row => usageTokens(row) > 0), row => usedWorld(row, items, models)) }; };
     const myCard = item => {
+      // 生图模型：不对型号、不开对话、不进测智，只说明它用在哪。
+      if (item.image) return h('article', { key: item.key, className: 'ww-mw-mycard', 'data-image': true },
+        h('header', null, mini(null), h('div', { className: 'ww-mw-grow' }, h('strong', null, item.name), h('small', null, [item.providerName, channelText[item.kind], item.kind === 'relay' && item.host].filter(Boolean).join(' · '))), h('span', { className: 'ww-mw-badge', 'data-tone': 'quiet' }, '生图')),
+        h('p', { className: 'ww-mw-hint' }, '生图模型。专家和小鲸要出图时会用它，按张计费；不上实力榜，也不参加对决和测智。'));
       const world = item.world, usedRow = usedRows.find(row => row.provider === item.provider && row.model === item.model), channel = [item.providerName, channelText[item.kind], item.kind === 'relay' && item.host].filter(Boolean).join(' · ');
       return h('article', { key: item.key, className: 'ww-mw-mycard', 'data-default': item.isDefault },
         h('header', null, mini(world), h('div', { className: 'ww-mw-grow' }, world ? nameButton(world) : h('strong', null, item.name), h('small', null, channel)),
           item.isDefault && h('span', { className: 'ww-mw-badge' }, '默认'), world && tierBadge(world.rating?.tier)),
-        world ? h('div', { className: 'ww-mw-dims' }, h('div', { className: 'ww-mw-dim' }, h('span', null, c.overall), h('i', null, h('b', { style: { width: `${Math.min(100, world.rating?.overall ?? 0)}%` } })), h('span', null, world.rating?.overall ?? '—')),
+        world ? h('div', { className: 'ww-mw-dims' }, h('div', { className: 'ww-mw-dim' }, h('span', null, c.overall),
+          // 条长仍等于分数（2026-11-17 用户定）；竖线标出榜首的分数作参照（2026-11-18）。
+          h('i', topOverall ? { 'data-top': true, title: `${world.rating?.overall ?? '—'} 分，榜首 ${topOverall} 分`, style: { '--ww-mw-top': `${Math.min(100, topOverall)}%` } } : null, h('b', { style: { width: `${Math.min(100, world.rating?.overall ?? 0)}%` } }), topOverall && h('u', { 'aria-hidden': true })), h('span', null, world.rating?.overall ?? '—')),
           ...dims.map(([key, dimension]) => h('div', { key, className: 'ww-mw-dim' }, h('span', null, dimension.name), h('i', null, h('b', { style: { width: `${world.rating?.[key] ?? 0}%` } })), h('span', null, world.rating?.[key] ?? '—'))))
           : h('p', { className: 'ww-mw-hint' }, '没对上模型世界的型号，看不到成绩和价格。可以手动指一个。'),
         h('small', { className: 'ww-mw-meta' }, [world && (priceOf(world) ? `官网价 ${priceOf(world)}` : '官网价未公布'), world && !item.exact && !item.mapped && `按名字对到 ${world.name}`, item.mapped && '手动对应', usedRow ? `用过 ${worldCount(usedRow.tokens)} tokens` : '还没用过'].filter(Boolean).join(' · ')),
@@ -231,17 +240,17 @@ export function createModelWorldPages(React, kit) {
       if (mine.failed) return empty('没读到你在 DSH 里配的模型', mine.failed, button(c.retry, () => { setMine(null); loadMine(); }));
       if (!mine.supported.catalog) return empty('当前 DSH 读不到模型列表', '这一版 DSH 没有开放模型目录，「我的模型」用不了；实力榜、图鉴和对决照常能用。', button('先看实力榜', () => setTab('rank')));
       if (!items.length) return empty('还没在 DSH 里配模型', '在 DSH 的设置里加好模型后，这里会列出你能用的每个模型：实力排第几、官网价多少、这个月用了多少，有更划算的换法也会提醒你。', button('先看实力榜', () => setTab('rank')));
-      const order = item => (item.isDefault ? 0 : 1) * 1e18 - (usedRows.find(row => row.provider === item.provider && row.model === item.model)?.tokens ?? 0) - (item.world?.rating?.overall ?? 0);
+      const order = item => (item.isDefault ? 0 : 1) * 1e18 + (item.image ? 1e17 : 0) -(usedRows.find(row => row.provider === item.provider && row.model === item.model)?.tokens ?? 0) - (item.world?.rating?.overall ?? 0);
       const sorted = [...items].sort((a, b) => order(a) - order(b)), shown = showAll ? sorted : sorted.slice(0, 12), spent = spentOf();
       const tips = mineAdvice(items, models, today).filter(tip => !hidden[tip.id]).slice(0, 3);
       const tipText = tip => { const model = byId.get(tip.model); return tip.kind === 'pricier' ? [`${model.name} 不比 ${byId.get(tip.instead).name} 强，官网价却是它的 ${tip.times} 倍`, '同一家里你已经配了更划算的那个，这类活可以换过去。'] : tip.kind === 'newer' ? [`${vendorName(model)}出了新型号 ${model.name}`, `${model.releaseDate} 发布${model.rating?.overall != null ? `，综合 ${model.rating.overall}` : '，还没有评测成绩'}${priceOf(model) ? `，官网价 ${priceOf(model)}` : ''}。`] : [`${model.name} 开「${worldEffortText(tip.effort, c)}」就够`, `成绩 ${tip.index}，最强档「${worldEffortText(tip.top, c)}」是 ${tip.topIndex}，消耗少 ${tip.saving}%。`]; };
       const peak = Math.max(1, ...spent.days.map(day => usageTokens(day))), top = Math.max(1, ...spent.rows.map(row => usageTokens(row)));
       const def = items.find(item => item.isDefault);
       return h(React.Fragment, null,
-        h('div', { className: 'ww-mw-overview' }, h('div', { className: 'ww-mw-grow' }, h('strong', null, `你在 DSH 里配了 ${items.length} 个模型，${items.filter(item => item.world).length} 个对上了模型世界`), h('small', null, `默认模型：${def ? def.world?.name ?? def.name : '—'} · 模型列表来自 DSH 设置，这里只读`)),
+        h('div', { className: 'ww-mw-overview' }, h('div', { className: 'ww-mw-grow' }, h('strong', null, `你在 DSH 里配了 ${imageCount ? `${chatItems.length} 个对话模型、${imageCount} 个生图模型` : `${chatItems.length} 个模型`}，${items.filter(item => item.world).length} 个对上了模型世界`), h('small', null, `默认模型：${def ? def.world?.name ?? def.name : '—'} · 模型列表来自 DSH 设置，这里只读`)),
           h('div', { className: 'ww-mw-stat' }, h('small', null, `${periods[period]}用了`), h('strong', null, worldCount(usageTokens(spent.total)))), h('div', { className: 'ww-mw-stat' }, h('small', null, '大约花了'), h('strong', null, spent.text))),
         mine.issues.length > 0 && h('p', { className: 'ww-mw-hint', role: 'status' }, `有 ${mine.issues.length} 个渠道没读出来：${mine.issues[0]}`),
-        section('我在用的', '默认模型在前，用得多的在前', null, h('div', { className: 'ww-mw-mygrid' }, ...shown.map(myCard)), sorted.length > shown.length && button(`显示全部 ${sorted.length} 个`, () => setShowAll(true))),
+        section('我在用的', `默认模型在前，用得多的在前${topOverall ? ` · 综合条上的竖线是榜首 ${topOverall} 分` : ''}`, null, h('div', { className: 'ww-mw-mygrid' }, ...shown.map(myCard)), sorted.length > shown.length && button(`显示全部 ${sorted.length} 个`, () => setShowAll(true))),
         tips.length > 0 && section('可以试试', '只从你已经配好的模型里看', null, h('div', { className: 'ww-mw-tips' }, ...tips.map(tip => { const [title, text] = tipText(tip), model = byId.get(tip.model), other = tip.instead && byId.get(tip.instead);
           return h('article', { key: tip.id, className: 'ww-mw-tip' }, mini(model), h('div', { className: 'ww-mw-grow' }, h('strong', null, title), h('p', null, text),
             h('div', { className: 'ww-mw-actions' }, other && button('并排比较', event => { setPicks([model.id, other.id]); open({ kind: 'compare', ids: [model.id, other.id] }, event.currentTarget); }), button(c.detail, event => detail(model, event)))),
@@ -380,7 +389,7 @@ export function createModelWorldPages(React, kit) {
 
     // ---------- 模型测智 ----------
     const columnKey = record => `${record.provider}\n${record.model}`, rowKey = record => `${record.testId}|${record.classic ? 1 : 0}`;
-    const probeWho = probe.who ?? (() => { const def = items.find(item => item.isDefault) ?? items[0], relay = items.find(item => item.kind === 'relay' && item !== def); return [def, relay].filter(Boolean).map(item => item.key); })();
+    const probeWho = probe.who ?? (() => { const def = chatItems.find(item => item.isDefault) ?? chatItems[0], relay = chatItems.find(item => item.kind === 'relay' && item !== def); return [def, relay].filter(Boolean).map(item => item.key); })();
     const patchProbe = value => setProbe(previous => ({ ...previous, ...value }));
     const startProbe = () => {
       const targets = probeWho.map(key => items.find(item => item.key === key)).filter(Boolean), rows = probeTests.filter(test => probe.what.includes(test.id)).flatMap(test => [{ testId: test.id, classic: false }, ...(probe.classic ? [{ testId: test.id, classic: true }] : [])]);
@@ -438,13 +447,13 @@ export function createModelWorldPages(React, kit) {
     };
     const probePage = () => {
       if (!mine) return h('div', { className: 'ww-mw-skeleton', role: 'progressbar', 'aria-label': '模型测智' });
-      if (!items.length || !mine.supported.probe) return empty(items.length ? '当前 DSH 不能直接调用模型' : '先在 DSH 里配好模型', items.length ? '这一版 DSH 没有开放直接调用模型的接口，模型测智用不了。' : '模型测智是拿社区里最常用的几道题，测你自己配好的模型：到底几斤几两、有没有被转发站掺水。配好模型后回到这里。');
+      if (!chatItems.length || !mine.supported.probe) return empty(chatItems.length ? '当前 DSH 不能直接调用模型' : '先在 DSH 里配好模型', items.length ? '这一版 DSH 没有开放直接调用模型的接口，模型测智用不了。' : '模型测智是拿社区里最常用的几道题，测你自己配好的模型：到底几斤几两、有没有被转发站掺水。配好模型后回到这里。');
       const calls = probeWho.length * probe.what.length * (probe.classic ? 2 : 1), book = new Map();
       for (const run of runs) for (const record of run.records) { if (record.classic) continue; const entry = book.get(columnKey(record)) ?? book.set(columnKey(record), { right: 0, total: 0, canned: 0, star: 0, last: run.at }).get(columnKey(record)); if (probeTest(record.testId).judge === 'auto') { entry.total += 1; if (record.grade.pass) entry.right += 1; } if (record.grade.made === false) entry.canned += 1; if (run.stars[rowKey(record)] === columnKey(record)) entry.star += 1; }
       return h(React.Fragment, null,
         h('p', { className: 'ww-mw-lead' }, '社区里最常用的几道题，拿来测你自己配好的模型：到底几斤几两，有没有被转发站掺水。', h('strong', null, '每次出题都现换'), '动物、数字和颜色，画图和写代码的题还带一个本次的随机口令，提前写好的“预制答案”对不上。用的是你自己的额度，直接调模型，不在对话列表里留会话。'),
         h('section', { className: 'ww-mw-pset' },
-          h('div', { className: 'ww-mw-pline' }, h('strong', null, '测谁'), h('div', { className: 'ww-mw-grow ww-mw-boards' }, ...items.slice(0, 60).map(item => { const on = probeWho.includes(item.key); return chip([item.world && mini(item.world), item.world?.name ?? item.name, h('small', { key: 'p' }, item.providerName)], on, () => patchProbe({ who: on ? probeWho.filter(key => key !== item.key) : [...probeWho, item.key] }), { key: item.key, disabled: probe.live || (!on && probeWho.length >= 4) }); })), h('small', null, '最多 4 个')),
+          h('div', { className: 'ww-mw-pline' }, h('strong', null, '测谁'), h('div', { className: 'ww-mw-grow ww-mw-boards' }, ...chatItems.slice(0, 60).map(item => { const on = probeWho.includes(item.key); return chip([item.world && mini(item.world), item.world?.name ?? item.name, h('small', { key: 'p' }, item.providerName)], on, () => patchProbe({ who: on ? probeWho.filter(key => key !== item.key) : [...probeWho, item.key] }), { key: item.key, disabled: probe.live || (!on && probeWho.length >= 4) }); })), h('small', null, '最多 4 个')),
           h('div', { className: 'ww-mw-ptests' }, ...probeTests.map(test => { const on = probe.what.includes(test.id); return h('button', { key: test.id, type: 'button', className: 'ww-mw-ptest', 'aria-pressed': on, disabled: probe.live, onClick: () => patchProbe({ what: on ? probe.what.filter(id => id !== test.id) : [...probe.what, test.id] }) },
             h('span', null, h('strong', null, test.name), h('span', { className: 'ww-mw-badge', 'data-tone': 'quiet' }, test.skill), h('span', { className: 'ww-mw-badge', 'data-tone': test.judge === 'auto' ? 'ok' : undefined }, test.judge === 'auto' ? '自动判分' : '自己看图'), h('i', { 'aria-hidden': true }, icon(icons.check, 11))), h('span', null, test.intro), h('small', null, `出自 ${test.origin}`)); })),
           h('div', { className: 'ww-mw-actions' }, toggle('同时发一遍社区原题做对照', probe.classic, () => patchProbe({ classic: !probe.classic }), { disabled: probe.live }), h('small', { className: 'ww-mw-grow' }, '原题可能被转发站认出来、直接发回预制答案'),

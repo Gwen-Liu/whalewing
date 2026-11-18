@@ -43,6 +43,16 @@ export function createCardsClient(bridge, t, z, automation) {
   return {
     newsRequest, newsScheduleRequest, libraryRequest, readingRequest, openAutomation: automation.openAutomation,
     showKnowledge: () => bridge.showWorkbench?.('knowledge'),
+    /**
+     * 资讯任务和它上次运行的结果（2026-11-18：当天那期失败时首页照实说，并能“现在生成一期”）。
+     * 定时目录读不出来时返回 null，首页照旧只说几点整理。
+     */
+    newsTask: async signal => {
+      const catalog = await automation.automationCatalog(signal);
+      const task = catalog.tasks.find(item => item.purpose === 'news' && item.status !== 'inactive');
+      return task ? { task, lastRun: automation.lastRun(task) } : null;
+    },
+    runNewsNow: (task, signal) => automation.runAutomationNow(task, signal),
     scheduleAdapter: Object.freeze({ validate: input => newsSchema.scheduleInput.parse(input), submit: newsScheduleRequest }),
   };
 }

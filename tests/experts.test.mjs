@@ -1126,7 +1126,7 @@ test('专家说明带上关于员工和自己的记忆；记忆工具写完下�
   await h.run({ expertId: 'development' });
   await turn(h.ctx, h.agent);
   const first = contexts().at(-1);
-  assert.match(first, /【关于员工】个人知识「关于我」还没写/);
+  assert.match(first, /【关于员工】知识积累「关于我」还没写/);
   assert.match(first, /【你的记忆】（00-系统\/专家记忆\/研发专家\.md）\n还没有记过。/);
   assert.match(first, /记到你的记忆/);
 
@@ -1150,7 +1150,7 @@ test('专家说明带上关于员工和自己的记忆；记忆工具写完下�
   assert.ok(!(await memory({ action: 'add_global', text: '回答先说结论' })).isError);
   await h.run({ expertId: 'design' });
   await turn(h.ctx, h.agent);
-  assert.match(contexts().at(-1), /【关于员工】个人知识「关于我」（30-领域\/个人管理\/关于我\.md）里员工自己写的：\n### 怎样和我协作\n- \d{4}-\d{2}-\d{2} 回答先说结论/);
+  assert.match(contexts().at(-1), /【关于员工】知识积累「关于我」（30-领域\/个人管理\/关于我\.md）里员工自己写的：\n### 怎样和我协作\n- \d{4}-\d{2}-\d{2} 回答先说结论/);
   assert.match(contexts().at(-1), /品牌色已定为天青/);
 
   // 审批拒绝：不写。

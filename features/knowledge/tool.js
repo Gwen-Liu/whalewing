@@ -38,10 +38,10 @@ export function apply(ctx) {
         const routine = routineWrites.has(args.action) && exec.agent && routinePurposes.has(ctx.sessionProjections?.stateOf(exec.agent.session, 'whalewingAutomation')?.purpose);
         if (!noApproval.has(args.action) && !routine) {
           const policy = ctx.sandboxPolicy.resolve(exec.agent ? { session: exec.agent.session } : {});
-          await approveEscalation({ requestedMode: 'danger-full-access', effectiveMode: policy.mode, subject: '鲸翼个人知识操作', justification: `${name}/${args.action}，范围仅 ${ctx.whalewing.vault.root} 及员工明确登记的本机来源；不改变会话权限模式。` }, { approver: ctx.get('approval'), agent: exec.agent, callId: exec.callId, toolName: name, signal: exec.signal });
+          await approveEscalation({ requestedMode: 'danger-full-access', effectiveMode: policy.mode, subject: '鲸翼知识积累操作', justification: `${name}/${args.action}，范围仅 ${ctx.whalewing.vault.root} 及员工明确登记的本机来源；不改变会话权限模式。` }, { approver: ctx.get('approval'), agent: exec.agent, callId: exec.callId, toolName: name, signal: exec.signal });
         }
         return JSON.stringify(await ctx.whalewing.execute(args, { kind: 'model', agent: exec.agent, signal: exec.signal }));
       },
-      presentCall: args => ({ card: 'generic', title: '鲸翼个人知识', kind: knowledgeReadOnly.has(args.action) ? 'read' : 'other', rawInput: args }),
+      presentCall: args => ({ card: 'generic', title: '鲸翼知识积累', kind: knowledgeReadOnly.has(args.action) ? 'read' : 'other', rawInput: args }),
     }));
 }

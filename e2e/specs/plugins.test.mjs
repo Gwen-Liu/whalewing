@@ -93,6 +93,57 @@ test('上传插件包：预览里看技能和 MCP、填密钥再装；装好后�
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+// PLG-06 需求§技能中心（插件·更新：装过同名的包时原地更新到新的一份，原来装好的 MCP 沿用设置和密钥，开没开照旧；2026-11-18）
+test('插件包原地更新：再传新版，预览写“更新到这一版”、原来的 MCP 不用再填；更新后新技能在、MCP 照样连上、密钥还在；同一份再传是“已是这一版”', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ww-e2e-pack-update-'));
+  const zipOf = (version, extra = {}) => {
+    const file = path.join(dir, `echo-pack-${version}.zip`);
+    fs.writeFileSync(file, zipSync({
+      'echo-pack/.claude-plugin/plugin.json': strToU8(JSON.stringify({ name: 'echo-pack', version, description: '鲸翼测试 PLG06', userConfig: { token: { type: 'string', title: '回声口令', sensitive: true } } })),
+      'echo-pack/skills/echo-notes/SKILL.md': strToU8('---\nname: echo-notes\ndescription: 鲸翼测试 PLG06 的技能\n---\n\n照着回声做。\n'),
+      'echo-pack/server/echo.mjs': new Uint8Array(fs.readFileSync(echo)),
+      'echo-pack/.mcp.json': strToU8(JSON.stringify({ mcpServers: { echo: { command: process.execPath, args: ['${CLAUDE_PLUGIN_ROOT}/server/echo.mjs'], env: { TOKEN: '${user_config.token}' } } } })),
+      ...extra,
+    }));
+    return file;
+  };
+  try {
+    const v1 = zipOf('0.1.0'), v2 = zipOf('0.2.0', { 'echo-pack/skills/echo-more/SKILL.md': strToU8('---\nname: echo-more\ndescription: 鲸翼测试 PLG06 新版加的技能\n---\n\n多回一句。\n') });
+    await withPage(browser, t, async ({ page, errors, external }) => {
+      await openPlugins(page);
+      const upload = async file => { await kit(page).locator('input[aria-label="上传插件包"]').setInputFiles(file); const preview = drawer(page).filter({ has: page.locator('header h2', { hasText: 'echo-pack' }) }).filter({ has: page.locator('footer') }); await preview.locator('footer .ww-primary').waitFor(); return preview; };
+      let preview = await upload(v1);
+      await preview.locator('input[type=password]').fill('SECRET-PACK-UPDATE');
+      await preview.getByRole('button', { name: '安装' }).click();
+      await toast(page, '已装好「echo-pack」', 'success').waitFor({ timeout: 60_000 });
+      await drawer(page).filter({ hasText: '已连上 · 1 个工具' }).waitFor({ timeout: 60_000 });
+      await page.keyboard.press('Escape');
+      preview = await upload(v2);
+      const text = await textOf(preview);
+      assert.ok(text.includes('已经装了这个包（0.1.0）') && text.includes('原来装好的 MCP 沿用原来的设置和密钥'), text);
+      assert.ok(text.includes('已经装好，沿用原来的设置和密钥'));
+      assert.equal(await preview.locator('input[type=password]').count(), 0, '原来的 MCP 不用再填密钥');
+      await preview.getByRole('button', { name: '更新到这一版' }).click();
+      await toast(page, '已更新「echo-pack」到 0.2.0', 'success').waitFor({ timeout: 60_000 });
+      const detail = drawer(page).filter({ hasText: '已连上 · 1 个工具' });
+      await detail.waitFor({ timeout: 60_000 });
+      assert.match(await textOf(detail), /echo-more/, '新版加的技能在');
+      assert.deepEqual(holders('SECRET-PACK-UPDATE'), ['.credentials.yaml'], '密钥还在凭据库');
+      await page.keyboard.press('Escape');
+      preview = await upload(v2);
+      assert.equal(await preview.getByRole('button', { name: '已是这一版' }).isDisabled(), true, '同一份再传不用更新');
+      await page.keyboard.press('Escape');
+      // 收尾：卸载。
+      await kit(page).locator('.ww-kit-row', { hasText: 'echo-pack' }).click();
+      await drawer(page).getByRole('button', { name: '卸载' }).click();
+      await dialogButton(modal(page, '卸载插件包'), '卸载', { exact: true }).click();
+      await toast(page, '已卸载「echo-pack」', 'success').waitFor();
+      assert.deepEqual(errors, []);
+      assert.deepEqual(external, []);
+    });
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 // PLG-02 需求§技能中心（插件·发现：鲸翼精选四个包，点开先预览，里面的技能和 MCP 列清楚）
 test('发现·插件：鲸翼精选四个包排在最前，点开“录音进第二大脑”先预览两项技能和 Plaud MCP', async t => {
   await withPage(browser, t, async ({ page, errors, external }) => {

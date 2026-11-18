@@ -129,10 +129,13 @@ export function skillLibraryContract(z) {
     z.strictObject({ markets: z.array(z.strictObject({ id: text, title: text, kind: z.enum(['local', 'github']), repo: text.optional(), removable: z.literal(true).optional(), entries: z.array(packEntry), issue: text.optional(), loading: z.literal(true).optional() })) }),
     z.strictObject({ preview: z.strictObject({
       stage: text, hash: text, name: text, title: text, description: text, version: text, author: text, homepage: text, source: packSource, installed: z.boolean(),
+      // 装过同名的包时：原来的版本、和这一份是不是一模一样（2026-11-18 起能原地更新）。
+      update: z.strictObject({ version: text, same: z.boolean() }).optional(),
       skills: z.array(packSkill.extend({ conflict: z.literal(true).optional() })), skipped, issues: z.array(text),
-      mcp: z.array(z.strictObject({ key: text, title: text, transport: z.enum(['stdio', 'streamable-http']), target: text, fields: z.array(field), blocked: text.optional(), hint: text.optional(), ready: z.boolean() })),
+      // kept：原来就装好的 MCP，更新时沿用原来的设置和密钥，不用再填。
+      mcp: z.array(z.strictObject({ key: text, title: text, transport: z.enum(['stdio', 'streamable-http']), target: text, fields: z.array(field), blocked: text.optional(), hint: text.optional(), ready: z.boolean(), kept: z.literal(true).optional() })),
     }) }),
-    z.strictObject({ pack: packView, failed: z.array(z.strictObject({ key: text, reason: text })) }),
+    z.strictObject({ pack: packView, failed: z.array(z.strictObject({ key: text, reason: text })), updated: z.literal(true).optional(), removedMcp: z.array(text).optional() }),
     z.strictObject({ pack: packView }),
     z.strictObject({ removed: text, mcp: z.array(text) }),
     z.strictObject({ skill: z.strictObject({ pack: text, packTitle: text, name: text, description: text, content: text, enabled: z.boolean() }) }),

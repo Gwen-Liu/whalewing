@@ -28,6 +28,15 @@ export const zh = {
   "homeViewSource": "查看来源",
   "homeNewsMenu": "{name} · 运行详情和历史日报",
   "homeNewsNone": "今日日报尚未生成。每天北京时间 08:00 整理，DSH 需要开着。",
+  "homeNewsFailed": "今天这一期没生成出来：{reason}",
+  "homeNewsFailedFix": "{fix}。也可以现在重新生成一期。",
+  "homeNewsMissing": "今天 {time} 那次跑完了，但没有交出日报。可以打开原会话看看，或者现在重新生成一期。",
+  "homeNewsWorking":"正在整理今天这一期，一般要几分钟，好了这里会显示。",
+  "homeNewsGenerate": "现在生成一期",
+  "homeNewsWhy": "打开原会话",
+  "homeNewsGenerating": "已经开始整理今天这一期，好了首页会显示；08:00 那次照常运行",
+  "homeNewsNoTask": "还没有每日资讯任务，先到阅读设置里打开一个资讯领域",
+  "homeNewsRefresh": "看看好了没有",
   "homeNewsEmpty": "这一期没有符合条件的条目。",
   "homeOfficial": "官方",
   "homeWeekToday": "这一期",
@@ -215,6 +224,7 @@ export const styles = `
 .ww-read-q-s{flex:none;font-size:12px;color:var(--ww-ink-3);white-space:nowrap}
 .ww-read-seen .ww-read-t{color:var(--ww-ink-3)}
 .ww-read-blank{flex:1 0 auto;margin:0;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 14px;border:1px dashed var(--ww-line-2);border-radius:14px;font-size:13px;color:var(--ww-ink-3)}
+.ww-read-today{display:flex;flex-direction:column;gap:10px;margin-bottom:10px}.ww-read-today .ww-read-blank{flex:0 0 auto;display:block;line-height:1.7}.ww-read-today .ww-read-blank strong{display:block;color:var(--ww-ink-2);font-weight:600}
 .ww-read-wkme{flex:none;margin:0;padding:10px 12px;border:1px solid var(--ww-orn);border-radius:12px;background:linear-gradient(120deg,var(--ww-orn-2),transparent 60%),var(--ww-surface-2);font-size:13px;color:var(--ww-ink-2)}
 .ww-read-newsbody[data-d="0"] .ww-read-q-d{display:block}
 .ww-read-newsbody:not([data-d="0"]) .ww-read-q-s{display:none}

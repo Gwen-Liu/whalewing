@@ -128,8 +128,9 @@ export function createView(kit, navigation) {
         setPacks(current => [...(current ?? []).filter(pack => pack.name !== value.pack.name), value.pack]);
         if (servers) setMcp(servers);
         setPackPreview(null); setView('mine'); setFilter('all'); setQuery(''); setPackOpen(value.pack.name);
-        if (value.failed.length) notify(`已装好「${value.pack.title}」，但有 ${value.failed.length} 个 MCP 没加上：${value.failed.map(item => `${item.key}（${item.reason}）`).join('；')}`, { kind: 'error' });
-        else notify(`已装好「${value.pack.title}」`);
+        const done = value.updated ? `已更新「${value.pack.title}」${value.pack.version ? `到 ${value.pack.version}` : ''}${value.removedMcp?.length ? `，撤掉了这一版里没有的 MCP：${value.removedMcp.join('、')}` : ''}` : `已装好「${value.pack.title}」`;
+        if (value.failed.length) notify(`${done}，但有 ${value.failed.length} 个 MCP 没加上：${value.failed.map(item => `${item.key}（${item.reason}）`).join('；')}`, { kind: 'error' });
+        else notify(done);
       } finally { setInstalling(false); }
     };
     const togglePack = pack => run(async () => {

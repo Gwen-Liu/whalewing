@@ -65,9 +65,11 @@ test('全栏改版后的双语词条与样式快照', () => {
   // 同日定时任务“打开原会话”遇到还空白的任务会话不打开、改成提示：“还没运行过”和“下一次是几点”2 个。
   // 同日“技能插件”改名“技能中心”（页签和页标题两个词条改字，全部功能的搜索关键词里留着旧名字），条数不变。
   // 2026-11-17 分界线都能拖（共用的 src/split.js）：线上的提示一句（共用）、专家列表、任务列表、知识积累右栏三条线的读屏名字，加 4 个。
-  assert.equal(Object.keys(zh).length, 1120); assert.equal(Object.keys(en).length, 1120);
-  assert.equal(hash(sorted(zh)), '35cf0c3b2adf10418e401606d4734df1172ec93147690be2cb9a074aeff721f7');
-  assert.equal(hash(sorted(en)), '690f1a790f1057c4dd859bf031dad404549cccca7e94adc5f1b8babb07cb65d9');
+  // 2026-11-18 下一版走查的 8 处：定时任务“＋ 添加”和“现在跑一次”及发出后的提示 3 个；每日阅读当天那期没生成出来、跑完没交出日报、
+  // 正在整理、现在生成一期、打开原会话、发出后的提示、没有资讯任务、看看好了没有共 9 个，加 12 个。“个人知识”旧名改字，条数不变。
+  assert.equal(Object.keys(zh).length, 1132); assert.equal(Object.keys(en).length, 1132);
+  assert.equal(hash(sorted(zh)), 'a55883cd98bf30a179ccefc0135d79bd1a38040e90d5a5f3f4b349f5196dc582');
+  assert.equal(hash(sorted(en)), 'ffab61f83073f93839261c600bc056dc686c9ee18da5e93d433de748892d45e8');
   // 没有扩展改名时，界面上的名字和原来逐字相同。
   const fill = text => text.replaceAll('{assistant}', '小鲸助手').replaceAll('{assistantShort}', '小鲸');
   assert.deepEqual([zh.question, zh.assistantOpen, zh.assistantStart, zh.skillEdit].map(fill), ['小鲸助手', '打开小鲸助手', '开始与小鲸协作', '与小鲸编辑技能']);
@@ -108,7 +110,9 @@ test('全栏改版后的双语词条与样式快照', () => {
   // 2026-11-17 分界线都能拖：共用的 ww-split-line（1px 的线、中间一小截把手、两边各多 4px 好按，悬停和拖着换品牌色）搬到外壳；
   // 专家团队两张分开的卡片合成一整块（和定时任务、知识积累一样，左栏垫一层底色），窄了线藏起来、左栏自己画边；
   // 定时任务列表右边的边框换成那条线；知识积累目录旁 8px 的旧分隔条换成那条线，右栏前也加一条。
-  assert.equal(hash(css), 'e9c9fe2e9ce335dceefa2567ec47330c9ffcdef802dee8a0f553329597323682');
+  // 2026-11-18 小鲸悬浮球默认离右下角 12px（原来 28px，在专家对话里压住“发送”按钮），--ww-fab-safe 跟着改；每日阅读当天没出的说明块（ww-read-today）；
+  // 模型世界综合条上标榜首分数的竖线（ww-mw-dim i u）和生图模型卡片的底色。
+  assert.equal(hash(css), 'e6cd17cf40eb3d1f2a149baf16b29e304d196f6d2edc6c401c6754cd247cc89f');
   assert.ok(css.includes('.ww-book-scroll{--dsh-scrollbar-width:14px;--dsh-scrollbar-thumb-border:4px;'), '正文滚动条够宽好拖');
   assert.equal(zh.newsHeadline, '来源标题'); assert.equal(en.newsHeadline, 'Source headline'); assert.equal(zh.newsViewSource, '查看来源');
   assert.equal(zh.library, '书架'); assert.equal(zh.learningTip, 'AI 使用技巧'); assert.equal(zh.libraryAll, '全部'); assert.equal(zh.libraryDailyBadge, '常看');

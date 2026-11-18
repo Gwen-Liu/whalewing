@@ -93,6 +93,24 @@ test('我的模型卡片的成绩条：四项共用一套列宽，条从同一�
   assert.match(viewCss, /\.ww-mw-dim\{display:grid;grid-column:1\/-1;grid-template-columns:subgrid/, '每一行跟着整组的列宽（子网格），不各算各的');
 });
 
+test('综合条上有一根竖线标出榜首的分数，条长仍是分数；生图模型单独标出来，不开对话、不进测智候选', async () => {
+  // 2026-11-18 走查：生图模型（gpt-image-2.6）被当成对话模型，给了“没对上型号”和“开个对话”，测智还默认勾上了它。
+  const withImage = { ...mine, defaultModel: { provider: 'relay', model: 'gpt-image-2.6' }, groups: [{ ...mine.groups[1], models: [{ id: 'gpt-image-2.6', name: 'gpt-image-2.6', efforts: [], defaultEffort: null, contextWindow: null }, ...mine.groups[1].models] }, mine.groups[0]] };
+  const view = page({ desk: { mine: async () => withImage } }); view.render(); await tick();
+  const tree = view.render(), shown = text(tree);
+  assert.ok(shown.includes('你在 DSH 里配了 3 个对话模型、1 个生图模型'), shown.slice(0, 200));
+  assert.ok(shown.includes('综合条上的竖线是榜首 60 分'));
+  const image = nodes(tree).find(node => node.props?.className === 'ww-mw-mycard' && node.props['data-image']);
+  assert.ok(text(image).includes('生图模型。专家和小鲸要出图时会用它'));
+  assert.equal(nodes(image).some(node => node.type === 'button'), false, '生图模型没有开对话、比一比、测一测');
+  const claude = nodes(tree).find(node => node.props?.className === 'ww-mw-mycard' && text(node).includes('Claude B'));
+  const bar = nodes(claude).find(node => node.type === 'i' && node.props['data-top']);
+  assert.equal(bar.props.style['--ww-mw-top'], '60%'); assert.equal(nodes(bar).find(node => node.type === 'b').props.style.width, '56%', '条长仍是自己的分数');
+  const probe = await view.tab('模型测智');
+  assert.equal(text(probe).includes('gpt-image-2.6'), false, '测智候选里没有生图模型');
+  view.unmount();
+});
+
 test('实力榜的成绩条和卡片同一套：条在前、数字在后，条长就是分数；条跟着这一栏伸缩，窄的时候才缩短', async () => {
   // 2026-11-17 用户看实力榜：“不也一样嘛”。原来条写死 72px、数字在前，底槽看不出满分那头。
   const view = page(); view.render(); await tick();
