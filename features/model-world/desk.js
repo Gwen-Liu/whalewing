@@ -3,6 +3,7 @@ import fsPromises from 'node:fs/promises';
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write';
 import { BlockAssembler, createUserMessage } from '@deepseek-ai/dsh-llm';
 import { deskLimits } from './contract.js';
+import { providerProfiles } from '../../src/llm-profiles.js';
 import { probeQuestion, probeGrade } from '../../src/model-world-probe.js';
 import { addUsage, channelOf, dayOf, emptyUsage, foldUsage, pruneLedger, usageOf, usageTokens, usageWindow, dayShift } from '../../src/model-world-mine.js';
 
@@ -105,7 +106,8 @@ export class ModelDesk {
   bases() {
     const { settings, llm } = this.services(), out = {};
     try { for (const item of llm?.listConfigurableProviders?.() ?? []) if (item?.provider && item.defaultBaseURL) out[item.provider] = item.defaultBaseURL; } catch { /* 没有这个接口 */ }
-    try { for (const [id, value] of Object.entries(settings?.get?.('llm-pi-ai')?.providers ?? {})) if (typeof value?.baseURL === 'string' && value.baseURL) out[id] = value.baseURL; } catch { /* 没有这个设置 */ }
+    // 员工在 DSH 模型设置里给渠道填的地址优先（自己加的中转渠道只有这里有地址）。
+    for (const [id, value] of providerProfiles({ settings, llm }, { redactSecrets: true })) if (typeof value?.baseURL === 'string' && value.baseURL) out[id] = value.baseURL;
     return out;
   }
   async mine(signal) {

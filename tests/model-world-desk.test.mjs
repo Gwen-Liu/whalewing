@@ -21,8 +21,9 @@ async function desk({ chunks, list = [] } = {}) {
   const services = () => ({
     sessionController: { modelCatalog: async () => catalog, list: async () => ({ items: list }), resolveAgent: async id => ({ agent: { model: { select: value => calls.selected.push([id, value]) } } }) },
     agentDefaultModel: { currentSelection: () => current, saveSelection: async value => { calls.saved.push(value); current = value; } },
-    settings: { get: name => name === 'llm-pi-ai' ? { providers: { relay: { baseURL: 'https://relay.example.com/v1', apiKeyEnv: 'SECRET_NAME' }, direct: { baseURL: 'https://api.deepseek.com' } } } : undefined },
-    llm: { listConfigurableProviders: () => [], async prepareCall(config) { calls.prepared.push(config); return { config, async *stream(options) { calls.prompts.push(options.messages[0].content[0].text); for (const chunk of typeof chunks === 'function' ? chunks(config, options) : chunks ?? []) yield chunk; } }; } },
+    // DSH 的设置服务只有 describe()（没有 get）：每节一项，value 是这一节能在设置页改的配置；渠道在哪一节、哪条路径由 llm 的渠道目录给出。
+    settings: { describe: () => [{ ns: 'ui-settings', value: {} }, { ns: 'llm-pi-ai', value: { providers: { relay: { baseURL: 'https://relay.example.com/v1', apiKeyEnv: 'SECRET_NAME' }, direct: { baseURL: 'https://api.deepseek.com' } } } }] },
+    llm: { listConfigurableProviders: () => [{ provider: 'direct', settingsNs: 'llm-pi-ai', settingsPath: ['providers', 'direct'] }, { provider: 'relay', settingsNs: 'llm-pi-ai', settingsPath: ['providers', 'relay'] }], async prepareCall(config) { calls.prepared.push(config); return { config, async *stream(options) { calls.prompts.push(options.messages[0].content[0].text); for (const chunk of typeof chunks === 'function' ? chunks(config, options) : chunks ?? []) yield chunk; } }; } },
   });
   const make = () => new ModelDesk({ root, services, stored: contract.desk.stored, now: () => now, flushMs: 60000 });
   const instance = make();

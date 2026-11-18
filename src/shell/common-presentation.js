@@ -126,11 +126,13 @@ export const zh = {
   "avatar": "上传头像",
   "saveExpert": "保存专家",
   "closePanel": "关闭",
-  "cancelEdit": "取消编辑"
+  "cancelEdit": "取消编辑",
+  "splitHint": "拖动调整宽度，双击还原"
 };
 export const en = {
   "panel": "WhaleWing",
-  "shadowed": "A same-name item takes precedence in the library"
+  "shadowed": "A same-name item takes precedence in the library",
+  "splitHint": "Drag to resize, double-click to reset"
 };
 export const styles = [
 `

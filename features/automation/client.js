@@ -2,6 +2,7 @@ import { createWorkspacePicker } from './workspace-picker.js';
 import { automationContract } from './contract.js';
 import { describeSchedule, nextRuns } from './schedule-rule.js';
 import { registerFeature, useFeature } from '../../src/shell/feature.js';
+import { createSplit } from '../../src/split.js';
 
 /** 本页持有自己的草稿、动作和恢复状态；切走时不把状态交给外壳。 */
 export function createView(kit) {
@@ -9,8 +10,13 @@ export function createView(kit) {
   const WorkspacePicker = createWorkspacePicker(React, ActionMenu);
   const { createElement: h, useState, useRef, useEffect, useLayoutEffect, useSyncExternalStore } = React;
   const labelText = label => kit.resolveText ? kit.resolveText(label) : label.zh;
+  // 任务列表和右边详情之间那条线能拖（共用的 src/split.js）：没拖过时列表占约四分之一，夹在 13.75rem 到 22.5rem（样式里）；拖的范围是 180px 到一半，右边至少留 320px。
+  const useSplit = createSplit(React);
+  const listLimits = size => ({ min: Math.min(180, size / 3), max: Math.max(0, Math.min(size * 0.5, size - 320)) });
+  const listPreferred = size => Math.max(220, Math.min(size * 0.26, 360));
   return function AutomationView({ active, workbench }) {
     const { api, t, notify, busy, run, operation, setError: reportError, button, field, row, help, bind, dirty, openAssistant } = useFeature(React, workbench, 'automation');
+    const split = useSplit({ key: 'schedules', active, preferred: listPreferred, limits: listLimits, reserve: () => 1, label: t('taskListResize'), hint: t('splitHint') });
     const setError = (message, action) => reportError(message, action || { label: t('retry'), run: () => refreshTab() });
     const cardsEnabled = workbench.internal.featureEnabled('cards');
     const [confirm, setConfirm] = useState(null);
@@ -174,7 +180,7 @@ export function createView(kit) {
         automations.available === false && h('div', { className: 'ww-schedule-off', role: 'status' }, h('div', null, h('strong', null, t('taskUnavailableShort')), help('scheduleUnavailable')), row(button('retry', refreshTab, false, { className: 'ww-primary' }), button('legacyScheduleSettings', () => run(async () => api.openPlugins())))),
         api.automationCacheIssue() && h('p', { className: 'ww-notice ww-error', role: 'alert' }, api.automationCacheIssue()),
         automations.issues.length > 0 && h('details', { className: 'ww-notice' }, h('summary', null, t('newsDiagnostics')), ...automations.issues.map((issue, i) => h('p', { key: i, className: 'ww-error' }, issue.message))),
-        h('div', { className: 'ww-task-split' },
+        h('div', { className: 'ww-task-split', ref: split.frame, style: split.style('--ww-split') },
           h('aside', { className: 'ww-task-list', 'aria-label': t('schedule') },
             taskDraft && taskDraftHidden && button('taskDraftResume', () => setTaskDraftHidden(false)),
 
@@ -182,6 +188,7 @@ export function createView(kit) {
             ...allTasks.map(task => h('article', { key: taskKey(task), className: `ww-task-row${selected && taskKey(task) === taskKey(selected) ? ' ww-selected' : ''}` },
               h('button', { type: 'button', className: 'ww-task-select', 'aria-pressed': selected && taskKey(task) === taskKey(selected), onClick: () => { setSelectedTask(taskKey(task)); setTaskHistory(null); } },
                 h('span', null, statusDot(api.lastRun(task)), task.title || t(task.legacy ? 'taskLegacy' : 'schedule')), h('small', null, ...(taskOwnerName(task) ? [taskOwnerName(task), ' · '] : []), taskStatus(task), ' · ', task.status === 'active' ? beijing(task.scheduledAt) : t('rule_' + (task.kind === 'every' ? 'every_seconds' : task.kind === 'after' ? 'at' : task.kind)))), taskActions(task)))),
+          h('div', { ...split.separator, className: 'ww-split-line' }),
           h('div', { className: 'ww-task-main' },
             pending && h('section', { className: 'ww-notice', role: 'status' }, h('h3', null, t('taskPending')), help('taskPendingHelp'),
               row(button('taskRecover', recoverTask), button('openTaskSession', () => run(async () => api.openAutomation(pending.sessionId)))),

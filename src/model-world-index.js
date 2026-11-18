@@ -3,12 +3,16 @@ import { worldIndexAsOf, worldIndexVersion, worldIndexRows } from './model-world
 /**
  * Artificial Analysis 智能指数：各模型分思考强度的成绩与单次任务成本，数据由 scripts/update-model-index.mjs 从 AA 免费接口生成。
  * 综合实力榜取每个模型最强档的成绩；性价比榜比较每一档的“能力 × 相对消耗”。
- * 成本为跑一次评测任务的美元花费，按 GPT-5.6 Luna 轻度（约 $0.01）= 1 折算成相对消耗。
+ * 成本为跑一次评测任务的美元花费，按 $0.02 = 1 折算成相对消耗。
  */
 export { worldIndexAsOf, worldIndexVersion };
 export const worldIndexSource = Object.freeze({ name: `Artificial Analysis Intelligence Index v${worldIndexVersion}`, url: 'https://artificialanalysis.ai/leaderboards/models' });
-/** 相对消耗的基准：GPT-5.6 Luna 轻度一次任务约 $0.01。 */
-export const worldCostBase = 0.01;
+/**
+ * 相对消耗的基准：跑一次评测任务 $0.02 记为 1。
+ * v4.3 时是 $0.01（GPT-5.6 Luna 轻度一次）；2026-11-18 换 v5 时改：v5 的评测任务更重，两版都测过的 77 个方案 v5 花费中位是 v4.3 的 1.94 倍，
+ * 基准跟着翻倍，老方案的相对消耗和原来差不多，7 个档位分到的方案也和原来一样匀（v5 下 9/19/23/13/24/20/9）。v5 只测了 GPT-5.6 Luna 最强档，不能再拿它的轻度当基准。
+ */
+export const worldCostBase = 0.02;
 
 /** 思考强度：顺序即从强到弱；`null` 表示该模型只有一档（或只标“推理”）。 */
 export const worldEfforts = Object.freeze({ max: '最高', xhigh: '极高', high: '高', medium: '中', low: '轻度', minimal: '最低', none: '不思考' });
@@ -50,8 +54,14 @@ export function strongestEffort(efforts) {
   return efforts.reduce((best, item) => !best || item.index > best.index ? item : best, null);
 }
 
-/** 梯队按 AA 指数划分（按 AA 榜单显示的整数）：T0 ≥ 52，T1 ≥ 44，T2 ≥ 34，其余 T3。 */
-export const worldTierFloors = Object.freeze([['T0', 51.5], ['T1', 43.5], ['T2', 33.5]]);
+/**
+ * 梯队按 AA 指数划分（按 AA 榜单显示的整数）：T0 ≥ 50，T1 ≥ 30，T2 ≥ 20，其余 T3。
+ * 2026-11-18 随包数据从 v4.3 换成 v5（用户说“现在就换”）时重定：v5 比 v4.3 难，顶尖模型分数差不多、中游普遍低十来分，
+ * 照搬 v4.3 的 52 / 44 / 34，两版都测过的 42 个模型只有 17 个档位不变；这一组有 36 个不变，T0 的 50 正好在 v5 分数的断层上（50 → 46.5）。
+ */
+export const worldTierFloors = Object.freeze([['T0', 49.5], ['T1', 29.5], ['T2', 19.5]]);
+/** 界面上写的门槛（显示的整数），从上面这组生成，换门槛只改一处。 */
+export const worldTierText = () => worldTierFloors.map(([tier, floor]) => `${tier} ≥ ${floor + 0.5}`).join('，');
 export const worldTierFor = index => index === null ? null : worldTierFloors.find(([, floor]) => index >= floor)?.[0] ?? 'T3';
 
 /** 性价比按相对消耗分档；每档推荐能力最强的“模型 + 思考强度”，同分取更省者。 */

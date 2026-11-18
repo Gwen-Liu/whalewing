@@ -3135,16 +3135,19 @@ test('技能入库状态消费正式契约并明确区分实际会话使用，�
   assert.equal(f.calls.some(item => item[0] === 'create' || item[0] === 'prompt'), false);
 });
 
-test('目录分隔支持拖动键盘与容器夹取，取消恢复起点且离开和卸载释放捕获及观察器', async () => {
+test('目录分隔支持拖动键盘与容器夹取，取消恢复起点、拖过的宽度按比例记在本机、双击还原，离开和卸载释放捕获及观察器', async () => {
   const f = await fixture(); const observers = [];
   f.browser.ResizeObserver = class { constructor(callback) { this.callback = callback; observers.push(this); } observe(element) { this.element = element; } disconnect() { this.disconnected = true; } };
   await button(f.render(), '知识积累').props.onClick();
   const split = () => nodes(f.render()).find(node => node.props.className === 'ww-knowledge-split');
-  const separator = () => nodes(f.render()).find(node => node.props.role === 'separator');
-  // 知识区宽度先扣掉左侧功能条（44px），不到 1000 时右栏不停靠，所以 844 宽时目录可用的正好是原来的 800。
-  const container = { clientWidth: 844 }; split().props.ref.current = container; f.flushEffects();
+  const separator = () => nodes(f.render()).find(node => node.props.role === 'separator' && node.props['aria-label'] === '调整目录宽度');
+  const resized = () => observers.filter(observer => !observer.disconnected).forEach(observer => observer.callback());
+  // 知识区宽度先扣掉左侧功能条（44px）和目录旁那条 1px 的线，不到 1000 时右栏不停靠，所以 845 宽时目录可用的正好是 800。
+  const container = { clientWidth: 845 }; split().props.ref(container); f.render(); f.flushEffects();
   assert.equal(separator().props['aria-orientation'], 'vertical'); assert.equal(separator().props.tabIndex, 0);
-  assert.equal(separator().props['aria-valuemin'], 120); assert.equal(separator().props['aria-valuemax'], 552);
+  assert.equal(separator().props.title, '拖动调整宽度，双击还原'); assert.match(separator().props.className, /ww-split-line/);
+  assert.equal(separator().props['aria-valuemin'], 120); assert.equal(separator().props['aria-valuemax'], 560);
+  assert.equal(nodes(f.render()).filter(node => /ww-split-line/.test(node.props.className || '')).length, 1, '右栏不停靠时只有目录旁一条线');
   const captures = new Set(); let focused = 0;
   const target = { focus: () => focused++, setPointerCapture: id => captures.add(id), hasPointerCapture: id => captures.has(id), releasePointerCapture: id => captures.delete(id) };
   const event = (clientX, pointerId = 7) => ({ button: 0, clientX, pointerId, currentTarget: target, preventDefault() {} });
@@ -3152,23 +3155,52 @@ test('目录分隔支持拖动键盘与容器夹取，取消恢复起点且离�
   assert.equal(split().props.style['--ww-directory-width'], '350px'); assert.equal(focused, 1);
   separator().props.onPointerMove(event(700, 99)); assert.equal(split().props.style['--ww-directory-width'], '350px');
   separator().props.onPointerCancel(event(350)); assert.equal(split().props.style['--ww-directory-width'], '195px'); assert.equal(captures.size, 0);
-  const key = (name, shiftKey = false) => separator().props.onKeyDown({ key: name, shiftKey, preventDefault() {} });
+  const stored = () => JSON.parse(f.browser.localStorage.getItem('whalewing.split.knowledge-directory.v1') || 'null');
+  assert.equal(stored(), null, '撤回的拖动不记');
+  const key = (name, shiftKey = false) => separator().props.onKeyDown({ key: name, shiftKey, preventDefault() {}, currentTarget: target });
   key('ArrowRight'); assert.equal(separator().props['aria-valuenow'], 203);
   key('ArrowLeft', true); assert.equal(separator().props['aria-valuenow'], 179);
-  key('End'); assert.equal(separator().props['aria-valuenow'], 552);
+  key('End'); assert.equal(separator().props['aria-valuenow'], 560);
   key('Home'); assert.equal(separator().props['aria-valuenow'], 120);
   separator().props.onPointerDown(event(120)); separator().props.onPointerMove(event(-200)); separator().props.onPointerUp(event(-200));
   assert.equal(separator().props['aria-valuenow'], 120); assert.equal(captures.size, 0);
-  key('End'); separator().props.onPointerDown(event(552)); container.clientWidth = 700; observers[0].callback();
-  assert.equal(separator().props['aria-valuemax'], 408); assert.equal(separator().props['aria-valuenow'], 408); assert.equal(captures.size, 0);
-  separator().props.onPointerDown(event(408)); separator().props.onPointerMove(event(380)); key('Escape'); assert.equal(separator().props['aria-valuenow'], 408);
-  await button(f.render(), '技能中心').props.onClick(); f.render(); assert.equal(observers[0].disconnected, true);
-  await button(f.render(), '知识积累').props.onClick(); split().props.ref.current = container; f.flushEffects();
-  separator().props.onPointerDown(event(408)); f.unmount();
-  assert.equal(captures.size, 0); assert.equal(observers.at(-1).disconnected, true);
+  // 记的是占可用宽度的比例：窗口变窄后照比例缩，再夹在上限里。
+  key('End'); assert.equal(stored().ratio, 560 / 800);
+  separator().props.onPointerDown(event(560)); container.clientWidth = 700; resized();
+  assert.equal(separator().props['aria-valuemax'], 415); assert.equal(separator().props['aria-valuenow'], 415); assert.equal(captures.size, 0);
+  separator().props.onPointerDown(event(415)); separator().props.onPointerMove(event(380)); key('Escape'); assert.equal(separator().props['aria-valuenow'], 415);
+  separator().props.onDoubleClick(); assert.equal(stored(), null, '双击还原，记录删掉'); assert.equal(separator().props['aria-valuenow'], Math.round(Math.max(160, Math.min(655 * 0.244, 300))));
+  await button(f.render(), '技能中心').props.onClick(); f.render(); assert.ok(observers.every(observer => observer.disconnected));
+  await button(f.render(), '知识积累').props.onClick(); split().props.ref(container); f.render(); f.flushEffects();
+  separator().props.onPointerDown(event(160)); f.unmount();
+  assert.equal(captures.size, 0); assert.ok(observers.every(observer => observer.disconnected));
   const css = nodes(f.render()).find(node => node.type === 'style').props.children[0];
-  assert.match(css, /grid-template-columns:var\(--ww-directory-width,195px\) 8px minmax\(0,1fr\)/);
-  assert.match(css, /ww-directory-separator:focus-visible/); assert.match(css, /touch-action:none/);
+  assert.match(css, /grid-template-columns:var\(--ww-directory-width,195px\) 1px minmax\(0,1fr\)/);
+  assert.match(css, /\.ww-split-line\{[^}]*cursor:col-resize[^}]*touch-action:none/); assert.match(css, /\.ww-split-line:is\(:hover,\[data-dragging\],:focus-visible\)/);
+});
+
+test('知识积累右栏停靠时也能拖：往左拖变宽，宽度单独记', async () => {
+  const f = await fixture({ knowledge: async input => {
+    if (input.action === 'status') return { ok: true, value: { initialized: true, root: 'vault', limits: { maxGraphNodes: 200 } } };
+    if (input.action === 'search') return { ok: true, value: { notes: [], total: 0, truncated: false } };
+    if (input.action === 'overview') return { ok: true, value: { notes: [], tags: [], properties: [] } };
+    if (input.action === 'graph') return { ok: true, value: emptyGraph() };
+    assert.fail(input.action);
+  } });
+  f.browser.ResizeObserver = class { constructor(callback) { this.callback = callback; } observe() {} disconnect() {} };
+  await button(f.render(), '知识积累').props.onClick();
+  const split = () => nodes(f.render()).find(node => node.props.className === 'ww-knowledge-split');
+  const side = () => nodes(f.render()).find(node => node.props.role === 'separator' && node.props['aria-label'] === '调整右栏宽度');
+  split().props.ref({ clientWidth: 1244 }); f.render(); f.flushEffects();
+  // 右栏按整块减去功能条算：1200 宽时默认占五分之一夹在 220 到 300 之间，可拖到 200 到 480。
+  assert.equal(side().props['aria-valuenow'], 249); assert.equal(side().props['aria-valuemin'], 200); assert.equal(side().props['aria-valuemax'], 480);
+  assert.match(split().props.style.gridTemplateColumns, / 1px 249px$/);
+  const target = { focus() {}, setPointerCapture() {}, hasPointerCapture: () => false, releasePointerCapture() {} };
+  side().props.onPointerDown({ button: 0, clientX: 900, pointerId: 3, currentTarget: target, preventDefault() {} });
+  side().props.onPointerMove({ clientX: 850, pointerId: 3, preventDefault() {} }); side().props.onPointerUp({ pointerId: 3 });
+  assert.equal(side().props['aria-valuenow'], 299); assert.match(split().props.style.gridTemplateColumns, / 1px 299px$/);
+  assert.equal(JSON.parse(f.browser.localStorage.getItem('whalewing.split.knowledge-side.v1')).ratio, 299 / 1200);
+  assert.equal(f.browser.localStorage.getItem('whalewing.split.knowledge-directory.v1') ?? null, null, '两条线各记各的');
 });
 
 test('个人知识默认全库图，刷新保留阅读与编辑，往返标签和重点击不丢冲突草稿', async () => {

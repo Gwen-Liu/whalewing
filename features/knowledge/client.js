@@ -7,6 +7,7 @@ import { knowledgeContract } from './contract.js';
 import { registerFeature } from '../../src/shell/feature.js';
 import { createMarkdown } from '../../src/shell/markdown.js';
 import { useFeature } from '../../src/shell/feature.js';
+import { createSplit } from '../../src/split.js';
 
 /** 检查弹窗里的文风结果：几篇用了规则里不推荐的词，各是哪些（最多列十篇）。 */
 function styleLines(h, validation, t) {
@@ -152,51 +153,18 @@ export function createView(kit) {
       h('p', { className: 'ww-muted' }, t('submitHelp')));
   }
 
-  // 目录默认占可用宽度约四分之一，夹在 160 到 300 之间；拖过或用方向键调过以后按员工定的宽度走。
-  // 可用宽度是整块知识区减去左侧功能条和停靠着的右栏（reserveOf 按整块宽度算）。
+  // 两条可拖的分界线（共用的 src/split.js，2026-11-17 起右栏也能拖、拖过的宽度记在本机）：
+  // 目录默认占可用宽度约四分之一，夹在 160 到 300 之间；右栏默认占整块的五分之一，夹在 220 到 300 之间。
+  // 两栏的比例都按整块减去左侧功能条算，互不牵连：拖宽右栏时让的是中间，目录不跟着变窄。
+  // 只是目录最宽到让中间至少留 240（窄时留一半），右栏宽了它的上限跟着收。
   const preferredDirectoryWidth = size => Math.round(Math.max(160, Math.min(size * 0.244, 300)));
-  function useDirectorySplit(active, reserveOf) {
-    const frame = useRef(null);
-    const gesture = useRef(null);
-    const [width, setWidth] = useState(null);
-    const [total, setTotal] = useState(1200);
-    const available = Math.max(0, total - reserveOf(total));
-    const limits = size => ({ min: Math.min(120, Math.max(0, (size - 8) / 3)), max: Math.max(0, Math.min(560, size - 8 - Math.min(240, size / 2))) });
-    const clamp = (value, size = available) => { const range = limits(size); return Math.max(range.min, Math.min(value ?? preferredDirectoryWidth(size), Math.max(range.min, range.max))); };
-    const finish = (event, cancel = false) => {
-      const drag = gesture.current;
-      if (!drag || (event?.pointerId !== undefined && event.pointerId !== drag.id)) return;
-      gesture.current = null;
-      if (cancel) setWidth(drag.previous === null ? null : clamp(drag.previous));
-      if (drag.target.hasPointerCapture(drag.id)) drag.target.releasePointerCapture(drag.id);
-    };
-    useEffect(() => {
-      if (!active || !frame.current) return;
-      const resize = () => { finish(); setTotal(Math.max(0, frame.current.clientWidth)); };
-      resize();
-      const observer = new window.ResizeObserver(resize);
-      observer.observe(frame.current);
-      return () => { finish(); observer.disconnect(); };
-    }, [active]);
-    const range = limits(available);
-    const value = clamp(width);
-    return { frame, width: value, total, available, separator: {
-      role: 'separator', tabIndex: 0, 'aria-orientation': 'vertical', 'aria-valuemin': Math.round(range.min), 'aria-valuemax': Math.round(Math.max(range.min, range.max)), 'aria-valuenow': Math.round(value),
-      onPointerDown: event => { if (event.button !== 0 || gesture.current) return; event.preventDefault(); event.currentTarget.focus(); gesture.current = { id: event.pointerId, target: event.currentTarget, x: event.clientX, width: value, previous: width }; event.currentTarget.setPointerCapture(event.pointerId); },
-      onPointerMove: event => { const drag = gesture.current; if (!drag || event.pointerId !== drag.id) return; event.preventDefault(); setWidth(clamp(drag.width + event.clientX - drag.x)); },
-      onPointerUp: event => finish(event), onPointerCancel: event => finish(event, true), onLostPointerCapture: event => finish(event, true),
-      onKeyDown: event => {
-        if (event.key === 'Escape') { finish(undefined, true); return; }
-        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-        event.preventDefault();
-        setWidth(clamp(event.key === 'Home' ? range.min : event.key === 'End' ? range.max : value + (event.key === 'ArrowLeft' ? -1 : 1) * (event.shiftKey ? 24 : 8)));
-      },
-    } };
-  }
+  const directoryLimits = (size, taken) => { const room = Math.max(0, size - taken); return { min: Math.min(120, Math.max(0, room / 3)), max: Math.max(0, Math.min(560, room - Math.min(240, room / 2))) }; };
+  const useSplit = createSplit(React);
 
   // 尺寸跟着知识区走（不写死窗口宽度）：左侧功能条固定一列；够宽时左右两栏都停靠，中等宽度右栏改成点了才浮出来，再窄左栏也浮出来。
   const ribbonWidth = 44;
   const sideWidthOf = total => Math.round(Math.max(220, Math.min(total * 0.2, 300)));
+  const sideLimits = size => ({ min: Math.min(200, size / 4), max: Math.max(0, Math.min(520, size * 0.4)) });
   const dockOf = total => ({ left: total >= 640, right: total >= 1000 });
 
   return function KnowledgeView({ active, workbench }) {
@@ -207,8 +175,12 @@ export function createView(kit) {
     const [leftOverlay, setLeftOverlay] = useState(false);
     const [rightOpen, setRightOpen] = useState(true);
     const [rightOverlay, setRightOverlay] = useState(false);
-    const directorySplit = useDirectorySplit(active, total => ribbonWidth + (dockOf(total).right && rightOpen ? sideWidthOf(total) : 0));
-    const dock = dockOf(directorySplit.total), sideWidth = sideWidthOf(directorySplit.total);
+    const sideSplit = useSplit({ key: 'knowledge-side', active, side: 'end', preferred: size => sideWidthOf(size + ribbonWidth), limits: sideLimits, reserve: () => ribbonWidth, label: t('sideResize'), hint: t('splitHint') });
+    const sideWidth = sideSplit.width;
+    const sideTaken = dockOf(sideSplit.total).right && rightOpen ? sideWidth + 1 : 0;
+    const directorySplit = useSplit({ key: 'knowledge-directory', node: sideSplit.node, active, preferred: size => preferredDirectoryWidth(size - sideTaken), limits: size => directoryLimits(size, sideTaken),
+      reserve: () => ribbonWidth + 1, label: t('directoryResize'), hint: t('splitHint') });
+    const dock = dockOf(directorySplit.total);
     const leftShown = dock.left ? leftOpen : leftOverlay;
     const sideShown = dock.right ? rightOpen : rightOverlay;
     const [status, setStatus] = useState(null);
@@ -710,14 +682,16 @@ export function createView(kit) {
     const spaceCount = libraries.map(item => item.spaces.length ? t('librarySummary', { name: labelText(item.label), count: item.spaces.length }) : '').filter(Boolean);
     const summary = !status ? t('preparing') : !status.initialized ? '' : [`${t('myLibrary')}在 ${status.root}`, ...spaceCount, replaced && `规则和模板已换成新版，原来的 ${replaced.files.length} 个文件另存在 ${replaced.folder}`, edited.length > 0 && `有 ${edited.length} 个规则或模板和新版不一样，插件下次更新会换成新版，原来的另存`, status.bundle?.issue && `规则和模板没能更新：${status.bundle.issue}，下次打开会再试`].filter(Boolean).join(' · ');
     const bundleFiles = [...(replaced?.files || []), ...edited];
-    const columns = [`${ribbonWidth}px`, dock.left && leftOpen && `${directorySplit.width}px`, dock.left && leftOpen && '8px', 'minmax(0,1fr)', dock.right && rightOpen && `${sideWidth}px`].filter(Boolean).join(' ');
+    const columns = [`${ribbonWidth}px`, dock.left && leftOpen && `${directorySplit.width}px`, dock.left && leftOpen && '1px', 'minmax(0,1fr)', dock.right && rightOpen && '1px', dock.right && rightOpen && `${sideWidth}px`].filter(Boolean).join(' ');
     body = h('section', { className: 'ww-knowledge' },
       h('header', { className: 'ww-pagehead ww-knowledge-head' }, h('div', null, h('h2', null, t('pageTitle')), summary && h('p', { title: bundleFiles.length ? bundleFiles.join('\n') : undefined }, summary))),
       validation && h(Modal, { title: t('validation'), onClose: () => setValidation(null), className: 'ww-confirm' }, h('div', { className: 'ww-confirm-body' }, h('p', null, t(validation.valid ? 'valid' : 'invalid', { count: validation.notes })), ...(validation.issues || []).map((issue, i) => h('p', { key: i }, issue)), ...styleLines(h, validation, t)), h('footer', { className: 'ww-dialog-actions' }, button('closePanel', () => setValidation(null), false, { className: 'ww-primary' }))),
-      h('div', { className: 'ww-knowledge-split', ref: directorySplit.frame, style: { '--ww-directory-width': `${directorySplit.width}px`, gridTemplateColumns: columns } },
+      h('div', { className: 'ww-knowledge-split', ref: sideSplit.frame, style: { '--ww-directory-width': `${directorySplit.width}px`, gridTemplateColumns: columns } },
         ribbon, leftPanel,
-        dock.left && leftOpen && h('div', { ...directorySplit.separator, className: 'ww-directory-separator', 'aria-label': t('directoryResize') }),
-        center, right,
+        dock.left && leftOpen && h('div', { ...directorySplit.separator, className: 'ww-split-line ww-directory-separator' }),
+        center,
+        dock.right && rightOpen && h('div', { ...sideSplit.separator, className: 'ww-split-line ww-side-separator' }),
+        right,
         ((!dock.left && leftShown) || (!dock.right && sideShown)) && h('div', { className: 'ww-kn-scrim', 'aria-hidden': true, onClick: () => { setLeftOverlay(false); setRightOverlay(false); } })));
 
     body = h(React.Fragment, null, body, submitting && note && !note.source && h(SubmitDrawer, { note, libraries: submitLibraries, busy, t, onClose: () => setSubmitting(false), onSubmit: submitNote }),

@@ -367,7 +367,8 @@ export function createAiWebView(React, { useDiscard = ({ onClose }) => [onClose,
           h('label', { className: 'ww-ai-search' }, h('span', null, '查找 AI'), h('input', { type: 'search', value: query, placeholder: '名字、厂商或拿手戏', onChange: event => setQuery(event.target.value) })),
           current && h('button', { type: 'button', className: 'ww-primary', disabled: busy || !active, onClick: resume }, '继续使用'))),
       desk, sceneRow,
-      scene ? groups : h('div', { className: 'ww-ai-dir' }, ...groups),
+      // 名录和选了场景后的大卡都放进一块，在这块里滚，页面本身一屏放得下。
+      scene ? h('div', { className: 'ww-ai-body' }, ...groups) : h('div', { className: 'ww-ai-dir' }, ...groups),
       !scene && query.trim() && !entries.length && h('p', { className: 'ww-muted', role: 'status' }, '没有匹配的 AI 入口，换个关键词试试'),
       dialogs,
       active && editor && h(Editor, { key: editor.entry?.id ?? 'new', ...editor, manageAiWeb, notify, onSaved: acceptSaved, onClose: () => setEditor(null) }));

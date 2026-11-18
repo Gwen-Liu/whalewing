@@ -571,6 +571,61 @@ test('窄窗口：钉的页签放不下时收进页签条末尾的“更多”�
   });
 });
 
+// COM-23 需求§界面通用约定·两栏之间的分界线能拖（2026-11-17 用户定，共用的 src/split.js）
+test('分界线能拖：专家团队、定时任务、知识积累（目录和右栏）按住线拖宽，刷新后还是这个宽度，换窗口大小按比例跟着变；双击还原；窄了线藏起来', async t => {
+  await withPage(browser, t, { width: 1536, height: 864 }, async ({ page, errors }) => {
+    await openWhaleWing(page, dsh.url);
+    // [页签, 整块, 线的读屏名字, 调的是线右边那一栏]
+    const lines = [['专家团队', '.ww-team', '调整专家列表宽度', false], ['定时任务', '.ww-task-split', '调整任务列表宽度', false],
+      ['知识积累', '.ww-knowledge-split', '调整目录宽度', false], ['知识积累', '.ww-knowledge-split', '调整右栏宽度', true]];
+    const paneOf = (line, end) => line.locator(end ? 'xpath=following-sibling::*[1]' : 'xpath=preceding-sibling::*[1]');
+    const widthOf = async locator => Math.round((await locator.boundingBox()).width);
+    const dragged = {};
+    for (const [tab, frame, label, end] of lines) {
+      await openTab(page, tab);
+      const line = page.locator(`${frame} > .ww-split-line`).and(page.getByRole('separator', { name: label, exact: true }));
+      await line.waitFor();
+      assert.equal(await line.getAttribute('title'), '拖动调整宽度，双击还原', `${label}：鼠标停上去有提示`);
+      const pane = paneOf(line, end), before = await widthOf(pane), box = await line.boundingBox();
+      const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
+      await page.mouse.move(x, y);
+      await page.waitForFunction(element => getComputedStyle(element).cursor === 'col-resize', await line.elementHandle());
+      await page.mouse.down();
+      await page.mouse.move(x + (end ? -80 : 80), y, { steps: 6 });
+      assert.equal(await page.evaluate(() => String(getSelection())), '', `${label}：拖的时候不选中文字`);
+      await page.mouse.up();
+      const after = await widthOf(pane);
+      assert.ok(Math.abs(after - before - 80) <= 2, `${label}：宽了 80px（${before} → ${after}）`);
+      dragged[label] = after;
+    }
+    // 两条线各管各的：知识积累拖宽右栏时让的是中间，目录不跟着变窄。
+    assert.ok(Math.abs(await widthOf(page.locator('.ww-note-tree').first()) - dragged['调整目录宽度']) <= 1, '拖右栏不改目录宽度');
+    await openWhaleWing(page, dsh.url);
+    for (const [tab, frame, label, end] of lines) {
+      await openTab(page, tab);
+      const line = page.locator(`${frame} > .ww-split-line`).and(page.getByRole('separator', { name: label, exact: true }));
+      await line.waitFor();
+      assert.ok(Math.abs(await widthOf(paneOf(line, end)) - dragged[label]) <= 2, `${label}：刷新后还是拖过的宽度`);
+    }
+    // 记的是比例：窗口变窄，专家列表按比例跟着窄；双击还原成默认（和没拖过时一样宽）。
+    await openTab(page, '专家团队');
+    const roster = page.locator('nav.ww-roster'), teamLine = page.getByRole('separator', { name: '调整专家列表宽度', exact: true });
+    const wideTeam = await widthOf(page.locator('.ww-team'));
+    await resizeAndSettle(page, { width: 1276, height: 640 });
+    const ratio = dragged['调整专家列表宽度'] / (wideTeam - 1), narrowTeam = await widthOf(page.locator('.ww-team'));
+    assert.ok(Math.abs(await widthOf(roster) - ratio * (narrowTeam - 1)) <= 2, `专家列表按比例变窄（${dragged['调整专家列表宽度']} → ${await widthOf(roster)}）`);
+    await teamLine.dblclick();
+    await page.waitForFunction(() => !document.querySelector('.ww-team')?.style.getPropertyValue('--ww-split'));
+    assert.equal(await page.evaluate(() => localStorage.getItem('whalewing.split.experts.v1')), null, '双击还原，本机记录删掉');
+    // 窄到左栏收成一列头像时，线藏起来、拖不了，左栏自己画边。
+    await resizeAndSettle(page, { width: 700, height: 700 });
+    await page.waitForFunction(() => getComputedStyle(document.querySelector('.ww-team > .ww-split-line')).display === 'none');
+    assert.notEqual(await roster.evaluate(element => getComputedStyle(element).borderRightWidth), '0px', '左栏右边有边');
+    assert.equal(await page.evaluate(() => document.scrollingElement.scrollWidth <= innerWidth), true, '没有横向滚动');
+    assert.deepEqual(errors, []);
+  });
+});
+
 // 决策 2026-10-27（DSH 桌面版顶上 40px 是拖动区域、右上角是窗口按钮）
 test('桌面版：页头的页签和“…”都不在拖动区域和窗口按钮下面', async t => {
   await withPage(browser, t, async ({ page }) => {

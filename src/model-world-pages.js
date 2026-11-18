@@ -1,7 +1,7 @@
 import { worldBoards, worldDimensions } from '../features/model-world/contract.js';
 import { modelWorldVendors, modelWorldVariants, modelWorldPlatforms, portraitIdFor } from './model-world-roster.js';
 import { worldPersonas } from './model-world-persona.js';
-import { worldIndexAsOf, worldValuePlans } from './model-world-index.js';
+import { worldIndexAsOf, worldTierText, worldValuePlans } from './model-world-index.js';
 import { isDomesticVendor, worldPriceText } from './model-world-cny-prices.js';
 import { battleKit } from './model-world-battle-kits.js';
 import { probeTests, probeTest, probeQuestion, probeArtifact, probeFrameDocument, probeSvgUrl, probeSummary } from './model-world-probe.js';
@@ -56,7 +56,9 @@ export function createModelWorldPages(React, kit) {
   const chip = (label, on, onClick, props = {}) => h('button', { type: 'button', className: 'ww-mw-chip2', 'aria-pressed': on, onClick, ...props }, ...[].concat(label));
   const toggle = (label, on, onClick, props = {}) => h('button', { type: 'button', className: 'ww-mw-switch', role: 'switch', 'aria-checked': on, onClick, ...props }, h('i', { 'aria-hidden': true }), label);
   const mini = model => h('span', { className: 'ww-mw-mini' }, model ? h(Portrait, { vendorId: model.vendorId, modelId: model.id }) : null);
-  const bar = value => h('span', { className: 'ww-mw-bar' }, h('span', null, value ?? '—'), h('i', null, h('b', { style: { width: `${value ?? 0}%` } })));
+  // 表格里的成绩条（2026-11-17 用户：实力榜“不也一样嘛”）：和“我的模型”卡片同一套——条在前、数字在后，条长就是分数（满分 100），
+  // 条跟着这一栏的宽度伸缩、不写死，同一栏里每行的条从同一条竖线开始。
+  const bar = value => h('span', { className: 'ww-mw-bar' }, h('i', null, h('b', { style: { width: `${Math.max(0, Math.min(100, value ?? 0))}%` } })), h('span', null, value ?? '—'));
   const priceOf = model => { const input = worldPriceText(model, 'inputPerMTok'), output = worldPriceText(model, 'outputPerMTok'); return input || output ? `${input ?? '—'} / ${output ?? '—'}` : null; };
   const empty = (title, text, ...actions) => h('div', { className: 'ww-mw-empty' }, title && h('h3', null, title), h('p', null, text), actions.length > 0 && h('div', { className: 'ww-mw-actions' }, ...actions));
   const section = (title, sub, extra, ...children) => h('section', { className: 'ww-mw-sec' }, h('div', { className: 'ww-mw-sec-h' }, h('h3', null, title), sub && h('small', null, sub), h('span', { className: 'ww-mw-grow' }), extra), ...children);
@@ -214,7 +216,7 @@ export function createModelWorldPages(React, kit) {
       return h('article', { key: item.key, className: 'ww-mw-mycard', 'data-default': item.isDefault },
         h('header', null, mini(world), h('div', { className: 'ww-mw-grow' }, world ? nameButton(world) : h('strong', null, item.name), h('small', null, channel)),
           item.isDefault && h('span', { className: 'ww-mw-badge' }, '默认'), world && tierBadge(world.rating?.tier)),
-        world ? h('div', { className: 'ww-mw-dims' }, h('div', { className: 'ww-mw-dim' }, h('span', null, c.overall), h('i', null, h('b', { style: { width: `${Math.min(100, (world.rating?.overall ?? 0) * 1.5)}%` } })), h('span', null, world.rating?.overall ?? '—')),
+        world ? h('div', { className: 'ww-mw-dims' }, h('div', { className: 'ww-mw-dim' }, h('span', null, c.overall), h('i', null, h('b', { style: { width: `${Math.min(100, world.rating?.overall ?? 0)}%` } })), h('span', null, world.rating?.overall ?? '—')),
           ...dims.map(([key, dimension]) => h('div', { key, className: 'ww-mw-dim' }, h('span', null, dimension.name), h('i', null, h('b', { style: { width: `${world.rating?.[key] ?? 0}%` } })), h('span', null, world.rating?.[key] ?? '—'))))
           : h('p', { className: 'ww-mw-hint' }, '没对上模型世界的型号，看不到成绩和价格。可以手动指一个。'),
         h('small', { className: 'ww-mw-meta' }, [world && (priceOf(world) ? `官网价 ${priceOf(world)}` : '官网价未公布'), world && !item.exact && !item.mapped && `按名字对到 ${world.name}`, item.mapped && '手动对应', usedRow ? `用过 ${worldCount(usedRow.tokens)} tokens` : '还没用过'].filter(Boolean).join(' · ')),
@@ -291,7 +293,7 @@ export function createModelWorldPages(React, kit) {
               h('p', null, h('strong', null, `${c.index} ${band.best.index}`), ` · ${c.cost} ${worldCostText(band.best.cost)}`), band.alternatives.length > 0 && h('small', null, `${c.alternatives}：${band.alternatives.map(plan => `${label(plan)} ${plan.index}`).join('；')}`)))),
             h('div', { className: 'ww-mw-actions' }, h('h3', null, c.plans), button(rank.allPlans ? c.showFrontier : c.showAll, () => patchRank({ allPlans: !rank.allPlans }))),
             h('div', { className: 'ww-mw-table-wrap' }, h('table', { className: 'ww-mw-table' }, h('thead', null, h('tr', null, ...[c.rank, c.plans, c.index, c.cost, c.frontier].map(text => h('th', { key: text, scope: 'col' }, text)))),
-              h('tbody', null, ...plans.filter(plan => rank.allPlans || plan.frontier).map((plan, index) => h('tr', { key: plan.key, 'data-mine': mineIds.has(plan.modelId) }, h('td', { className: 'ww-mw-rank', 'data-top': index < 3 }, index + 1), h('td', { className: 'ww-mw-cell-model' }, planRow(plan)), h('td', null, bar(plan.index)), h('td', { className: 'ww-mw-score' }, worldCostText(plan.cost)), h('td', null, plan.frontier ? h('span', { className: 'ww-mw-badge' }, c.frontier) : null)))))));
+              h('tbody', null, ...plans.filter(plan => rank.allPlans || plan.frontier).map((plan, index) => h('tr', { key: plan.key, 'data-mine': mineIds.has(plan.modelId) }, h('td', { className: 'ww-mw-rank', 'data-top': index < 3 }, index + 1), h('td', { className: 'ww-mw-cell-model' }, planRow(plan)), h('td', { className: 'ww-mw-barcell' }, bar(plan.index)), h('td', { className: 'ww-mw-score' }, worldCostText(plan.cost)), h('td', null, plan.frontier ? h('span', { className: 'ww-mw-badge' }, c.frontier) : null)))))));
       } else {
         const metric = model => model.rating[rank.board], rated = list.filter(model => metric(model) !== null).sort((a, b) => (rank.direction === 'asc' ? 1 : -1) * (metric(a) - metric(b)) || (b.rating.overall ?? 0) - (a.rating.overall ?? 0) || a.id.localeCompare(b.id));
         const size = 20, pages = Math.max(1, Math.ceil(rated.length / size)), page = Math.min(rank.page, pages - 1), rows = rated.slice(page * size, page * size + size);
@@ -303,7 +305,7 @@ export function createModelWorldPages(React, kit) {
               h('td', { className: 'ww-mw-rank', 'data-top': rank.direction !== 'asc' && place <= 3 }, place),
               h('td', { className: 'ww-mw-cell-model' }, h('div', null, mini(model), h('div', { className: 'ww-mw-model-name' }, nameButton(model), h('small', null, [vendorName(model), model.releaseDate, mineIds.has(model.id) && '你配好的'].filter(Boolean).join(' · '))), pickButton(model))),
               h('td', null, tierBadge(model.rating.tier)), h('td', { className: 'ww-mw-score' }, model.rating.overall ?? c.noScore, model.rating.effort && h('small', { className: 'ww-mw-effort' }, worldEffortText(model.rating.effort, c))),
-              ...dims.map(([key]) => h('td', { key }, bar(model.rating[key]))), h('td', { className: 'ww-mw-price' }, priceOf(model) ?? '—')); })))),
+              ...dims.map(([key]) => h('td', { key, className: 'ww-mw-barcell' }, bar(model.rating[key]))), h('td', { className: 'ww-mw-price' }, priceOf(model) ?? '—')); })))),
           pages > 1 && h('footer', { className: 'ww-mw-page' }, h('span', null, `${page * size + 1}–${page * size + rows.length} / ${rated.length}`), button(c.previous, () => setRank(previous => ({ ...previous, page: page - 1 })), { disabled: page === 0 }), button(c.next, () => setRank(previous => ({ ...previous, page: page + 1 })), { disabled: page >= pages - 1 })));
       }
       return h(React.Fragment, null, boards, toolbar, body, h('p', { className: 'ww-mw-hint' }, '价格：国产模型是厂商官网的人民币标价，海外模型是公开目录里的美元价，都按每百万 tokens；转发站以账单为准。'));
@@ -526,7 +528,7 @@ export function createModelWorldPages(React, kit) {
         button('并排比较', event => open({ kind: 'compare', ids: picks }, event.currentTarget), { disabled: pickedModels.length < 2, title: pickedModels.length < 2 ? '至少放两个' : undefined }),
         button(pickedModels.length === 2 ? '动画对决' : '去对决台', event => pickedModels.length === 2 ? open({ kind: 'duel', ids: picks }, event.currentTarget) : toDuel(picks), { disabled: pickedModels.length > 2, title: pickedModels.length > 2 ? '动画对决只能两位' : undefined }),
         button('去测智', () => toProbe(pickedMine.map(item => item.key)), { disabled: !pickedMine.length || !mine?.supported.probe, title: pickedMine.length ? undefined : '测智只能测你在 DSH 里配好的模型' }), button(c.clear, () => setPicks([]))),
-      world && h('details', { className: 'ww-mw-about' }, h('summary', null, c.about), h('p', null, c.method.replace('{asOf}', world.index?.asOf ?? worldIndexAsOf)), h('p', null, c.valueMethod), world.available && h('p', null, `${c.generated} ${worldTime(world.generatedAt) ?? c.unknown} · ${c.accepted} ${worldTime(world.acceptedAt) ?? c.unknown}`), h('p', null, c.artCredit), ...world.attributions.map(item => h('p', { key: item.name }, link(item.url, item.name), ' · ', item.licenseUrl ? link(item.licenseUrl, item.license) : item.license))),
+      world && h('details', { className: 'ww-mw-about' }, h('summary', null, c.about), h('p', null, c.method.replace('{asOf}', world.index?.asOf ?? worldIndexAsOf).replace('{tiers}', worldTierText())), h('p', null, c.valueMethod), world.available && h('p', null, `${c.generated} ${worldTime(world.generatedAt) ?? c.unknown} · ${c.accepted} ${worldTime(world.acceptedAt) ?? c.unknown}`), h('p', null, c.artCredit), ...world.attributions.map(item => h('p', { key: item.name }, link(item.url, item.name), ' · ', item.licenseUrl ? link(item.licenseUrl, item.license) : item.license))),
       dialogs(),
       viewer && h(PortraitViewer, { key: viewer.key, items: viewer.items, start: viewer.index, returnFocus: viewer.returnFocus, onClose: () => setViewer(null), notify, copy: c }),
       keyWindow && world?.index && h(KeyWindow, { index: world.index, api, notify, onClose: () => setKeyWindow(false), onChange: index => setWorld(previous => previous && { ...previous, index }), returnFocus: trigger.current, fallbackFocus: fallback, copy: c }));

@@ -157,8 +157,8 @@ const readRows = page => rankingRows(page).evaluateAll(rows => rows.map(row => {
   const cells = row.querySelectorAll('td');
   return { name: cells[1]?.querySelector('strong, .ww-mw-model-name strong, div strong')?.textContent.trim() || cells[1]?.innerText.split('\n')[0].trim(), tier: cells[2]?.innerText.trim(), score: Number.parseFloat(cells[3]?.innerText) };
 }));
-/** 需求§实力榜：T0 ≥ 52、T1 ≥ 44、T2 ≥ 34，其余 T3；按 AA 榜单显示的整数（四舍五入后）比较。 */
-const tierOf = score => { const shown = Math.round(score); return shown >= 52 ? 'T0' : shown >= 44 ? 'T1' : shown >= 34 ? 'T2' : 'T3'; };
+/** 需求§实力榜：T0 ≥ 50、T1 ≥ 30、T2 ≥ 20，其余 T3（2026-11-18 换 AA v5 后重定）；按 AA 榜单显示的整数（四舍五入后）比较。 */
+const tierOf = score => { const shown = Math.round(score); return shown >= 50 ? 'T0' : shown >= 30 ? 'T1' : shown >= 20 ? 'T2' : 'T3'; };
 
 // 需求§模型世界·数据（只收录有角色立绘的 18 家厂商）
 test('角色图鉴：19 位角色各一张卡（18 家厂商加 DeepSeek Flash），每张有立绘、梯队或最强型号、模型数和“查看大图”', async t => {
@@ -283,7 +283,7 @@ test('实力榜：五个榜单，默认综合实力从高到低；点箭头改�
   });
 });
 
-// 需求§实力榜（按指数分梯队：T0 ≥ 52、T1 ≥ 44、T2 ≥ 34，其余 T3；按 AA 榜单显示的整数）
+// 需求§实力榜（按指数分梯队：T0 ≥ 50、T1 ≥ 30、T2 ≥ 20，其余 T3；按 AA 榜单显示的整数）
 test('实力榜每一行的梯队都和综合实力分对得上', async t => {
   await withPage(browser, t, async ({ page }) => {
     await openWhaleWing(page, dsh.url);

@@ -1,5 +1,6 @@
 import { registerBuiltin } from '../../src/features.js';
 import { apply as registerTool, applyMemory as registerMemoryTool } from './tool.js';
+import { applyImage as registerImageTool } from './image.js';
 import { ExpertMemory } from './memory.js';
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain';
 
@@ -310,6 +311,8 @@ export async function apply(ctx, config) {
   registerBuiltin(ctx, 'experts');
   ctx.inject(['tools', 'whalewingExperts'], scope => registerTool(scope));
   ctx.inject(['tools', 'whalewingExperts', 'sandboxPolicy', 'sessionProjections'], scope => registerMemoryTool(scope));
+  // 生图：借 DSH 配好的渠道出图，存进会话工作目录（2026-11-17 用户定）。
+  ctx.inject(['tools', 'fs', 'workingDirectory', 'sandboxPolicy'], scope => registerImageTool(scope));
   const domain = await ctx.storageDomain.open(expertDomain);
   ctx.effect(() => () => domain.close(), 'whalewing expert storage');
   const changeDomain = await ctx.storageDomain.open(expertChangeDomain);

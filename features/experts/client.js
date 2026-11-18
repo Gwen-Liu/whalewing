@@ -3,6 +3,7 @@ import { registerEntries } from './entries.js';
 import { expertContract } from './contract.js';
 import { parseExpertTemplate } from './template.js';
 import { registerFeature, useFeature } from '../../src/shell/feature.js';
+import { createSplit } from '../../src/split.js';
 import { createExpertDetail } from './detail.js';
 import { createTeam } from './team.js';
 import { expertActivity, rosterOf, sortInUse, daysAgo, defaultIdleDays } from './roster.js';
@@ -156,11 +157,16 @@ export function createView(kit) {
   }
 
   const Team = createTeam(kit);
+  // 左栏和右边之间那条线能拖（共用的 src/split.js）：没拖过时左栏占约四分之一，夹在 12.5rem 到 18rem（样式里）；拖的范围是 176px 到一半，右边至少留 320px。
+  const useSplit = createSplit(React);
+  const rosterLimits = size => ({ min: Math.min(176, size / 3), max: Math.max(0, Math.min(size * 0.5, size - 320)) });
+  const rosterPreferred = size => Math.max(200, Math.min(size * 0.24, 288));
   const IdleSelect = Team.IdleSelect;
   const dayText = (t, days) => days === 0 ? t('teamToday') : days === 1 ? t('teamYesterday') : t('teamDaysAgo', { days });
 
   return function ExpertsView({ active, workbench, SessionProvider, renderSlot }) {
     const { api, t, notify, busy, run, setError: reportError, button, field, row, bind, openAssistant } = useFeature(React, workbench, 'experts');
+    const split = useSplit({ key: 'experts', active, preferred: rosterPreferred, limits: rosterLimits, reserve: () => 1, label: t('teamResize'), hint: t('splitHint') });
     const setError = (message, action) => reportError(message, action || { label: t('retry'), run: () => refreshTab() });
     const [confirm, setConfirm] = useState(null);
     const [cwd, setCwd] = useState('');
@@ -345,8 +351,9 @@ export function createView(kit) {
       busyCount(['running', 'queued']) && t('teamHeadRunning', { count: busyCount(['running', 'queued']) }), busyCount(['waiting']) && t('teamHeadWaiting', { count: busyCount(['waiting']) })].filter(Boolean).join(' · ');
     const body = h('section', { className: 'ww-experts' },
       h(PageHead, { title: t('experts'), summary: headSummary, actions: createMenu }),
-      h('div', { className: 'ww-team' },
+      h('div', { className: 'ww-team', ref: split.frame, style: split.style('--ww-split') },
         h(Team.Roster, { t, entries: inUse, selection: showLibrary ? selection : current ? { kind: 'expert', id: current.role.id } : null, statusFor, sourceLabelFor: role => role.source ? labelText(role.source.label) : '', onSelect: setSelection, libraryCount: roster.length, idleDays: registry.roster?.idleDays ?? defaultIdleDays, settings }),
+        h('div', { ...split.separator, className: 'ww-split-line' }),
         middle),
       confirmDialog,
       detailRole && h(ExpertDetail, { key: `${detailRole.id}-${detail.tab}`, initialTab: detail.tab, api, expert: detailRole, t, notify, onClose: () => setDetail(null),

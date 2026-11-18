@@ -161,7 +161,7 @@ export const styles = `
 .ww-read-nav:disabled{opacity:.3}
 .ww-read-tabs{flex:none;display:flex;gap:6px;flex-wrap:wrap}
 .ww-read-board{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);grid-template-rows:minmax(0,1fr);gap:16px}
-.ww-read[data-form=tabs] .ww-read-board{grid-template-columns:minmax(0,1fr);padding-bottom:46px}
+.ww-read[data-form=tabs] .ww-read-board{grid-template-columns:minmax(0,1fr)}
 .ww-read[data-form=tabs][data-tab=news] .ww-read-side,.ww-read[data-form=tabs]:not([data-tab=news]) .ww-read-news,
 .ww-read[data-form=tabs][data-tab=tip] :is(.ww-read-book,.ww-read-rv),.ww-read[data-form=tabs][data-tab=read] .ww-read-tip{display:none}
 .ww-read-pane{min-width:0;min-height:0;display:flex;flex-direction:column;gap:8px}

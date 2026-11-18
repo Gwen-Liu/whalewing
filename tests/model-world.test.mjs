@@ -6,7 +6,7 @@ import path from 'node:path';
 import { z } from 'zod';
 import { acceptWorldSnapshot, buildWorldCatalog, curateWorldSnapshot, fetchWorldSnapshot, ModelWorld, worldCatalogUrl, worldLimits, worldPriceUrl } from '../features/model-world/model-world.js';
 import { rateWorldModels } from '../src/model-world-rating.js';
-import { worldIndex, worldValuePlans, worldTierFor, matchWorldIndex, worldNameKey } from '../src/model-world-index.js';
+import { worldIndex, worldValuePlans, worldTierFor, worldTierText, worldIndexVersion, matchWorldIndex, worldNameKey } from '../src/model-world-index.js';
 import { worldBenchScores } from '../src/model-world-bench.js';
 import { parseAaName, groupAaModels } from '../src/model-world-aa.js';
 import { collectEpochScores, epochModelName, parseCsv } from '../scripts/update-model-bench.mjs';
@@ -131,25 +131,31 @@ test('综合实力取 AA 指数最强档，梯队按指数划分；分项按百�
   const by = Object.fromEntries(rated.map(model => [model.id, model]));
   const opus = by['anthropic/claude-opus-5-5'], sonnet = by['anthropic/claude-sonnet-5-5'], fable = by['anthropic/claude-fable-5-1'];
   assert.ok(sonnet.rating.composite > opus.rating.composite, '分项百分位 Sonnet 更高');
-  assert.deepEqual([opus.rating.overall, opus.rating.tier, opus.rating.effort], [57.6, 'T0', 'max'], '综合实力仍以 AA 最强档为准，Opus 5.5 第一');
+  assert.deepEqual([opus.rating.overall, opus.rating.tier, opus.rating.effort], [59.1, 'T0', 'max'], '综合实力仍以 AA 最强档为准，Opus 5.5 第一');
   assert.ok(sonnet.rating.overall < opus.rating.overall);
-  assert.deepEqual([fable.rating.tier, fable.rating.effort], ['T0', 'max']);
-  assert.equal(opus.efforts.length, 5); assert.deepEqual(opus.efforts[2], { effort: 'high', index: 53.6, cost: 182.25 }, '成本按 GPT-5.6 Luna 轻度 ≈ $0.01 = 1 折算');
+  assert.deepEqual([fable.rating.overall, fable.rating.tier, fable.rating.effort], [50, 'T0', 'xhigh'], 'v5 里 Fable 5.1 最强的是 xhigh 档（max 反而 49.2）；50 分算 T0');
+  assert.equal(opus.efforts.length, 5); assert.deepEqual(opus.efforts[2], { effort: 'high', index: 51.8, cost: 173.24 }, '成本按 $0.02 = 1 折算（v5 起）');
   assert.equal(by.a.rating.overall, null, 'AA 未收录的模型不进综合实力榜'); assert.equal(by.a.rating.tier, null);
   assert.ok(by.d.rating.reasoning > by.a.rating.reasoning); assert.equal(by.a.rating.coverage, 3);
   assert.equal(by.lone.rating.composite, null, '只有一项评测不给加权分');
-  assert.deepEqual([52, 51, 44, 43, 34, 33].map(worldTierFor), ['T0', 'T1', 'T1', 'T2', 'T2', 'T3']);
+  // 2026-11-18 换 v5 后的门槛：按 AA 显示的整数 T0 ≥ 50、T1 ≥ 30、T2 ≥ 20（49.5 显示为 50，算 T0）。
+  assert.deepEqual([50, 49.5, 49.4, 30, 29.5, 29.4, 20, 19.5, 19.4].map(worldTierFor), ['T0', 'T0', 'T1', 'T1', 'T1', 'T2', 'T2', 'T2', 'T3']);
+  assert.equal(worldTierText(), 'T0 ≥ 50，T1 ≥ 30，T2 ≥ 20', '界面上写的门槛从同一组数生成');
+  assert.deepEqual([worldIndexVersion, worldIndex.length], ['5', 53], '随包是 AA 智能指数 v5');
 });
 
 test('性价比先按相对消耗分档，档内推荐能力最强的模型与思考强度；同价最强标记无被支配方案', () => {
   const { bands, plans } = worldValuePlans(worldIndex.map(entry => ({ ...entry, id: `${entry.vendorId}/${entry.key}` })));
   const best = Object.fromEntries(bands.map(band => [band.id, band.best && `${band.best.name} ${band.best.effort} ${band.best.index}`]));
-  assert.equal(best.c200, 'Claude Opus 5.5 high 53.6', '100–200 消耗档推荐 Opus 5.5 高强度思考');
-  assert.equal(best.c100, 'GPT-6.1 Sol max 51.8');
-  assert.equal(best['c-max'], 'Claude Opus 5.5 max 57.6');
+  assert.equal(best.c200, 'GPT-6.2 Astra max 62.1', '100–200 消耗档推荐 GPT-6.2 Astra 最强档');
+  assert.equal(best.c100, 'GPT-6.2 Sol max 57.3');
+  assert.equal(best['c-max'], 'Claude Fable 5.2 max 64.6');
+  // v5 的评测任务更重，基准 $0.02 = 1，7 个档位都有方案。
+  assert.ok(bands.every(band => band.best), '每个消耗档都有推荐');
   assert.ok(bands.every(band => band.alternatives.length <= 3 && band.alternatives.every(plan => !band.best || plan.index <= band.best.index)));
   const key = (name, effort) => plans.find(plan => plan.name === name && plan.effort === effort);
-  assert.equal(key('Claude Opus 5.5', 'high').frontier, true);
+  assert.equal(key('GPT-6.2 Sol', 'xhigh').frontier, true);
+  assert.equal(key('Claude Opus 5.5', 'high').frontier, false, 'GPT-6.2 Astra 中等更省又更强');
   assert.equal(key('Gemini 4 Argon', 'high').frontier, false, '更贵且更弱的方案不算同价最强');
   assert.equal(plans.some(plan => plan.name === 'Muse Wonder Full'), false, '未公布成本的方案不参与性价比');
   assert.ok(plans.every((plan, index) => index === 0 || plans[index - 1].index >= plan.index));

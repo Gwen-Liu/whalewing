@@ -64,9 +64,10 @@ test('全栏改版后的双语词条与样式快照', () => {
   // 同日真模型跑了一期之后：今日一招在“今天这一期整理过但没挑出技巧”时的两句（标题和说明），加 2 个。
   // 同日定时任务“打开原会话”遇到还空白的任务会话不打开、改成提示：“还没运行过”和“下一次是几点”2 个。
   // 同日“技能插件”改名“技能中心”（页签和页标题两个词条改字，全部功能的搜索关键词里留着旧名字），条数不变。
-  assert.equal(Object.keys(zh).length, 1116); assert.equal(Object.keys(en).length, 1116);
-  assert.equal(hash(sorted(zh)), 'f8ff611caff50ac4f7ec37ab429dd8f9c59892213dc064486bf9aefb4e155a41');
-  assert.equal(hash(sorted(en)), 'f92bed610771e98d3cb8dff9c91d1321ae5642df45bd841cd1882177c67ca7c9');
+  // 2026-11-17 分界线都能拖（共用的 src/split.js）：线上的提示一句（共用）、专家列表、任务列表、知识积累右栏三条线的读屏名字，加 4 个。
+  assert.equal(Object.keys(zh).length, 1120); assert.equal(Object.keys(en).length, 1120);
+  assert.equal(hash(sorted(zh)), '35cf0c3b2adf10418e401606d4734df1172ec93147690be2cb9a074aeff721f7');
+  assert.equal(hash(sorted(en)), '690f1a790f1057c4dd859bf031dad404549cccca7e94adc5f1b8babb07cb65d9');
   // 没有扩展改名时，界面上的名字和原来逐字相同。
   const fill = text => text.replaceAll('{assistant}', '小鲸助手').replaceAll('{assistantShort}', '小鲸');
   assert.deepEqual([zh.question, zh.assistantOpen, zh.assistantStart, zh.skillEdit].map(fill), ['小鲸助手', '打开小鲸助手', '开始与小鲸协作', '与小鲸编辑技能']);
@@ -100,7 +101,14 @@ test('全栏改版后的双语词条与样式快照', () => {
   // 同日勾选一项统一成 ww-choice：删掉 ww-check、ww-kit-check-label 两套样式，插件包挑技能那一列名字的加粗并进 .ww-page label.ww-choice strong。
   // 2026-11-15 MCP 改存 DSH 配置（0.2.2-rc.3.2）：MCP 列表的状态一栏加宽、状态下面一行原因（ww-kit-state）、名字后的来源小标签、
   // 详情里一项一块的密钥（ww-kit-secret，填密钥时的输入行）、试连结果（ww-kit-probe）、升级后的搬家提示（ww-kit-moved）。
-  assert.equal(hash(css), '32427dd205383968caee25de4dfd56ea5553b618c365a3cd19427d11d77e5504');
+  // 2026-11-16 小鲸收起时改成圆形悬浮球（ww-fab-mark 鲸尾和水纹、ww-fab-badge 等审批的数、悬停弹出名字、四段动效和减少动效时停下）；
+  // 专家对话、AI 网页、每日阅读窄屏底部写死的留白（5rem、5.5rem、46px）删掉；页面不给球让位、不随球拖动挪（同日用户看后定），
+  // 右下角两条横栏让出的宽度 --ww-fab-safe 写成球默认位置的占地（.ww-page 上），不再由脚本按拖到的位置改。
+  // 同日 AI 网页一屏放得下：页面占满主区高度，名录（选了场景是大卡 ww-ai-body）在自己那块里滚；窗口矮于 760 时收起剪贴板说明、收紧提问台。
+  // 2026-11-17 分界线都能拖：共用的 ww-split-line（1px 的线、中间一小截把手、两边各多 4px 好按，悬停和拖着换品牌色）搬到外壳；
+  // 专家团队两张分开的卡片合成一整块（和定时任务、知识积累一样，左栏垫一层底色），窄了线藏起来、左栏自己画边；
+  // 定时任务列表右边的边框换成那条线；知识积累目录旁 8px 的旧分隔条换成那条线，右栏前也加一条。
+  assert.equal(hash(css), 'e9c9fe2e9ce335dceefa2567ec47330c9ffcdef802dee8a0f553329597323682');
   assert.ok(css.includes('.ww-book-scroll{--dsh-scrollbar-width:14px;--dsh-scrollbar-thumb-border:4px;'), '正文滚动条够宽好拖');
   assert.equal(zh.newsHeadline, '来源标题'); assert.equal(en.newsHeadline, 'Source headline'); assert.equal(zh.newsViewSource, '查看来源');
   assert.equal(zh.library, '书架'); assert.equal(zh.learningTip, 'AI 使用技巧'); assert.equal(zh.libraryAll, '全部'); assert.equal(zh.libraryDailyBadge, '常看');

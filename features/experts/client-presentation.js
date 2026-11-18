@@ -115,6 +115,7 @@ export const zh = {
   "expertFilter_scheduled": "有定时任务",
   "expertNoMatch": "没有匹配的专家，换个词或筛选试试",
   "teamRoster": "在用的专家",
+  "teamResize": "调整专家列表宽度",
   "teamInUse": "在用",
   "teamInUseCount": "在用 · {count}",
   "teamAdd": "添加",
@@ -202,11 +203,12 @@ export const styles = [
     .ww-picker-trigger{border:0;background:transparent;color:var(--dsw-alias-label-secondary);border-radius:var(--dsw-radius-sm,6px);font:inherit;font-size:13px;display:inline-flex;align-items:center;gap:6px;padding:4px 8px;cursor:pointer;white-space:nowrap;max-width:min(15rem,40vw)}.ww-picker-trigger:hover,.ww-picker-trigger[aria-expanded=true]{background:var(--dsw-alias-interactive-bg-hover)}.ww-picker-popover{position:fixed;inset:auto;margin:0;width:min(328px,calc(100vw - 24px));max-height:min(420px,calc(100dvh - 32px));overflow:auto;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l2);border-radius:14px;padding:10px;box-shadow:0 8px 24px var(--dsw-alias-border-l3);font:inherit;font-size:13px}.ww-picker-popover input{box-sizing:border-box;width:100%;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-2);color:inherit;padding:8px 10px;margin-bottom:8px}.ww-picker-options button{display:flex;align-items:center;gap:10px;width:100%;border:0;border-radius:9px;background:transparent;color:inherit;text-align:left;padding:8px;cursor:pointer;font:inherit}.ww-picker-options button:hover,.ww-picker-options button[aria-pressed=true]{background:var(--dsw-alias-interactive-bg-hover)}.ww-picker-options strong{font-weight:500;display:block}.ww-picker-options small{display:block;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:1.5;margin-top:2px}.ww-picker-popover :focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:-2px}.ww-picker-group{margin:8px 8px 2px;font-size:11.5px;color:var(--dsw-alias-label-secondary)}.ww-picker-options .ww-picker-more{margin-top:4px;border-top:1px solid var(--dsw-alias-border-l1);border-radius:0 0 9px 9px;color:var(--dsw-alias-label-secondary)}`,
 ``,
 // 2026-11-08 第三版：三栏（左栏在用的专家、中间专家说的话或专家库，右边小鲸在外壳的停靠栏）。宽度全按所在区域走，窄了左栏收成一列头像，再窄收到顶上一排。
+// 2026-11-17 用户说两张分开的卡片“和其他模块一眼看过去全不一样，比较割裂”：改成和定时任务、知识积累一样的一整块，左栏垫一层底色，中间一条能拖的线（共用的 ww-split-line）。
 `.ww-editor-fields{border:0;margin:0;min-width:0}
 .ww-experts{height:100%;min-height:0;display:flex;flex-direction:column;container:ww-team/inline-size}
 .ww-experts>.ww-pagehead{flex:none;margin-bottom:14px}
-.ww-team{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:minmax(0,clamp(12.5rem,24%,18rem)) minmax(0,1fr);gap:clamp(.625rem,1.2cqi,1rem)}
-.ww-page .ww-team-panel{min-width:0;min-height:0;display:flex;flex-direction:column;background:var(--ww-surface);border:1px solid var(--ww-line);border-radius:16px;box-shadow:var(--dsw-elevation-soft,none);overflow:hidden}
+.ww-team{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:minmax(0,var(--ww-split,clamp(12.5rem,24%,18rem))) 1px minmax(0,1fr);background:var(--ww-surface);border:1px solid var(--ww-line);border-radius:16px;box-shadow:var(--dsw-elevation-soft,none);overflow:hidden}
+.ww-page .ww-team-panel{min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden}.ww-page .ww-team-panel.ww-roster{background:var(--ww-surface-2)}
 .ww-experts [data-tone]{--ww-tone:var(--ww-ink-2)}.ww-experts [data-tone=run]{--ww-tone:var(--dsw-alias-state-business-primary,var(--ww-brand))}.ww-experts [data-tone=wait]{--ww-tone:var(--ww-warn)}.ww-experts [data-tone=ok]{--ww-tone:var(--ww-ok)}.ww-experts [data-tone=err]{--ww-tone:var(--ww-err)}.ww-experts [data-tone=idle]{--ww-tone:var(--ww-ink-3)}
 .ww-roster-group{margin:0;padding:.875rem 1rem .25rem;font-size:11.5px;color:var(--ww-ink-2)}
 .ww-roster-list{list-style:none;margin:0;padding:0 .375rem;display:flex;flex-direction:column;gap:2px;flex:0 1 auto;min-height:0;overflow:auto}
@@ -217,7 +219,7 @@ export const styles = [
 .ww-page .ww-roster-item:focus-visible{outline:2px solid var(--ww-brand);outline-offset:-2px}
 .ww-roster-avatar{position:relative;display:inline-flex;flex:none}
 .ww-roster-avatar .ww-avatar{border-radius:999px}
-.ww-roster-avatar:is([data-tone=run],[data-tone=wait],[data-tone=ok],[data-tone=err])::after{content:'';position:absolute;right:-1px;bottom:-1px;width:10px;height:10px;box-sizing:border-box;border-radius:50%;border:2px solid var(--ww-surface);background:var(--ww-tone)}
+.ww-roster-avatar:is([data-tone=run],[data-tone=wait],[data-tone=ok],[data-tone=err])::after{content:'';position:absolute;right:-1px;bottom:-1px;width:10px;height:10px;box-sizing:border-box;border-radius:50%;border:2px solid var(--ww-surface-2);background:var(--ww-tone)}
 .ww-roster-icon{width:34px;height:34px;align-items:center;justify-content:center;border-radius:50%;background:var(--ww-surface-2);color:var(--ww-ink-2)}
 .ww-roster-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
 .ww-roster-text strong{display:flex;align-items:center;gap:6px;min-width:0;font-size:13.5px;font-weight:500;line-height:1.45}
@@ -243,7 +245,6 @@ export const styles = [
 .ww-state{flex:none;padding:0 .4375rem;border-radius:999px;font-size:11.5px;line-height:1.6;color:var(--ww-tone);background:color-mix(in srgb,var(--ww-tone) 12%,transparent)}
 .ww-page .ww-pane-new{margin-left:auto;display:inline-flex;align-items:center;gap:.25rem;min-height:0;padding:.25rem .625rem;font-size:12.5px;white-space:nowrap}
 .ww-expert-conversation{flex:1;min-height:0}
-.ww-workspace-bubble .ww-expert-conversation{padding-bottom:5rem}
 .ww-pane-empty{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.625rem;padding:2rem;text-align:center;overflow:auto}
 .ww-pane-empty .ww-avatar{border-radius:999px}
 .ww-pane-empty p{margin:0;max-width:40ch;font-size:13px;line-height:1.7;color:var(--ww-ink-2)}
@@ -284,8 +285,8 @@ export const styles = [
 .ww-starter .ww-avatar{border-radius:999px;flex:none}
 .ww-starter strong{font-size:13.5px;font-weight:500}
 .ww-deleted-experts{display:flex;flex-direction:column;gap:.375rem;padding-top:.5rem;border-top:1px solid var(--ww-line)}
-@container ww-team (max-width:40rem){.ww-team{grid-template-columns:auto minmax(0,1fr)}.ww-roster-text,.ww-roster-group,.ww-roster-hint,.ww-roster-empty{display:none}.ww-roster-list{padding:.5rem .375rem 0}.ww-page .ww-roster-item{justify-content:center;padding:.375rem}.ww-roster-sep{margin:.5rem .5rem}.ww-roster-foot{align-items:center;padding:.5rem .375rem}.ww-roster-foot .ww-action-menu{align-self:center}.ww-roster-foot .ww-menu-trigger{font-size:0;gap:0}.ww-lib-last{display:none}}
-@container ww-team (max-width:30rem){.ww-team{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}.ww-page .ww-team-panel.ww-roster{flex-direction:row;align-items:center}.ww-roster-list{flex-direction:row;overflow-x:auto;overflow-y:hidden;padding:.25rem}.ww-roster-sep{width:1px;height:auto;align-self:stretch;margin:.375rem 0}.ww-roster-foot{margin:0 0 0 auto;border:0;padding:.375rem}.ww-pane-actions .ww-quiet{display:none}}`,
+@container ww-team (max-width:40rem){.ww-team{grid-template-columns:auto minmax(0,1fr)}.ww-team>.ww-split-line{display:none}.ww-page .ww-team-panel.ww-roster{border-right:1px solid var(--ww-line)}.ww-roster-text,.ww-roster-group,.ww-roster-hint,.ww-roster-empty{display:none}.ww-roster-list{padding:.5rem .375rem 0}.ww-page .ww-roster-item{justify-content:center;padding:.375rem}.ww-roster-sep{margin:.5rem .5rem}.ww-roster-foot{align-items:center;padding:.5rem .375rem}.ww-roster-foot .ww-action-menu{align-self:center}.ww-roster-foot .ww-menu-trigger{font-size:0;gap:0}.ww-lib-last{display:none}}
+@container ww-team (max-width:30rem){.ww-team{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}.ww-page .ww-team-panel.ww-roster{flex-direction:row;align-items:center;border-right:0;border-bottom:1px solid var(--ww-line)}.ww-roster-list{flex-direction:row;overflow-x:auto;overflow-y:hidden;padding:.25rem}.ww-roster-sep{width:1px;height:auto;align-self:stretch;margin:.375rem 0}.ww-roster-foot{margin:0 0 0 auto;border:0;padding:.375rem}.ww-pane-actions .ww-quiet{display:none}}`,
 // 2026-11-08 专家团改版：一行查找和筛选（同技能页）、名帖点开详情、详情抽屉的页签和记忆文本框。
 `.ww-detail-tabs{gap:6px;padding:0 0 8px}.ww-expert-detail-title{gap:10px;align-items:center}.ww-expert-detail-body h3{font-size:14px;margin:16px 0 6px}
 .ww-expert-recent{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}.ww-expert-recent li{display:flex;align-items:baseline;gap:8px;min-width:0}.ww-page .ww-expert-recent button{border:0;background:transparent;padding:0;color:var(--dsw-alias-brand-primary);font:inherit;cursor:pointer;text-align:left;overflow-wrap:anywhere}

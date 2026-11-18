@@ -1,6 +1,6 @@
 import { registerEntries } from './entries.js';
 import { registerFeature, useFeature } from '../../src/shell/feature.js';
-import { createDispatchStrip } from './dispatch-strip.js';
+import { createDispatchStrip, dispatchItems } from './dispatch-strip.js';
 
 /** 助手独立持有会话、引用范围和窗口形态；只向外壳申请呈现租约。 */
 const noSubscribe = () => () => {}, noSnapshot = () => null;
@@ -21,9 +21,10 @@ export function createView(kit) {
       const node = element.current;
       if (!node) return;
       if (node.offsetWidth !== size.width || node.offsetHeight !== size.height) setSize({ width: node.offsetWidth, height: node.offsetHeight });
-      // 页面右下角要给气泡让位的地方（如模型世界选中条）按气泡实际宽度和位置留，不写死。
-      const right = parseFloat(window.getComputedStyle?.(node)?.right) || 0;
-      node.closest?.('.ww-page')?.style?.setProperty('--ww-fab-safe', `${Math.ceil(right + node.offsetWidth + 16)}px`);
+      // 页面不因为球拖到哪而挪动（2026-11-16 用户定）：右下角那两条横栏让出的宽度（--ww-fab-safe）是球默认位置的占地，写在样式里，不跟着拖动变。
+      // 悬停时的名字条朝窗口里面那一边弹出：球拖到左半边就往右弹，免得出了窗口。
+      const box = node.getBoundingClientRect?.();
+      if (box && node.dataset) node.dataset.side = box.left + box.width / 2 < window.innerWidth / 2 ? 'right' : 'left';
     });
     const edge = 8;
     const clamp = (element, right, bottom) => {
@@ -64,6 +65,23 @@ export function createView(kit) {
     // 窗口缩小时位置仍留在可见范围内：按气泡实际量到的宽高夹紧，窗口再放大时回到员工拖到的地方。
     const style = offset ? { right: `max(${edge}px, min(${offset.right}px, calc(100vw - ${size.width + edge}px)))`, bottom: `max(${edge}px, min(${offset.bottom}px, calc(100vh - ${size.height + edge}px)))` } : undefined;
     return { style, handlers, consumeDrag };
+  }
+
+  /**
+   * 小鲸收起时的悬浮球（2026-11-16 用户定：气泡改成小圆球浮着，做得生动些）。
+   * 球里是鲸翼的鲸尾露在水面上：平时尾巴轻轻摆、水纹慢慢流，隔一会儿漾一圈；专家手上有事时水纹漾得勤，
+   * 有事等员工审批时右上角挂个数字。名字只在悬停或键盘聚焦时从球边弹出来（名字仍是按钮的读屏名和文字），平时不占地方。
+   */
+  function FabBall({ api, t, notify, bubble, onOpen }) {
+    const snapshot = useSyncExternalStore(api.subscribeSessions ?? noSubscribe, api.sessionsSnapshot ?? noSnapshot, api.sessionsSnapshot ?? noSnapshot);
+    const { active, waiting } = dispatchItems(snapshot, { archived: api.archivedSessions?.() ?? [] });
+    const label = t('assistantOpen');
+    const status = waiting ? t('dispatchWaitingCount', { count: waiting }) : active.length ? t('dispatchActiveCount', { count: active.length }) : '';
+    return h('button', { type: 'button', className: 'ww-assistant-bubble', 'aria-label': label, 'data-state': waiting ? 'waiting' : active.length ? 'busy' : 'idle', title: [status, t('assistantDrag')].filter(Boolean).join(' · '), style: bubble.style, ...bubble.handlers,
+      onClick: () => { notify(null); if (!bubble.consumeDrag()) onOpen(); } },
+    h('span', { className: 'ww-fab-mark', 'aria-hidden': 'true' }),
+    label,
+    waiting > 0 && h('span', { className: 'ww-fab-badge', 'aria-hidden': 'true' }, waiting > 9 ? '9+' : String(waiting)));
   }
 
   function useFloatingAssistant(form) {
@@ -261,7 +279,7 @@ export function createView(kit) {
         assistantReference && shell?.tab !== 'experts' && h(DispatchStrip, { api, t, openTask: id => { try { api.checkSession(id); if (api.showTask) api.showTask(id); else api.open(id); } catch (error) { api.notify(error.message, { kind: 'error' }); } } }),
         assistantReference ? h('div', { className: 'ww-assistant-conversation' }, h(SessionProvider, { session: assistantReference }, renderSlot('whalewing.assistant.conversation', {}))) : h('div', { className: 'ww-assistant-welcome' }, h(Avatar, { expert: roleCards.find(role => role.id === 'manager'), size: 72 }), h('h3', null, t('question')), help('questionHelp'), button('assistantStart', openAssistant, false, { className: 'ww-primary' }))));
     return h(React.Fragment, null, assistant,
-      assistantForm === 'bubble' && button('assistantOpen', () => { if (!bubble.consumeDrag()) showAssistant(); }, false, { className: 'ww-assistant-bubble', style: bubble.style, title: t('assistantDrag'), disabled: false, ...bubble.handlers }));
+      assistantForm === 'bubble' && h(FabBall, { api, t, notify, bubble, onOpen: showAssistant }));
   };
 }
 

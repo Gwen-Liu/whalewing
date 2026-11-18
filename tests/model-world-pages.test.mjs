@@ -79,6 +79,37 @@ test('打开只读本地数据：一次取全部型号，不联网更新；默�
   view.unmount();
 });
 
+test('我的模型卡片的成绩条：四项共用一套列宽，条从同一条竖线开始；条长就是分数（满分 100），综合实力不放大', async () => {
+  // 2026-11-17 用户：“文字背后的能力条……是直接紧跟在文字后边的，我觉得他们应该左对齐”“56.9分跟98分之间都没差啥”。
+  const view = page(); view.render(); await tick();
+  const card = nodes(view.render()).find(node => node.props?.className === 'ww-mw-mycard');
+  const rows = nodes(card).filter(node => node.props?.className === 'ww-mw-dim');
+  assert.deepEqual(rows.map(row => [text(row.props.children[0]), nodes(row).find(node => node.type === 'b').props.style.width, text(row.props.children[2])]),
+    [['综合实力', '60%', '60'], ['推理与知识', '80%', '80'], ['编程', '70%', '70'], ['智能体', '60%', '60']], 'GPT A 综合 60 就画 60%，不再乘 1.5');
+  view.unmount();
+  const { worldPagesCss } = await import('../src/model-world-style.js');
+  assert.match(worldPagesCss, /\.ww-mw-mycard \.ww-mw-dims\{grid-template-columns:max-content minmax\(2rem,1fr\) minmax\(2\.6em,max-content\)/, '列宽定在整组上，文字列取最长的那个');
+  const viewCss = (await import('node:fs')).readFileSync(new URL('../src/model-world-view.js', import.meta.url), 'utf8');
+  assert.match(viewCss, /\.ww-mw-dim\{display:grid;grid-column:1\/-1;grid-template-columns:subgrid/, '每一行跟着整组的列宽（子网格），不各算各的');
+});
+
+test('实力榜的成绩条和卡片同一套：条在前、数字在后，条长就是分数；条跟着这一栏伸缩，窄的时候才缩短', async () => {
+  // 2026-11-17 用户看实力榜：“不也一样嘛”。原来条写死 72px、数字在前，底槽看不出满分那头。
+  const view = page(); view.render(); await tick();
+  const tree = await view.tab('实力榜');
+  const cells = nodes(tree).filter(node => node.type === 'td' && node.props?.className === 'ww-mw-barcell');
+  assert.ok(cells.length >= 3);
+  const shape = cell => { const bar = nodes(cell).find(node => node.props?.className === 'ww-mw-bar'); const [track, number] = bar.props.children; return [track.type, nodes(track).find(node => node.type === 'b').props.style.width, number.type, text(number)]; };
+  assert.deepEqual(shape(cells[0]), ['i', '80%', 'span', '80'], 'GPT A 推理与知识 80：条在前画 80%，数字在后');
+  view.unmount();
+  const viewCss = (await import('node:fs')).readFileSync(new URL('../src/model-world-view.js', import.meta.url), 'utf8');
+  assert.match(viewCss, /\.ww-mw-bar\{display:grid;grid-template-columns:minmax\(4\.5rem,1fr\) minmax\(2\.6em,max-content\)/, '条不写死宽度，跟着这一栏伸缩');
+  assert.ok(!/42px 72px/.test(viewCss), '不再写死 72px');
+  const { worldPagesCss } = await import('../src/model-world-style.js');
+  assert.match(worldPagesCss, /@container ww-mw-body \(max-width:64rem\)\{\.ww-mw-bar\{grid-template-columns:minmax\(3rem,1fr\)/, '窄的时候条最短缩到 3rem，实力榜不用横着滚');
+  assert.match(worldPagesCss, /\.ww-mw-dim i,\.ww-mw-bar i\{background:var\(--ww-tint\)\}/, '底槽看得出满分那头');
+});
+
 test('开个对话只给这一个会话选模型；设成默认要先确认，确认后才改 DSH 设置', async () => {
   const view = page({ desk: { setDefault: async input => ({ defaultModel: { provider: input.provider, model: input.model } }) } }); view.render(); await tick();
   nodes(view.render()).filter(node => node.type === 'button' && text(node) === '开个对话')[1].props.onClick(); await tick();

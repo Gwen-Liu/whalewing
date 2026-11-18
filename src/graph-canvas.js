@@ -167,7 +167,7 @@ export function createGraphCanvas(React) {
       let edgeCache = null, building = null, refineTimer = 0;
       // live：拖动和松手后的回弹期间，模拟逐帧推进、全部连线逐帧直接画；停下后再回到平时的绘制。
       const liveCapable = n > 1 && n <= liveLimits.nodes && edges.length <= liveLimits.edges;
-      let live = false, homed = false;
+      let live = false, homed = false, homeX = null, homeY = null;
       // 常见规模的连线图层：按当前镜头与像素逐帧精绘，镜头、坐标、尺寸、主题都没变时（悬停、渐变）直接复用。
       let lineLayer = null, geometry = 0;
       const camera = { k: 1, x: 0, y: 0 };
@@ -431,7 +431,7 @@ export function createGraphCanvas(React) {
       const startLive = () => {
         if (!homed) {
           // 回家的位置取布局算好时的坐标，只在第一次拖动时记一次。
-          const homeX = Float64Array.from(layout.nodes, node => node.x), homeY = Float64Array.from(layout.nodes, node => node.y);
+          homeX = Float64Array.from(layout.nodes, node => node.x); homeY = Float64Array.from(layout.nodes, node => node.y);
           simulation.force('homeX', forceX(node => homeX[node.index])).force('homeY', forceY(node => homeY[node.index]));
           homed = true;
         }
@@ -453,8 +453,21 @@ export function createGraphCanvas(React) {
           simulation.tick();
         } while (quiet && simulation.alpha() >= simulation.alphaMin() && performance.now() < until);
         if (!dragging && simulation.alpha() < simulation.alphaMin()) {
-          live = false; publish(); remember(); labelSelection = null; beginEdges();
+          live = false; landHome(); publish(); remember(); labelSelection = null; beginEdges();
         } else if (!quiet) publish();
+      };
+      /**
+       * 回弹停下时，离家不到 1 个屏幕像素的点直接放回家。模拟停在 alpha 降到下限那一刻，其余的力还剩一点，
+       * 点会差零点几像素停住；画布上的标题按整像素对齐，差 0.05 像素也可能让整行字挪一格，停下后就和拖之前不一样了。
+       * 差得更远的点不动，免得看得出一跳。
+       */
+      const landHome = () => {
+        if (!homed) return;
+        for (let i = 0; i < n; i++) {
+          const node = layout.nodes[i];
+          if (Math.hypot(node.x - homeX[i], node.y - homeY[i]) * camera.k > 1) continue;
+          node.x = homeX[i]; node.y = homeY[i]; node.vx = node.vy = 0;
+        }
       };
       /** 换排布的四个数：小图逐帧慢慢挪到新的平衡（和拖动松手后一样），大图重新排一遍。 */
       const retune = next => {
@@ -465,7 +478,7 @@ export function createGraphCanvas(React) {
         if (growth) stopGrow();
         if (liveCapable) {
           // 原来记的“家”是旧排布的位置，换了力就作废，下次拖动时按新的平衡重新记。
-          if (homed) { simulation.force('homeX', null).force('homeY', null); homed = false; }
+          if (homed) { simulation.force('homeX', null).force('homeY', null); homed = false; homeX = homeY = null; }
           if (!live) { live = true; releaseLayer(edgeCache); edgeCache = null; releaseLayer(building); building = null; setSettling(false); }
           simulation.alpha(Math.max(simulation.alpha(), 0.5)).alphaTarget(0);
         } else { running = true; steps = 0; simulation.alpha(1); }

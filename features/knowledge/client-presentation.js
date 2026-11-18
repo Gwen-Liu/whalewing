@@ -103,6 +103,7 @@ export const zh = {
   "reading": "笔记阅读",
   "graph": "关系图谱",
   "directoryResize": "调整目录宽度",
+  "sideResize": "调整右栏宽度",
   "localGraph": "当前笔记关系图",
   "graphRange": "图谱显示范围",
   "graphPage": "{from}–{to} / {total}",
@@ -252,6 +253,7 @@ export const en = {
   "graphLayerTimeline": "Timeline and inbox",
   "graphLayerSystem": "System and external index",
   "directoryResize": "Resize note directory",
+  "sideResize": "Resize side panel",
   "ribbon": "Ribbon",
   "leftPanel": "Left sidebar",
   "leftFiles": "Files",
@@ -332,7 +334,7 @@ export const styles = [
     @media(max-width:520px){.ww-page{padding:12px}.ww-grid{grid-template-columns:1fr}}@container ww-main (max-width:30rem){.ww-note-tree{padding:8px 3px}.ww-page .ww-folder{font-size:11px;gap:3px}}`,
 `
     .ww-note-canvas.ww-graph-mode{padding:0;overflow:hidden;display:flex}.ww-graph-workspace{position:relative;display:flex;flex:1;min-width:0;min-height:0}.ww-graph-empty{display:flex;flex:1;align-items:center;justify-content:center}.ww-graph-controls{position:absolute;left:10px;bottom:10px;display:flex;align-items:center;gap:8px;max-width:calc(100% - 20px);flex-wrap:wrap;padding:4px 6px;border-radius:8px;background:var(--dsw-alias-bg-layer-1);box-shadow:0 1px 6px var(--dsw-alias-border-l1);font-size:11px;color:var(--dsw-alias-label-secondary)}.ww-page .ww-graph-controls button{padding:4px 6px;border:0;background:transparent;font-size:11px}.ww-graph-missing{position:absolute;left:12px;top:12px;max-width:min(26.25rem,calc(100% - 24px));max-height:50%;overflow:auto;padding:12px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-1)}
-    .ww-knowledge-split{grid-template-columns:var(--ww-directory-width,195px) 8px minmax(0,1fr)}.ww-note-tree{min-width:0;border-right:0}.ww-directory-separator{cursor:col-resize;touch-action:none;background:var(--dsw-alias-bg-layer-2);position:relative}.ww-directory-separator:before{content:'';position:absolute;left:3px;top:0;bottom:0;width:2px;background:var(--dsw-alias-border-l1)}.ww-directory-separator:hover:before,.ww-directory-separator:focus-visible:before{background:var(--dsw-alias-state-business-primary)}.ww-directory-separator:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:-2px}`,
+    .ww-knowledge-split{grid-template-columns:var(--ww-directory-width,195px) 1px minmax(0,1fr)}.ww-note-tree{min-width:0;border-right:0}.ww-split-line+.ww-note-side{border-left:0}`,
 `.ww-folder>svg,.ww-folder-chevron,.ww-note>svg{flex-shrink:0}.ww-note-tree .ww-note{flex:1}.ww-note-row{min-width:0}`,
 // 2026-10-25 随皮点缀：页头一句现状，面和分隔线跟随 DSH 与皮肤，阅读区标题用宋体、正文放宽行距。
 `.ww-page .ww-knowledge-head{flex:none;margin:22px 0 6px}.ww-knowledge-head>div{min-width:0;flex:1 1 auto}.ww-knowledge-head p{max-width:100%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.ww-knowledge-split{border-color:var(--ww-line);background:var(--ww-surface)}.ww-note-tree{background:var(--ww-surface-2)}.ww-note-canvas{background:transparent}.ww-note-canvas .ww-reader{max-width:78ch;font-size:14px;line-height:1.8}.ww-note-canvas .ww-reader :is(h1,h2,h3){font-family:var(--ww-serif);font-weight:600;letter-spacing:.01em}.ww-note-canvas .ww-reader h1{font-size:26px;line-height:1.35}.ww-note-canvas .ww-reader h2{font-size:20px}.ww-directory-separator{background:var(--ww-surface-2)}.ww-graph-controls,.ww-graph-missing{background:var(--ww-raised)}`,
