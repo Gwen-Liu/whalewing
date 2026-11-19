@@ -141,7 +141,7 @@ test('综合实力取 AA 指数最强档，梯队按指数划分；分项按百�
   // 2026-11-18 换 v5 后的门槛：按 AA 显示的整数 T0 ≥ 50、T1 ≥ 30、T2 ≥ 20（49.5 显示为 50，算 T0）。
   assert.deepEqual([50, 49.5, 49.4, 30, 29.5, 29.4, 20, 19.5, 19.4].map(worldTierFor), ['T0', 'T0', 'T1', 'T1', 'T1', 'T2', 'T2', 'T2', 'T3']);
   assert.equal(worldTierText(), 'T0 ≥ 50，T1 ≥ 30，T2 ≥ 20', '界面上写的门槛从同一组数生成');
-  assert.deepEqual([worldIndexVersion, worldIndex.length], ['5', 53], '随包是 AA 智能指数 v5');
+  assert.deepEqual([worldIndexVersion, worldIndex.length], ['5', 54], '随包是 AA 智能指数 v5');
 });
 
 test('性价比先按相对消耗分档，档内推荐能力最强的模型与思考强度；同价最强标记无被支配方案', () => {

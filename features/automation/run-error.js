@@ -12,6 +12,8 @@ const rules = [
   [/^(UNKNOWN_MODEL|MODEL_UNSUPPORTED|NO_ADAPTER)$/, '任务用的模型找不到了（可能在 DSH 里删掉或改名了）', '打开原会话换一个能用的模型'],
   [/^(TIMEOUT|TRANSPORT|STREAM_CLOSED)$/, '连模型服务时网络断了或超时', '多半是临时问题，下一次会照常跑；急用的话打开原会话重发'],
   [/^(SERVER|HTTP_5\d\d)$/, '模型服务那边出错了', '多半是服务商临时故障，下一次会照常跑；一直这样就换个模型'],
+  // DSH 0.2.2-rc.4 起 DeepSeek 以 stop_reason: refusal 结束时报 CONTENT_REFUSED（原来是 MALFORMED_RESPONSE）。
+  [/^CONTENT_REFUSED$/, '模型拒绝回答这次任务的内容', '打开原会话看看任务的说法，改一改再重发，或者换一个模型'],
   [/^(EMPTY_RESPONSE|MALFORMED_RESPONSE|INVALID_RESPONSE)$/, '模型没有给出能用的回复', '下一次会照常跑；经常这样就换个模型'],
   [/^TOOL_ACTIVATION_FAILED$/, '任务要用的某个工具没能启用', '打开原会话看是哪个工具，检查对应的插件有没有开着'],
 ];

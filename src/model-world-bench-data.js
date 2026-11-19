@@ -1,5 +1,5 @@
 // 生成来源：scripts/update-model-bench.mjs（Epoch AI Benchmarking Hub，CC BY 4.0）；请重新运行脚本更新，不要手改。
-export const worldBenchAsOf = "2026-11-18";
+export const worldBenchAsOf = "2026-11-19";
 // [厂商 id, 名称归一, { 评测 id: 成绩 }]
 export const worldBenchRows = [
   ["alibaba", "openhands-+-qwen-2-5-72b", {"the_agent_company":5.7}],
@@ -369,7 +369,7 @@ export const worldBenchRows = [
   ["google", "gemini-4-carbon-high", {"arc_agi_2":92.08}],
   ["google", "gemini-4-carbon-low", {"arc_agi_2":49.58}],
   ["google", "gemini-4-carbon-medium", {"arc_agi_2":94.17}],
-  ["google", "gemini-4-hydrogen", {"vending_bench_2":14549.49,"apex_agents":78}],
+  ["google", "gemini-4-hydrogen", {"gpqa_diamond":96.78,"frontiermath":88.07,"aime":100,"vending_bench_2":14549.49,"apex_agents":78}],
   ["google", "gemini-exp-1206", {"simplebench":31.1}],
   ["google", "gemma-2-27b", {"eci":118.61}],
   ["google", "gemma-2-27b-it", {"gpqa_diamond":36.49,"aime":1.39}],

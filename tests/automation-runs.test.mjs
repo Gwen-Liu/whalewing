@@ -55,6 +55,7 @@ test('出错的那次记下原因：代码、截短的原文和 HTTP 状态；�
   assert.match(runErrorText(state.runs[0].error).reason, /余额或额度用完/);
   assert.match(runErrorText({ code: 'HTTP_401', message: 'bad key', status: 401 }).fix, /key/);
   assert.match(runErrorText({ code: 'CONTEXT_WINDOW_EXCEEDED', message: '' }).fix, /压缩/);
+  assert.match(runErrorText({ code: 'CONTENT_REFUSED', message: 'refusal' }).reason, /拒绝回答/, 'DSH rc.4 起的拒答错误码');
   assert.equal(runErrorText({ code: 'SOMETHING_NEW', message: '奇怪的错' }).reason, '出错了：奇怪的错', '没归类的照原文说');
   assert.match(runErrorText(undefined).reason, /没有留下原因/, '旧记录没有原因时也有话说');
   // 合同允许带原因的运行结果。

@@ -1,11 +1,12 @@
 // 生成来源：scripts/update-model-index.mjs（Artificial Analysis 免费接口）；请重新运行脚本更新，不要手改。
-export const worldIndexAsOf = "2026-11-18";
+export const worldIndexAsOf = "2026-11-19";
 export const worldIndexVersion = "5";
 // [厂商 id, 名称, 发布日期, [[思考强度, 智能指数, 单次任务美元成本], ...]]
 export const worldIndexRows = [
   ["anthropic", "Claude Fable 5.2", "2026-11-09", [["max",64.6,26.5386],["xhigh",62.2,14.8286],["high",61.8,9.0784],["medium",56.4,3.8026],["low",53.9,3.0972]]],
   ["openai", "GPT-6.2 Astra", "2026-11-17", [["max",62.1,3.9979],["xhigh",61.6,2.5211],["high",60.1,2.0739],["medium",57,1.6177],["low",45.7,0.6617]]],
-  ["google", "Gemini 4 Carbon", "2026-10-28", [["high",60,5.4848],["medium",58.3,4.6777],["low",54.2,5.2214]]],
+  ["google", "Gemini 4 Neon", "2026-11-18", [["xhigh",61.4,6.4448],["high",59.6,3.7427],["medium",54.9,1.9046],["low",44.1,0.7452]]],
+  ["google", "Gemini 4 Carbon", "2026-10-28", [["high",60,7.7555],["medium",58.3,6.5858],["low",54.2,7.1866]]],
   ["anthropic", "Claude Opus 5.5", "2026-09-22", [["max",59.1,10.0364],["xhigh",57.4,6.0472],["high",51.8,3.4647],["medium",48.2,2.4511],["low",34.8,0.9755]]],
   ["openai", "GPT-6.2 Sol", "2026-11-17", [["max",57.3,1.0144],["xhigh",55.7,0.648],["high",54.9,0.5636],["medium",52.7,0.4061],["low",40.6,0.1836]]],
   ["openai", "GPT-6 Astra", "2026-09-03", [["max",56.9,6.2447],["xhigh",55.3,3.6589],["high",54.8,3.2386],["medium",51.6,2.7324],["low",43.3,1.4237]]],
